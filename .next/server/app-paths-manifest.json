@@ -1,0 +1,9 @@
+{
+  "/page": "app/page.js",
+  "/(users)/assistant/page": "app/(users)/assistant/page.js",
+  "/(users)/dashboard/page": "app/(users)/dashboard/page.js",
+  "/(users)/support/page": "app/(users)/support/page.js",
+  "/(users)/signup/page": "app/(users)/signup/page.js",
+  "/(users)/features/page": "app/(users)/features/page.js",
+  "/icon.svg/route": "app/icon.svg/route.js"
+}
