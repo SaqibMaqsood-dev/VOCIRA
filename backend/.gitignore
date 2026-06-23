@@ -1,0 +1,60 @@
+# Ignore python virtual environments
+.venv/
+env/
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+# Ignore logs and temporary files
+*.log
+*.tmp
+# Ignore database files
+*.db
+# Ignore IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+# Ignore Docker files
+docker-compose.override.yml
+# Ignore environment variable files 
+.env
+
+# Ignore local backend artifacts
+.venv/
+meet/
+.next/
+node_modules/
+audio/
+audio_models/
+temp.py
+.env.local
+.env.*.local
+# Ignore coverage reports
+coverage/
+.coverage
+# Ignore distribution files
+dist/
+build/
+*.egg-info/ 
+# Ignore pytest cache
+.pytest_cache/  
+# Ignore mypy cache
+.mypy_cache/
+.dmypy.json
+dmypy.json
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# Ignore Sphinx documentation build files
+docs/_build/
+
+# Ignore large generated and build artifacts
+.next/
+node_modules/
+audio/
+audio_models/
+
+# Ignore audio files
+services/text_speech/audio_files
+*.wav
