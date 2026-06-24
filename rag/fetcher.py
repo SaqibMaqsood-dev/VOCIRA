@@ -41,7 +41,7 @@ def get_dynamic_data(url: str):
         log.info(f"Scraping: {url}")
         driver.get(url)
 
-        # Step 1: Body aane ka wait
+        # Step 1: wait for body
         try:
             WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
@@ -49,14 +49,14 @@ def get_dynamic_data(url: str):
         except Exception:
             pass
 
-        # Step 2: JavaScript content load hone do
+        # Step 2: loading JavaScript content 
         time.sleep(4)
 
-        # Step 3: Page scroll karo — lazy load content ke liye
+        # Step 3: scrol page— for lazy load content 
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(2)
 
-        # Step 4: Actual text content aane ka wait
+        # Step 4: wait for actual text content 
         try:
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.TAG_NAME, "p"))
