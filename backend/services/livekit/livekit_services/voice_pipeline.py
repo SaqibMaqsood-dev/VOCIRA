@@ -51,7 +51,7 @@ async def consume_audio(track, stt, participant, service_handle, session_id, aud
                 del audio_buffer[:vad_frame_size]
 
                 speech = await asyncio.to_thread(vad.is_speech, chunk, sample_rate)
-
+                
                 if speech:
                     silence_frames = 0
                     voice_accumulation.extend(chunk)
