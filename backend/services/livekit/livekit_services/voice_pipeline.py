@@ -3,7 +3,6 @@ import json
 import traceback
 
 import webrtcvad
-<<<<<<< Updated upstream
 from sqlalchemy import text
 from livekit import rtc
 
@@ -11,18 +10,8 @@ from database.database import SessionLocal
 from services.message_services.message_create import create_message
 from services.text_speech.piper_servies import tts_converter
 from services.groq.groq import dataConverter
-from ...groq import sql_prompt, human_text, intent_prompt
-
-=======
-from livekit import rtc
-from sqlalchemy import text
-
-from database.database import SessionLocal
-from services.message_services.message_logic import create_message
-from services.text_speech.piper_servies import tts_converter
-from services.groq.groq import dataConverter
 from services.groq import sql_prompt, human_text, intent_prompt
->>>>>>> Stashed changes
+
 
 async def consume_audio(track, stt, participant, service_handle, session_id, audio_source):
     metadata = json.loads(participant.metadata or "{}")
@@ -62,11 +51,7 @@ async def consume_audio(track, stt, participant, service_handle, session_id, aud
                 del audio_buffer[:vad_frame_size]
 
                 speech = await asyncio.to_thread(vad.is_speech, chunk, sample_rate)
-<<<<<<< Updated upstream
                 
-=======
-
->>>>>>> Stashed changes
                 if speech:
                     silence_frames = 0
                     voice_accumulation.extend(chunk)
@@ -85,11 +70,6 @@ async def consume_audio(track, stt, participant, service_handle, session_id, aud
 
                         service_handle._speech_generation += 1
                         my_generation = service_handle._speech_generation
-<<<<<<< Updated upstream
-
-=======
-                    
->>>>>>> Stashed changes
                         t = asyncio.create_task(
                             process_voice_intent(
                                 chunk=captured_audio,
@@ -124,21 +104,7 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
         db_sender_type = "user" if usertype != "agent" else "agent"
 
         async with SessionLocal() as db:
-<<<<<<< Updated upstream
             await create_message(db=db, content=sql_text, user_id=user_id, usertype=db_sender_type, session_id=session_id)
-=======
-            await create_message(
-                db=db,
-                content=sql_text,
-                user_id=user_id,
-                usertype=db_sender_type,
-                session_id=session_id
-                )
-
-            # ----------------------------------------
-            # Checking Query is general or sensitive
-            # ----------------------------------------
->>>>>>> Stashed changes
 
             router_prompt = intent_prompt.INTENT_ROUTER_PROMPT.format(user_query=sql_text)
             router_result = await dataConverter(router_prompt)
@@ -146,13 +112,6 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
 
             ai_response_text = ""
 
-<<<<<<< Updated upstream
-=======
-            # ------------------------------------------------
-            # If Query is sensitive the data will fetch from DB
-            # ------------------------------------------------
-
->>>>>>> Stashed changes
             if "DB_QUERY" in intent:
                 print("🔍 [Route]: Database Query Pipeline")
                 prompt = sql_prompt.build_prompt(user_query=sql_text)
@@ -163,40 +122,15 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
                 if "LIMIT" not in response_sql.upper() and "SELECT" in response_sql.upper():
                     response_sql = f"{response_sql.rstrip(';')} LIMIT 5;"
 
-<<<<<<< Updated upstream
-=======
-                
-                # ---------------------
-                # Data fetching from DB
-                # ---------------------
-
->>>>>>> Stashed changes
                 db_response = await db.execute(text(response_sql))
                 rows = db_response.fetchall()
                 data = [dict(row._mapping) for row in rows][:5]
                 print(f"📊 [SQL Result Windowed]: {data}")
-<<<<<<< Updated upstream
 
                 sql_result_prompt = human_text.build_response_prompt(user_query=sql_text, sql_result=data)
                 converter_text = await dataConverter(prompt=sql_result_prompt)
                 ai_response_text = converter_text.choices[0].message.content
             else:
-=======
-                        
-                sql_result_prompt = human_text.build_response_prompt(user_query=sql_text, sql_result=data)
-                converter_text = await dataConverter(prompt=sql_result_prompt)
-                ai_response_text = converter_text.choices[0].message.content
-            
-            # ---------------------
-            # Fetching Data from RAG
-            # ---------------------
-
-            elif "RAG" in intent :
-                pass
-
-            else:
-                
->>>>>>> Stashed changes
                 print("👋 [Route]: General Conversation Pipeline")
                 general_prompt = f"You are a helpful AI voice assistant named 'Vocira'. Respond naturally and concisely to the user's input: {sql_text}"
                 converter_text = await dataConverter(prompt=general_prompt)

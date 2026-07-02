@@ -1,4 +1,4 @@
-from tokken.access_tokken.
+from tokken.access_tokken.get_current_user import current_user
 from services.rbac.required_permission import require_permission
 from services.router_services import session_logic
 from sqlalchemy.ext.asyncio import AsyncSession
