@@ -12,7 +12,7 @@ from alembic import context
 config = context.config
 
 
-# ✅ use .env DATABASE_URL 
+#  use .env DATABASE_URL 
 DATABASE_URL = settings.Database_URL.replace("+asyncpg", "")
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 

@@ -30,18 +30,18 @@ from backend.repository.router.admin_route import admin_route
 # -------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 🚀 Startup logic
+    #  Startup logic
     if settings.HF_TOKEN:
         login(token=settings.HF_TOKEN)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    print("✅ Application started successfully")
+    print("Application started successfully")
     yield  # app runs here
 
-    # 🧹 Shutdown logic (optional cleanup)
-    print("🛑 Application shutting down")
+    #  Shutdown logic (optional cleanup)
+    print(" Application shutting down")
 
 
 # -------------------------

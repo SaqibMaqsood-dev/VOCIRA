@@ -3,8 +3,7 @@ import json
 import traceback
 import sys
 
-# --- HARDCODED ABSOLUTE PATH FALLBACKS ---
-# Kisi relative calculation par bhrosa nahi karte, direct full windows path force karein:
+
 PATHS_TO_INJECT = [
     r"D:\vocira_backend",
     r"D:\vocira_backend\backend"
@@ -39,7 +38,7 @@ async def consume_audio(track, stt, participant, service_handle, session_id, aud
     try:
         stream = rtc.AudioStream(track)
     except Exception as e:
-        print(f"❌ Failed to create AudioStream: {e}")
+        print(f" Failed to create AudioStream: {e}")
         return
 
     vad = webrtcvad.Vad(2)
@@ -75,7 +74,7 @@ async def consume_audio(track, stt, participant, service_handle, session_id, aud
                         # Barge-in: user started talking again — interrupt agent immediately
                         if service_handle._is_agent_speaking:
                             service_handle._speech_generation += 1
-                            print(f"✋ [Barge-In] User interrupted — bumping to gen {service_handle._speech_generation}, stopping agent audio.")
+                            print(f" [Barge-In] User interrupted — bumping to gen {service_handle._speech_generation}, stopping agent audio.")
                 elif is_speaking:
                     silence_frames += 1
                     voice_accumulation.extend(chunk)
@@ -105,7 +104,7 @@ async def consume_audio(track, stt, participant, service_handle, session_id, aud
                         silence_frames = 0
                         is_speaking = False
     except Exception as e:
-        print(f"❌ Audio Consumer Error: {e}")
+        print(f" Audio Consumer Error: {e}")
     finally:
         await stream.aclose()
 
@@ -116,7 +115,7 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
         if not sql_text or not sql_text.strip():
             return
 
-        print(f"🗣️ [User]: {sql_text}")
+        print(f" [User]: {sql_text}")
         db_sender_type = "user" if usertype != "agent" else "agent"
 
         async with SessionLocal() as db:
@@ -129,15 +128,15 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
             ai_response_text = ""
 
             if "INAPPROPRIATE" in intent:
-                print("🚫 [Route]: Inappropriate Query — Blocked")
+                print(" [Route]: Inappropriate Query — Blocked")
                 ai_response_text = "I'm here to help with school-related questions like admissions, fees, and general information. I can't help with that request."
 
             elif "SENSITIVE" in intent:
-                print("🔒 [Route]: Sensitive/ERP Data Pipeline")
+                print(" [Route]: Sensitive/ERP Data Pipeline")
                 prompt = sql_prompt.build_prompt(user_query=sql_text)
                 result = await dataConverter(prompt)
                 response_sql = result.choices[0].message.content
-                print(f"⚙️ [Generated SQL]: {response_sql}")
+                print(f" [Generated SQL]: {response_sql}")
 
                 if "LIMIT" not in response_sql.upper() and "SELECT" in response_sql.upper():
                     response_sql = f"{response_sql.rstrip(';')} LIMIT 5;"
@@ -145,14 +144,14 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
                 db_response = await db.execute(text(response_sql))
                 rows = db_response.fetchall()
                 data = [dict(row._mapping) for row in rows][:5]
-                print(f"📊 [SQL Result Windowed]: {data}")
+                print(f" [SQL Result Windowed]: {data}")
 
                 sql_result_prompt = human_text.build_response_prompt(user_query=sql_text, sql_result=data)
                 converter_text = await dataConverter(prompt=sql_result_prompt)
                 ai_response_text = converter_text.choices[0].message.content
 
             else:
-                print("📚 [Route]: General Pipeline (School Info + Conversation)")
+                print(" [Route]: General Pipeline (School Info + Conversation)")
                 try:
                     if rag_state.retriever:
                         ai_response_text = await ask_vocira(rag_state.retriever, sql_text)
@@ -167,32 +166,32 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
                         converter_text = await dataConverter(prompt=general_prompt)
                         ai_response_text = converter_text.choices[0].message.content
                 except Exception as e:
-                    print(f"❌ [RAG Pipeline Error]: {e}")
+                    print(f" [RAG Pipeline Error]: {e}")
                     ai_response_text = "I'm having trouble accessing that information right now — could you try asking again?"
 
-            print(f"🤖 [AI]: {ai_response_text}")
+            print(f" [AI]: {ai_response_text}")
             await create_message(db=db, content=ai_response_text, user_id=user_id, usertype="agent", session_id=session_id)
 
         audio_bytes = await asyncio.to_thread(tts_converter, text=ai_response_text)
         if not audio_bytes:
-            print("⚠️ [TTS] No audio bytes generated, skipping voice playback.")
+            print(" [TTS] No audio bytes generated, skipping voice playback.")
             return
 
         try:
             await asyncio.wait_for(service_handle._track_ready.wait(), timeout=5)
         except asyncio.TimeoutError:
-            print("⚠️ [LiveKit Stream] Agent track not ready after 5s — aborting voice send.")
+            print(" [LiveKit Stream] Agent track not ready after 5s — aborting voice send.")
             return
 
         # --- Serialized playback: only one response streams audio at a time ---
         async with service_handle._tts_lock:
 
             if generation != service_handle._speech_generation:
-                print(f"⏭️ [LiveKit Stream] Skipping stale response (gen {generation} superseded by {service_handle._speech_generation}).")
+                print(f"⏭ [LiveKit Stream] Skipping stale response (gen {generation} superseded by {service_handle._speech_generation}).")
                 return
 
             if audio_source and service_handle.room and service_handle.room.isconnected():
-                print("🔊 [LiveKit Stream] Shipping audio frames down the WebRTC track...")
+                print(" [LiveKit Stream] Shipping audio frames down the WebRTC track...")
 
                 sample_rate = 22050
                 num_channels = 1
@@ -205,11 +204,11 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
                     for i in range(0, len(audio_bytes), chunk_size):
                         # Interruption or room check
                         if generation != service_handle._speech_generation:
-                            print(f"✋ [LiveKit Stream] Interrupted mid-stream (gen {generation} superseded). Stopping playback.")
+                            print(f" [LiveKit Stream] Interrupted mid-stream (gen {generation} superseded). Stopping playback.")
                             break
 
                         if not service_handle.room or not service_handle.room.isconnected():
-                            print("🛑 [LiveKit Stream] Room disconnected mid-stream. Aborting framing.")
+                            print(" [LiveKit Stream] Room disconnected mid-stream. Aborting framing.")
                             break
 
                         frame_chunk = audio_bytes[i:i + chunk_size]
@@ -226,14 +225,14 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
                         try:
                             await audio_source.capture_frame(audio_frame)
                         except Exception as frame_err:
-                            print(f"⚠️ [Stream Warning] Core frame submission bypassed: {frame_err}")
+                            print(f" [Stream Warning] Core frame submission bypassed: {frame_err}")
                             break
                 finally:
                     service_handle._is_agent_speaking = False
 
-                print("✅ [LiveKit Stream] Audio generation stream completed.")
+                print(" [LiveKit Stream] Audio generation stream completed.")
             else:
-                print("⚠️ [LiveKit Stream] audio_source or room unavailable — voice response not sent.")
+                print(" [LiveKit Stream] audio_source or room unavailable — voice response not sent.")
 
     except Exception as e:
-        print(f"❌ [Pipeline Error]: {traceback.format_exc()}")
+        print(f" [Pipeline Error]: {traceback.format_exc()}")

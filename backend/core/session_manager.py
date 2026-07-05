@@ -9,7 +9,7 @@ class SessionManager:
     async def start_session(self, session_id, coro):
         async with self.lock:
             if session_id in self.active_sessions:
-                print(f"⚠️ Session {session_id} already running")
+                print(f" Session {session_id} already running")
                 return False
 
             task = asyncio.create_task(coro)
@@ -23,7 +23,7 @@ class SessionManager:
 
     def cleanup(self, session_id):
         self.active_sessions.pop(session_id, None)
-        print(f"🧹 Cleaned session {session_id}")
+        print(f" Cleaned session {session_id}")
 
     def stop_session(self, session_id):
         task = self.active_sessions.get(session_id)

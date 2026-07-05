@@ -58,21 +58,21 @@ class LivekitServices:
         self._shutdown_event.clear()
         self._track_ready.clear()
         self._speech_generation = 0
-        print(f"🚀 [Worker] Spin-up initialized for room: {self.room_name}...")
+        print(f" [Worker] Spin-up initialized for room: {self.room_name}...")
 
         self.agent_source = rtc.AudioSource(sample_rate=22050, num_channels=1)
         self.agent_track = rtc.LocalAudioTrack.create_audio_track("agent_voice", self.agent_source)
 
         @self.room.on("connected")
         def on_connected():
-            print(f"✅ [Worker] Successfully connected to room: {self.room.name}")
+            print(f" [Worker] Successfully connected to room: {self.room.name}")
             # NOTE: publishing happens directly after connect() below, not here,
             # to avoid a race between the connected event and the first utterance.
 
         @self.room.on("participant_connected")
         def on_participant_connected(participant):
             if participant.identity != "agent":
-                print(f"👤 [User Joined] Human detected: {participant.identity}")
+                print(f" [User Joined] Human detected: {participant.identity}")
                 self.human_has_joined = True
                 if self._disconnect_timer:
                     self._disconnect_timer.cancel()
@@ -80,11 +80,11 @@ class LivekitServices:
 
         @self.room.on("participant_disconnected")
         def on_participant_disconnected(participant):
-            print(f"🚪 [User Left] Participant left: {participant.identity}")
+            print(f"[User Left] Participant left: {participant.identity}")
             if self.human_has_joined:
                 humans_in_room = [p for p in self.room.remote_participants.values() if p.identity != "agent"]
                 if not humans_in_room:
-                    print("🤫 [Worker] Last human left. Starting 10s grace period countdown...")
+                    print("[Worker] Last human left. Starting 10s grace period countdown...")
                     if self._disconnect_timer:
                         self._disconnect_timer.cancel()
                     self._disconnect_timer = asyncio.create_task(self._delayed_teardown())
@@ -92,7 +92,7 @@ class LivekitServices:
         @self.room.on("track_subscribed")
         def on_track_subscribed(track, publication, participant):
             if track.kind == rtc.TrackKind.KIND_AUDIO:
-                print(f"🎤 [Audio Active] Subscribed to track from {participant.identity}")
+                print(f" [Audio Active] Subscribed to track from {participant.identity}")
                 t = asyncio.create_task(
                     voice_pipeline.consume_audio(
                         stt=stt,
@@ -112,7 +112,7 @@ class LivekitServices:
             await self._publish_agent_voice()
             await self._shutdown_event.wait()
         except Exception as e:
-            print(f"❌ [Worker Error] Loop exception occurred: {e}")
+            print(f" [Worker Error] Loop exception occurred: {e}")
         finally:
             await self.cleanup()
             await SessionCreate.close_session_by_id(session_id=session_id)
@@ -125,34 +125,34 @@ class LivekitServices:
                     source=rtc.TrackSource.SOURCE_MICROPHONE,
                 )
             )
-            print(f"📡 Published Track SID: {publication.sid}")
+            print(f" Published Track SID: {publication.sid}")
 
             if self.agent_track.muted:
                 self.agent_track.unmute()
 
-            print(f"🎤 Track Muted State: {publication.muted}")
-            print(f"📚 Local Publications: {list(self.room.local_participant.track_publications.keys())}")
+            print(f" Track Muted State: {publication.muted}")
+            print(f" Local Publications: {list(self.room.local_participant.track_publications.keys())}")
 
             self._track_ready.set()
         except Exception as e:
-            print(f"❌ [LiveKit] Failed publishing agent track: {e}")
+            print(f" [LiveKit] Failed publishing agent track: {e}")
 
     async def _delayed_teardown(self):
         try:
             await asyncio.sleep(10)
-            print("🤫 [Worker] Grace period expired. Initiating clean room teardown...")
+            print(" [Worker] Grace period expired. Initiating clean room teardown...")
             if self.room and self.room.isconnected():
                 await self.room.disconnect()
             self._shutdown_event.set()
         except asyncio.CancelledError:
-            print("🔄 [Worker] Teardown cancelled. Human returned safely.")
+            print(" [Worker] Teardown cancelled. Human returned safely.")
 
     async def cleanup(self):
-        print("🛑 [Worker] Cleaning up resources and cancelling ghost tasks...")
+        print(" [Worker] Cleaning up resources and cancelling ghost tasks...")
         if self._disconnect_timer:
             self._disconnect_timer.cancel()
         for task in list(self._background_tasks):
             task.cancel()
         self._shutdown_event.set()
-        print(f"🛑 [Worker] Disconnected from {self.room_name}. Releasing process channel.")
+        print(f" [Worker] Disconnected from {self.room_name}. Releasing process channel.")
         

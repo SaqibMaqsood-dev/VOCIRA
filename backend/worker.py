@@ -20,9 +20,9 @@ async def main():
     if retriever:
         rag_state.vector_store = store
         rag_state.retriever = retriever
-        print("✅ RAG knowledge base connected.")
+        print("RAG knowledge base connected.")
     else:
-        print("⚠️ RAG index not found — voice pipeline general conversation pe fallback karega.")
+        print("RAG index not found — voice pipeline will fallback on general conversations.")
 
     rabbitmq = RabbitMQ()
     await rabbitmq.connect()
