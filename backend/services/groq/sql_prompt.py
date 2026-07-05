@@ -1,6 +1,10 @@
 from .list_schema import table_list
 
 def build_prompt(user_query: str) -> str:
+    schema_data = table_list()
+    db_schema = schema_data[0]
+    relationships = schema_data[1]
+
     return f"""
 You are an expert PostgreSQL SQL query generator used in a production-grade AI system.
 
@@ -56,7 +60,13 @@ SQL RULES
 DATABASE SCHEMA
 --------------------------------------------------
 
-{table_list}
+{db_schema}
+
+--------------------------------------------------
+TABLE RELATIONSHIPS
+--------------------------------------------------
+
+{relationships}
 
 --------------------------------------------------
 USER QUERY

@@ -1,6 +1,6 @@
 import asyncio
 from core.config import settings
-from services.livekit.livekit_service import LivekitServices
+from services.livekit.livekit_room_service import LivekitServices
 
 # This worker should be run in its own terminal.
 # It connects to LiveKit and stays alive to print participant events.

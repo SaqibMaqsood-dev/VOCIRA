@@ -1,17 +1,27 @@
 import os
-from backend.repository.router.users_route import auth, escalation_route, message_route, refresh_route, session_route
+import sys
+
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) # D:\vocira_backend\backend\main
+BACKEND_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..")) # D:\vocira_backend\backend
+ROOT_DIR = os.path.abspath(os.path.join(BACKEND_DIR, "..")) # D:\vocira_backend
+
+# In paths ko top priority par Python sys.path mein insert karein
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+# -------------------------------------------------------------------------
+
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-
 from huggingface_hub import login
 from core.config import settings
-
 from database.database import Base, engine
 
-# Routers
-from backend.repository.router.users_route import (
-    users_route
-)
+# Routers (Ab paths perfectly clear hain)
+from repository.router.users_route import auth, escalation_route, message_route, refresh_route, session_route
+from backend.repository.router.users_route import users_route
 from backend.repository.router.admin_route import admin_route
 
 
@@ -21,7 +31,6 @@ from backend.repository.router.admin_route import admin_route
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 🚀 Startup logic
-
     if settings.HF_TOKEN:
         login(token=settings.HF_TOKEN)
 
@@ -29,7 +38,6 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
 
     print("✅ Application started successfully")
-
     yield  # app runs here
 
     # 🧹 Shutdown logic (optional cleanup)

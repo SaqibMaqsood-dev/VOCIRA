@@ -1,46 +1,56 @@
+# --- LLM & Vector DB ---
 groq
 pinecone
 langchain
 langchain-community
 langchain-huggingface
 langchain-pinecone
+sentence-transformers
+transformers
+huggingface-hub
+
+# --- Web Scraping ---
 beautifulsoup4
 selenium
 webdriver-manager
-sentence-transformers
+
+# --- Core Utilities & Async ---
 tenacity
 python-dotenv
 nest-asyncio
 pypdf
-transformers
-huggingface-hub
-numpy
+numpy>=2.1.0
+pydantic
+pydantic-settings
+phonenumbers
+python-multipart
+aiohttp>=3.11.0
+
+# --- API Backend & Database ---
 fastapi
 uvicorn[standard]
-pydantic
 httpx
 sqlalchemy
 asyncpg
 databases
 PyJWT
-python-dotenv
-pydantic-settings
-phonenumbers
 alembic
 psycopg2-binary
 pwdlib
 pwdlib[argon2]
-python-multipart
+
+# --- Audio, STT & TTS (Vocira Engine) ---
 faster-whisper
-groq
 piper-tts
 livekit-api
 livekit
-webrtcvad
 silero-vad
 webrtcvad-wheels
 setuptools
-librosa
+numba>=0.59.0
+librosa>=0.10.1
+
+# --- Task Queue & Background Jobs ---
 celery
 rabbitmq
 celery[rabbitmq]

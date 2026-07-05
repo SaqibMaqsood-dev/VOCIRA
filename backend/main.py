@@ -1,7 +1,41 @@
 # Vocira-Rag engine(for general purpose)
-import uvicorn
-
+# Vocira-Rag engine(for general purpose)
 import os
+import sys
+
+# 1. PATH RESOLUTION & AUTOMATIC INJECTION FOR ALL SUBFOLDERS
+current_dir = os.path.dirname(os.path.abspath(__file__))  # main/
+backend_dir = os.path.abspath(os.path.join(current_dir, ".."))  # backend/
+
+# Base paths ko list mein shamil karein
+paths_to_add = [
+    backend_dir,                               # D:\vocira_backend\backend
+    os.path.join(backend_dir, "repository"),   # D:\vocira_backend\backend\repository
+]
+
+# Agar backend ke andar direct 'services' folder hai toh usey bhi explicitly add karein
+if os.path.exists(os.path.join(backend_dir, "services")):
+    paths_to_add.append(os.path.join(backend_dir, "services"))
+
+# System path inject karein bina duplicates ke
+for path in paths_to_add:
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+# 2. EXPLICIT .ENV LOADING FROM BACKEND ROOT
+from dotenv import load_dotenv
+env_path = os.path.join(backend_dir, ".env")
+if os.path.exists(env_path):
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
+
+# REST OF THE IMPORTS (uvicorn, fastapi, etc. will follow below...)
+import uvicorn
+# ... (baqi ka poora code same rahega)
+
+# REST OF THE IMPORTS
+import uvicorn
 import time
 import socket
 import asyncio
@@ -9,7 +43,6 @@ import logging
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -35,10 +68,6 @@ from groq import Groq
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 # CONFIGURATION
-
-
-load_dotenv()
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
@@ -54,13 +83,11 @@ TEMP_INDEX_NAME   = f"{INDEX_NAME}-temp"
 MAX_CONTEXT_CHARS = 3000
 
 # GLOBAL STATE
-
 vector_store = None
 retriever    = None
 is_syncing   = False
 
 # PHASE 1 — WEB SCRAPING
-
 def get_dynamic_data(url: str):
     """Scrape a single URL using Selenium with safety checks."""
     try:
@@ -108,7 +135,6 @@ def get_dynamic_data(url: str):
 
 
 # PHASE 2 — KNOWLEDGE BASE ASSEMBLY
-
 async def assemble_knowledge_base():
     """Load PDFs, text files, and live web data into chunks."""
     all_docs = []
@@ -163,7 +189,6 @@ async def assemble_knowledge_base():
 
 
 # PHASE 3 — VECTOR INDEXING (PINECONE)
-
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def upload_to_pinecone(chunks, embeddings, index_name: str):
     """Upload chunks to Pinecone with automatic retry."""
@@ -222,7 +247,6 @@ async def build_vector_store(chunks):
 
 
 # PHASE 4 — RETRIEVAL + GROQ REASONING
-
 def search_knowledge_base(query: str):
     """Fetch relevant chunks and their sources from Pinecone."""
     try:
@@ -299,7 +323,6 @@ CONTEXT:
 
 
 # BACKGROUND SYNC WORKER
-
 def sync_pipeline_worker():
     """Background worker — scrape, chunk, and re-index Pinecone."""
     global vector_store, retriever, is_syncing
@@ -327,7 +350,6 @@ def sync_pipeline_worker():
 
 
 # FASTAPI — STARTUP + ENDPOINTS
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Instantly connect to existing Pinecone index on boot."""
@@ -369,18 +391,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ── Request / Response Models ────────────────────────────────
-
 class AskRequest(BaseModel):
     question: str
 
 class AskResponse(BaseModel):
     answer: str
 
-
 # ── Endpoints ────────────────────────────────────────────────
-
 @app.get("/")
 def root():
     return {"status": "Vocira is running", "version": "1.0.0"}
@@ -419,6 +437,5 @@ def ask(request: AskRequest):
 
 
 # RUN
-
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

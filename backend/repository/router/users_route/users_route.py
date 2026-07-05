@@ -202,7 +202,7 @@ async def search_users(
 
 # ---------------- Live-kit ----------------
 
-from services.livekit.livekit_service import LivekitServices
+from backend.services.livekit.livekit_room_service import LivekitServices
 import random
 
 @router.post("/live_kit/token", response_model=user_schema.TokkenResponse)

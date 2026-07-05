@@ -1,33 +1,11 @@
-# Virtual environments
-backend/.venv/
-env/
-
-# Generated and build artifacts
-backend/.next/
-backend/meet/
-backend/meet/.next/
-backend/meet/node_modules/
-backend/audio/
-backend/audio_models/
-
-# Audio files
-backend/services/text_speech/audio/*.wav
-backend/services/text_speech/audio_files/
-*.wav
-
-# Python
+.venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-
-# Environment
 .env
 .env.local
-
-# IDE
-.vscode/
-.idea/
-*.sublime-project
+*.log
+.DS_Store
+Thumbs.db
+uv.lock
