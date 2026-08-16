@@ -12,7 +12,7 @@ venv/
 env/
 ENV/
 
-# Any virtual environment inside backend/microservices
+# Virtual environments inside any microservice
 **/.venv/
 **/venv/
 **/env/
@@ -28,7 +28,6 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-
 *.so
 
 
@@ -42,31 +41,42 @@ __pycache__/
 
 build/
 dist/
+**/build/
+**/dist/
 
 pip-wheel-metadata/
 
 .pytest_cache/
+**/.pytest_cache/
+
 .mypy_cache/
+**/.mypy_cache/
+
 .ruff_cache/
+**/.ruff_cache/
+
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
+
+.tox/
+.nox/
 
 
 # =========================================================
 # Environment / Secrets
 # =========================================================
 
+# Ignore environment files
 .env
 .env.*
-!.env.example
-!.env.sample
-
-# Covers .env files inside every microservice
 **/.env
 **/.env.*
 
-# Keep example configuration files
+# Keep example environment files
+!.env.example
+!.env.sample
 !**/.env.example
 !**/.env.sample
 
@@ -76,7 +86,11 @@ htmlcov/
 # =========================================================
 
 .vscode/
+**/.vscode/
+
 .idea/
+**/.idea/
+
 *.sublime-project
 *.sublime-workspace
 
@@ -84,42 +98,44 @@ htmlcov/
 *.swp
 *.swo
 
-# OS files
+
+# =========================================================
+# Operating System Files
+# =========================================================
+
 .DS_Store
+**/.DS_Store
+
 Thumbs.db
 
 
 # =========================================================
-# Node / Frontend
+# Node.js / Frontend Dependencies
 # =========================================================
 
 node_modules/
 **/node_modules/
 
-.next/
-**/.next/
-
-.nuxt/
-**/.nuxt/
-
-dist/
-**/dist/
-
 .npm/
 .yarn/
 .pnpm-debug.log*
 
-
-# =========================================================
-# Frontend Build
-# =========================================================
-
-backend/meet/.next/
-backend/meet/node_modules/
-
-# Other possible frontend builds
+# Next.js
+.next/
 **/.next/
-**/dist/
+
+# Nuxt
+.nuxt/
+**/.nuxt/
+
+
+# =========================================================
+# LiveKit Meet Frontend
+# =========================================================
+
+# Completely ignore the LiveKit Meet frontend
+backend/meet/
+backend/microservices/livekit_Rag_services/meet/
 
 
 # =========================================================
@@ -137,15 +153,20 @@ backend/audio/
 backend/services/text_speech/audio/
 backend/services/text_speech/audio_files/
 
+# Audio generated inside any microservice
+**/audio/
+**/audio_files/
+
 
 # =========================================================
 # AI / Voice Models
 # =========================================================
 
+# Audio model directories
 backend/audio_models/
 **/audio_models/
 
-# Large model files
+# Large AI model files
 *.onnx
 *.bin
 *.pt
@@ -154,28 +175,48 @@ backend/audio_models/
 
 
 # =========================================================
-# Temporary / Generated Files
+# Logs / Temporary / Generated Files
 # =========================================================
 
 *.log
+**/*.log
+
 *.tmp
 *.temp
 
 tmp/
 temp/
+**/tmp/
+**/temp/
+
+*.bak
+*.old
+*.orig
+
+
+# =========================================================
+# Local Databases
+# =========================================================
 
 *.sqlite
 *.sqlite3
 *.db
 
+# Database dumps
+*.sql
+*.dump
+*.backup
+
 
 # =========================================================
-# Alembic Generated Cache
+# Alembic
 # =========================================================
 
-# DO NOT ignore the alembic directory itself.
-# Migration files should normally be committed.
+# IMPORTANT:
+# Do NOT ignore alembic directories or migration files.
+# Alembic migration files should be committed.
 
+# Only ignore Python cache inside Alembic
 **/alembic/__pycache__/
 **/alembic/versions/__pycache__/
 
@@ -184,12 +225,15 @@ temp/
 # Docker
 # =========================================================
 
-# Local Docker environment files
+# Local Docker override
 docker-compose.override.yml
 
-# Docker volumes / generated data
+# Docker generated data
 docker-data/
 docker-volumes/
+
+# Local Docker environment files
+docker-compose.local.yml
 
 
 # =========================================================
@@ -198,9 +242,10 @@ docker-volumes/
 
 # uv virtual environments
 .venv/
+**/.venv/
 
-# Usually keep uv.lock committed for applications.
-# Therefore DO NOT ignore uv.lock.
+# Keep uv.lock committed.
+# DO NOT add uv.lock to .gitignore.
 
 
 # =========================================================
@@ -212,40 +257,45 @@ docker-volumes/
 *.crt
 
 credentials.json
+**/credentials.json
+
 service-account.json
+**/service-account.json
 
 secrets/
 **/secrets/
 
 
 # =========================================================
-# Local Database / Dumps
+# Local Development Files
 # =========================================================
 
-*.sql
-*.dump
-*.backup
+*.pid
+*.pid.lock
+
+*.cache
+**/.cache/
 
 
 # =========================================================
-# Coverage / Testing
+# Test / Debug Files
 # =========================================================
-
-.coverage
-coverage.xml
-htmlcov/
 
 .pytest_cache/
-.tox/
-.nox/
+**/.pytest_cache/
+
+test-results/
+**/test-results/
+
+*.prof
 
 
 # =========================================================
-# Miscellaneous
+# OS / Miscellaneous
 # =========================================================
 
+*.swp
+*.swo
 *.bak
 *.old
 *.orig
-
-.DS_Store
