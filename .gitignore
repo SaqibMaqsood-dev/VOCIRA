@@ -1,33 +1,251 @@
-# Virtual environments
-backend/.venv/
+# =========================================================
+# VOCIRA - Root Git Ignore
+# =========================================================
+
+
+# =========================================================
+# Python Virtual Environments
+# =========================================================
+
+.venv/
+venv/
 env/
+ENV/
 
-# Generated and build artifacts
-backend/.next/
-backend/meet/
-backend/meet/.next/
-backend/meet/node_modules/
-backend/audio/
-backend/audio_models/
+# Any virtual environment inside backend/microservices
+**/.venv/
+**/venv/
+**/env/
 
-# Audio files
-backend/services/text_speech/audio/*.wav
-backend/services/text_speech/audio_files/
-*.wav
 
-# Python
+# =========================================================
+# Python Cache / Compiled Files
+# =========================================================
+
 __pycache__/
-*.pyc
+**/__pycache__/
+
+*.py[cod]
 *.pyo
+*.pyd
+
+*.so
+
+
+# =========================================================
+# Python Build / Package Artifacts
+# =========================================================
+
+*.egg
 *.egg-info/
+**/*.egg-info/
+
+build/
+dist/
+
+pip-wheel-metadata/
+
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
-# Environment
+
+# =========================================================
+# Environment / Secrets
+# =========================================================
+
 .env
-.env.local
+.env.*
+!.env.example
+!.env.sample
 
-# IDE
+# Covers .env files inside every microservice
+**/.env
+**/.env.*
+
+# Keep example configuration files
+!**/.env.example
+!**/.env.sample
+
+
+# =========================================================
+# IDE / Editor
+# =========================================================
+
 .vscode/
 .idea/
 *.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# =========================================================
+# Node / Frontend
+# =========================================================
+
+node_modules/
+**/node_modules/
+
+.next/
+**/.next/
+
+.nuxt/
+**/.nuxt/
+
+dist/
+**/dist/
+
+.npm/
+.yarn/
+.pnpm-debug.log*
+
+
+# =========================================================
+# Frontend Build
+# =========================================================
+
+backend/meet/.next/
+backend/meet/node_modules/
+
+# Other possible frontend builds
+**/.next/
+**/dist/
+
+
+# =========================================================
+# Audio Files
+# =========================================================
+
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+*.aac
+
+backend/audio/
+backend/services/text_speech/audio/
+backend/services/text_speech/audio_files/
+
+
+# =========================================================
+# AI / Voice Models
+# =========================================================
+
+backend/audio_models/
+**/audio_models/
+
+# Large model files
+*.onnx
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+
+# =========================================================
+# Temporary / Generated Files
+# =========================================================
+
+*.log
+*.tmp
+*.temp
+
+tmp/
+temp/
+
+*.sqlite
+*.sqlite3
+*.db
+
+
+# =========================================================
+# Alembic Generated Cache
+# =========================================================
+
+# DO NOT ignore the alembic directory itself.
+# Migration files should normally be committed.
+
+**/alembic/__pycache__/
+**/alembic/versions/__pycache__/
+
+
+# =========================================================
+# Docker
+# =========================================================
+
+# Local Docker environment files
+docker-compose.override.yml
+
+# Docker volumes / generated data
+docker-data/
+docker-volumes/
+
+
+# =========================================================
+# UV
+# =========================================================
+
+# uv virtual environments
+.venv/
+
+# Usually keep uv.lock committed for applications.
+# Therefore DO NOT ignore uv.lock.
+
+
+# =========================================================
+# Secrets / Credentials
+# =========================================================
+
+*.pem
+*.key
+*.crt
+
+credentials.json
+service-account.json
+
+secrets/
+**/secrets/
+
+
+# =========================================================
+# Local Database / Dumps
+# =========================================================
+
+*.sql
+*.dump
+*.backup
+
+
+# =========================================================
+# Coverage / Testing
+# =========================================================
+
+.coverage
+coverage.xml
+htmlcov/
+
+.pytest_cache/
+.tox/
+.nox/
+
+
+# =========================================================
+# Miscellaneous
+# =========================================================
+
+*.bak
+*.old
+*.orig
+
+.DS_Store
