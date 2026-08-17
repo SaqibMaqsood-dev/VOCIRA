@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # =========================================================
 # VOCIRA - Root Git Ignore
 # =========================================================
@@ -22,11 +23,16 @@ ENV/
 # Python Cache / Compiled Files
 # =========================================================
 
+=======
+.venv/
+venv/
+>>>>>>> origin/backend-dev
 __pycache__/
 **/__pycache__/
 
 *.py[cod]
 *.pyo
+<<<<<<< HEAD
 *.pyd
 *.so
 
@@ -299,3 +305,11 @@ test-results/
 *.bak
 *.old
 *.orig
+=======
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+uv.lock
+>>>>>>> origin/backend-dev

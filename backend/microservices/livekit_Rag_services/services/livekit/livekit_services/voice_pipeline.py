@@ -13,6 +13,9 @@ from backend.microservices.livekit_Rag_services.services.router_services.message
 from backend.microservices.livekit_Rag_services.services.text_speech.piper_servies import tts_converter
 from backend.microservices.livekit_Rag_services.services.groq.groq import dataConverter
 from backend.microservices.livekit_Rag_services.services.groq import sql_prompt
+from backend.microservices.livekit_Rag_services.services.rag_engine.query import ask_vocira
+
+
 
 from uuid import UUID
 msg_serivce = MessageService()
@@ -328,12 +331,13 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
             ai_response_text = ""
 
             if "DB_QUERY" in intent:
+                
                 print("🔍 [Route]: Database Query Pipeline")
                 prompt = sql_prompt.build_prompt(user_query=sql_text)
                 result = await dataConverter(prompt)
                 response_sql = result.choices[0].message.content
                 print(f"⚙️ [Generated SQL]: {response_sql}")
-
+    
                 if "LIMIT" not in response_sql.upper() and "SELECT" in response_sql.upper():
                     response_sql = f"{response_sql.rstrip(';')} LIMIT 5;"
 
@@ -345,12 +349,14 @@ async def process_voice_intent(chunk: bytes, stt, user_id, usertype, session_id,
                 sql_result_prompt = human_text.build_response_prompt(user_query=sql_text, sql_result=data)
                 converter_text = await dataConverter(prompt=sql_result_prompt)
                 ai_response_text = converter_text.choices[0].message.content
-            else:
-                print("👋 [Route]: General Conversation Pipeline")
-                general_prompt = f"You are a helpful AI voice assistant named 'Vocira'. Respond naturally and concisely to the user's input: {sql_text}"
-                converter_text = await dataConverter(prompt=general_prompt)
-                ai_response_text = converter_text.choices[0].message.content
 
+            else:
+
+                print("👋 [Route]  :  General Conversation Pipeline")
+                general_prompt     =  f"You are a helpful AI voice assistant named 'Vocira'. Respond naturally and concisely to the user's input: {sql_text}"
+                converter_text     =  ask_vocira(retriever= general_prompt, user_query=general_prompt)
+                ai_response_text   =  converter_text.choices[0].message.content
+                                                    
             print(f"🤖 [AI]: {ai_response_text}")
             await msg_serivce.create_message(db=db, content=ai_response_text, user_id=user_id, usertype="agent", session_id=session_id)
 
