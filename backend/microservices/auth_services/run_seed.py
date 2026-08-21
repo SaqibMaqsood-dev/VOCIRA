@@ -1,6 +1,6 @@
 import asyncio
 
-from backend.helper_functions.database import SessionLocal
+from backend.microservices.auth_services.db import SessionLocal
 from backend.microservices.auth_services.seed import (
     Permission_Seeding,
     role_seeding,

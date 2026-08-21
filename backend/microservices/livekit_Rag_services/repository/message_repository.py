@@ -16,7 +16,9 @@ from backend.microservices.livekit_Rag_services.models.message_model import (
 )
 
 
-class MessageRepository:
+class MessageRepository(BaseRepository[Message]):
+    def __init__(self, model_cls):
+        super().__init__(model_cls=Message)
 
     async def create(
         self,

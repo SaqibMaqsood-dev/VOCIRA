@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.helper_functions.database import get_db
+from backend.microservices.auth_services.db import get_db
 from backend.microservices.auth_services.models.refresh_tokken import Refresh_Tokken
 from backend.microservices.auth_services.schema.token_schema import RefreshToken, Token
 from backend.microservices.auth_services.services.hashing_service.hashing import Hash

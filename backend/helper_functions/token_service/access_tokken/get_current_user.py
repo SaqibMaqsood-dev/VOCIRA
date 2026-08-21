@@ -1,17 +1,31 @@
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Annotated
-from fastapi import Depends , HTTPException , status
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
 from .verify_tokken import verify_jwt
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-async def current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/login"
+)
+
+
+
+async def current_user(
+    token: Annotated[str, Depends(oauth2_scheme)]
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={
+            "WWW-Authenticate": "Bearer"
+        },
     )
-    
-    user = verify_jwt(token=token , credentials_exception=credentials_exception)
-       
+
+    user = verify_jwt(
+        token=token,
+        credentials_exception=credentials_exception,
+    )
+
     return user

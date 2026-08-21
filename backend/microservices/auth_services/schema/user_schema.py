@@ -13,15 +13,21 @@ from uuid import UUID
 
 
 
+
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+from datetime import date
+
 class User(BaseModel):
-    name            : str
-    role            : Optional[str]
-    email           : Optional[str]
-    password        : Optional[str]
-    phone_number    : Optional[str]
-    address         : Optional[str]
-    location        : Optional[str]
-    date_birth      : Optional[date] =  date(2005, 1, 1)
+    name: str
+    role: str  # Accepts "parent", "admin", etc.
+    email: Optional[EmailStr] = None
+    password: str
+    phone_number: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[str] = None
+    date_birth: Optional[date] = None
+    parent_id: Optional[str] = None
 
 # ⁡⁢⁢⁢    Name  Fields validations ⁡
 
@@ -107,15 +113,23 @@ class UpdateUser(BaseModel):
 
 
 
-class ShowUser(BaseModel):
-    id: UUID
-    name: str
-    email: str
-    phone_number: str | None = None
-    address: str | None = None
-    location: str | None = None
-    date_birth: date | None = None
+from pydantic import BaseModel, ConfigDict, EmailStr
+from typing import Optional
+from datetime import date, datetime
 
+
+class ShowUser(BaseModel):
+    user_id: UUID
+    name: str
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[str] = None
+    date_birth: Optional[date] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # Enable ORM serialization (FastAPI will read directly from the Users SQLAlchemy object)
     model_config = ConfigDict(from_attributes=True)
 
 class UserPartialUpdate(BaseModel):

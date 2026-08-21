@@ -14,8 +14,8 @@ class MessageCreate(BaseModel):
 
 class MessageResponse(BaseModel):
     user_id: Optional[int] = None
-    id: int
-    session_id: int
+    id: UUID
+    session_id: UUID
     sender_type: str
     content: str
     intent: Optional[str]
@@ -23,8 +23,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
 
     class Config:
-        from_attributes = True
-
+        from_attributes  = True
 
 class MessagePartialUpdate(BaseModel):
     content: Optional[str] = None

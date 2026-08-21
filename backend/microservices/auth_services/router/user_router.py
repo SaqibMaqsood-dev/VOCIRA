@@ -2,7 +2,7 @@ from uuid import UUID
 from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.helper_functions import database
+from backend.microservices.auth_services.db import get_db
 from backend.microservices.auth_services.schema import user_schema
 from backend.microservices.auth_services.services.router_services.user_service import UserServices
 from backend.helper_functions.token_service.access_tokken.get_current_user import (
@@ -25,7 +25,7 @@ user_service = UserServices()
 
 async def signup(
     request: user_schema.User,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     return await user_service.UserCreate(
         request=request,
@@ -42,7 +42,7 @@ async def signup(
 async def get_users(
     limit: int = 10,
     skip: int = 0,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     return await user_service.get_all_users(
         db = db,
@@ -59,7 +59,7 @@ async def get_users(
 )
 async def get_user(
     id: UUID,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: user_schema.ShowUser = Depends(current_user),
 ):
     return await user_service.get_user(
@@ -75,7 +75,7 @@ async def get_user(
 )
 async def delete_user(
     id: UUID,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: user_schema.ShowUser = Depends(current_user),
 ):
     return await user_service.delete_user(
@@ -93,7 +93,7 @@ async def delete_user(
 async def update_user(
     id: UUID,
     request: user_schema.UpdateUser,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: user_schema.ShowUser = Depends(current_user),
 ):
 
@@ -125,7 +125,7 @@ async def update_user(
 async def partial_update(
     id: UUID,
     request: user_schema.UserPartialUpdate,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: user_schema.ShowUser = Depends(current_user),
 ):
     return await user_service.user_partialy_update(
@@ -143,7 +143,7 @@ async def partial_update(
 )
 async def search_users(
     keyword: str,
-    db: AsyncSession = Depends(database.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: user_schema.ShowUser = Depends(current_user),
 ):
     return await user_service.search_users(

@@ -9,14 +9,20 @@ from uuid import UUID , uuid4
 from sqlalchemy.dialects.postgresql import UUID as SQLUUID
 from uuid import uuid4 , UUID
 
-
 class Role(Base):
     __tablename__ = "role"
-    
-    role_id        : Mapped[UUID]   = mapped_column(SQLUUID(as_uuid=True), default=uuid4 , primary_key=True)
-    name           : Mapped[str]    = mapped_column(Text    , unique=True)
-    #relationship 
-    users          = relationship("Users"      , secondary="user_roles"       ,  back_populates="roles")
-    permissions    = relationship("Permission" , secondary="role_permissions" ,  back_populates="roles" )
 
-  
+    role_id = mapped_column(VARCHAR, primary_key=True)
+    name = mapped_column(Text, unique=True)
+
+    users = relationship(
+        "Users",
+        back_populates="role"
+    )
+
+    # Change secondary to the string name of the junction table:
+    permissions = relationship(
+        "Permission",
+        secondary="role_permissions",  # <-- Use string table name here
+        back_populates="roles"
+    )

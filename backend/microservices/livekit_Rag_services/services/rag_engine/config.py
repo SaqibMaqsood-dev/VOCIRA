@@ -27,7 +27,7 @@ EMBEDDING_DIM   = 384
 
 # ── RAG ──────────────────────────────────────────────────────
 MAX_CONTEXT_CHARS = 4000
-GROQ_MODEL        = "llama-3.1-8b-instant"
+GROQ_MODEL        = "openai/gpt-oss-20b"
 TOP_K             = 10
 
 # ── Pinecone Namespace ───────────────────────────────────────

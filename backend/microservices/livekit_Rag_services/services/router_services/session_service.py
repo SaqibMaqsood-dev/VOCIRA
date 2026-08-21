@@ -233,7 +233,7 @@ class SessionService:
 
                 session = await self.session_repo.get_by_id(
                     db=db,
-                    session_id=clean_session_id,
+                    id=clean_session_id,
                 )
 
                 if not session:

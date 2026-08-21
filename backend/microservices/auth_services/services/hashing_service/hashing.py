@@ -1,6 +1,55 @@
 from pwdlib import PasswordHash
 import hashlib
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 password_hash = PasswordHash.recommended()
 
 

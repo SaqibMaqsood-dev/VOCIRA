@@ -24,33 +24,52 @@ class UserServices:
         request,
     ) -> Users:
 
-        result = await db.execute(
-            select(Users).where(Users.email == request.email)
-        )
-        existing_user = result.scalar_one_or_none()
-
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User already exists",
+        # --------------------------------
+        # 1. Check existing email
+        # --------------------------------
+        if request.email:
+            result = await db.execute(
+                select(Users).where(Users.email == request.email)
             )
 
+            existing_user = result.scalar_one_or_none()
+
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="User already exists",
+                )
+
+        # --------------------------------
+        # 2. Get role from database
+        # --------------------------------
         result = await db.execute(
-            select(Role).where(Role.name == request.role)
+            select(Role).where(
+                Role.name.ilike(request.role.strip())
+            )
         )
+
         role_obj = result.scalar_one_or_none()
 
         if role_obj is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Role not found",
+                detail=f"Role '{request.role}' not found",
             )
 
-        if role_obj.name == "guest":
+        role_name = role_obj.name.lower()
+
+        # --------------------------------
+        # 3. Guest
+        # --------------------------------
+        if role_name == "guest":
+
+            guest_identifier = uuid.uuid4().hex[:8]
 
             data = {
-                "name": f"guest_{uuid.uuid4().hex[:8]}",
-                "email": f"guest_{uuid.uuid4().hex[:8]}@guest.local",
+                "name": f"guest_{guest_identifier}",
+                "parent_id": None,
+                "email": f"guest_{guest_identifier}@guest.local",
                 "password_hashed": None,
                 "role_id": role_obj.role_id,
                 "phone_number": None,
@@ -59,29 +78,88 @@ class UserServices:
                 "date_birth": None,
             }
 
-        else:
+        # --------------------------------
+        # 4. Guardian / Parent
+        # --------------------------------
+        elif role_name in ("guardian", "parent"):
 
-            hashed_password = Hash.get_hash_password(request.password)
+            if not request.parent_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="parent_id is required for guardian",
+                )
+
+            # One ERP parent ID = one VOCIRA guardian account
+            result = await db.execute(
+                select(Users).where(
+                    Users.parent_id == request.parent_id
+                )
+            )
+
+            existing_parent = result.scalar_one_or_none()
+
+            if existing_parent:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Guardian with this parent_id already exists",
+                )
+
+            hashed_password = Hash.get_hash_password(
+                request.password
+            )
 
             data = {
                 "name": request.name,
+                "parent_id": request.parent_id,
                 "email": request.email,
                 "password_hashed": hashed_password,
                 "role_id": role_obj.role_id,
-                "phone_number": request.phone_number,
-                "address": request.address,
-                "location": request.location,
-                "date_birth": request.date_birth,
+                "phone_number": getattr(request, "phone_number", None),
+                "address": getattr(request, "address", None),
+                "location": getattr(request, "location", None),
+                "date_birth": getattr(request, "date_birth", None),
             }
 
+        # --------------------------------
+        # 5. Admin
+        # --------------------------------
+        elif role_name == "admin":
+
+            hashed_password = Hash.get_hash_password(
+                request.password
+            )
+
+            data = {
+                "name": request.name,
+                "parent_id": None,
+                "email": request.email,
+                "password_hashed": hashed_password,
+                "role_id": role_obj.role_id,
+                "phone_number": getattr(request, "phone_number", None),
+                "address": getattr(request, "address", None),
+                "location": getattr(request, "location", None),
+                "date_birth": getattr(request, "date_birth", None),
+            }
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid or unsupported role: '{role_name}'",
+            )
+
+        # --------------------------------
+        # 6. Create user
+        # --------------------------------
         user = await self.user_repo.create(
             db=db,
             data=data,
         )
 
         await db.commit()
+        await db.refresh(user)
 
         return user
+
 
     # ---------------- GET USER ----------------
 

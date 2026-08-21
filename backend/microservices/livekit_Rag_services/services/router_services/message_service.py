@@ -39,7 +39,7 @@ from backend.microservices.livekit_Rag_services.models.message_model import (
 class MessageService:
 
     def __init__(self):
-        self.message_repo = MessageRepository()
+        self.message_repo = MessageRepository(model_cls=message_model.Message)
 
     async def create_message(
         self,
