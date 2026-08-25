@@ -29,6 +29,7 @@ dependencies = [
     "piper-tts>=1.7.0",
     "pwdlib>=0.3.1",
     "pydantic-settings",
+    "pydantic[email]>=2.13.4",
     "python-multipart>=0.0.32",
     "redis>=8.1.0",
     "selenium>=4.46.0",

@@ -4,7 +4,7 @@ from sqlalchemy import   DateTime,  func , ForeignKey  , text , Integer , Text ,
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as SQLUUID
 from uuid import uuid4 , UUID
-from backend.helper_functions.database import (
+from backend.helper_functions.database.base import (
     Base,
 )
 from sqlalchemy.orm import relationship
@@ -13,14 +13,15 @@ from sqlalchemy import Text, Enum
 
 class SourceTypeEnum(str, enum.Enum):
     rag = "rag"
-    database = "database"
+    database = "ERP"
+    admin    = "Admin"
 
 
     
 class SenderTypeEnum(str, enum.Enum):
-    user = "user"
+    user = "guardian"
     ai = "ai"
-    admin = "admin",
+    admin = "admin"
     guest = "guest"
 
 

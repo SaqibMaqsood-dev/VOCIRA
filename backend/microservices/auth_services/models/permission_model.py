@@ -1,7 +1,7 @@
 from sqlalchemy import String, VARCHAR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.helper_functions.database import Base
+from backend.helper_functions.database.base import Base
 
 
 class Permission(Base):

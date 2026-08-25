@@ -7,7 +7,7 @@ from typing import Optional
 
 def verify_refresh_tokken(token, credentials_exception):
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.ALGORITHM])
         
         email = payload.get("sub")
         token_type = payload.get("type")  
@@ -20,3 +20,5 @@ def verify_refresh_tokken(token, credentials_exception):
 
     except InvalidTokenError:
         raise credentials_exception 
+
+    

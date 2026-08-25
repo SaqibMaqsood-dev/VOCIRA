@@ -169,3 +169,11 @@ class _AuthResponse(BaseModel):
     acess_token : str
     barrer      : str
     
+
+
+class InternalUserResponse(BaseModel):
+    user_id: UUID
+    parent_id: Optional[str] = None
+    role: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)

@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from enum import Enum
 from datetime import datetime
+from uuid import UUID
 
 
 class EscalationStatus(str, Enum):
@@ -20,11 +21,11 @@ class CreateEscalation(BaseModel):
     
 
 class EscalationResponse(BaseModel):
-    id              : int
-    user_id         : int
-    message_id      : int
+    id              : UUID
+    user_id         : UUID
+    message_id      : UUID
     status          : EscalationStatus
-    assigned_admin  : Optional[int] = None
+    # assigned_admin  : Optional[UUID] = None
     created_at      : datetime
     class Config    :
         from_attributes = True  
@@ -35,7 +36,7 @@ class EscalationResponse(BaseModel):
 class EscalationPatch(BaseModel):
     status          : Optional[EscalationStatus] = None
     assigned_admin  : Optional[int] = None
-    message_id      : Optional[int] = None
+    message_id      : Optional[UUID] = None
 
     class Config:
         from_attributes = True

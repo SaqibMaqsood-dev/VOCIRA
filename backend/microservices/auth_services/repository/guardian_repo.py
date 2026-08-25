@@ -7,9 +7,6 @@
 #     BaseRepository,
 # )
 
-# from backend.microservices.auth_services.models.ErpGuardian import (
-#     ERPGuardianMapping,
-# )
 
 
 # class ERPGuardianRepository(BaseRepository[ERPGuardianMapping]):

@@ -2,12 +2,13 @@ import enum
 from datetime import datetime
 from sqlalchemy import VARCHAR,  DateTime,  func , ForeignKey , Float , text , Integer , Text , Boolean
 from sqlalchemy.orm import Mapped, mapped_column
-from backend.helper_functions.database import Base , engine
 from sqlalchemy.orm import relationship
 from sqlalchemy import Text
 from datetime import datetime, timedelta , timezone
 from sqlalchemy.dialects.postgresql import UUID as SQLUUID
 from uuid import uuid4 , UUID
+
+from backend.helper_functions.database.base import Base
 
 
 

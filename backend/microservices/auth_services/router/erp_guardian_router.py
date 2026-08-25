@@ -6,12 +6,11 @@
 # from backend.microservices.auth_services.db import get_db
 
 # from backend.microservices.auth_services.services.router_services.guardian_service import (
-#     ERPGuardianService,
+#     ERPGuardianService
 # )
 
-
 # from backend.microservices.auth_services.schema.guardian_schema import (
-#     AddERPGuardianRequest,
+#     AddERPGuardianRequest
 # )
 
 
@@ -22,6 +21,10 @@
 
 # guardian_service = ERPGuardianService()
 
+
+# # ============================================================
+# # GET ERP GUARDIAN ID
+# # ============================================================
 
 # @router.get("/{user_id}")
 # async def get_erp_guardian_id(
@@ -34,12 +37,18 @@
 #     )
 
 #     return {
-#         "erp_guardian_id": erp_guardian_id
+#         "erp_guardian_id": erp_guardian_id,
 #     }
 
 
+# # ============================================================
+# # ADD ERP GUARDIAN MAPPING
+# # ============================================================
 
-# @router.post("", status_code=status.HTTP_201_CREATED)
+# @router.post(
+#     "",
+#     status_code=status.HTTP_201_CREATED,
+# )
 # async def add_erp_guardian(
 #     data: AddERPGuardianRequest,
 #     db: AsyncSession = Depends(get_db),
@@ -54,4 +63,3 @@
 #         "vocira_user_id": mapping.vocira_user_id,
 #         "erp_guardian_id": mapping.erp_guardian_id,
 #     }
-

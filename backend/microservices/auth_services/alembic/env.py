@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-from backend.helper_functions.database import Base
+from backend.helper_functions.database.base import Base
 import backend.microservices.auth_services.models  # noqa: F401
 
 

@@ -13,7 +13,7 @@ class MessageCreate(BaseModel):
     
 
 class MessageResponse(BaseModel):
-    user_id: Optional[int] = None
+    user_id: Optional[UUID] = None
     id: UUID
     session_id: UUID
     sender_type: str

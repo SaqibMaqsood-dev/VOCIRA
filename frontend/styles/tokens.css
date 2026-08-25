@@ -1,0 +1,11 @@
+:root {
+  --vocira-bg-primary: #100944;
+  --vocira-bg-secondary: #140c4f;
+  --vocira-card: rgba(255, 255, 255, 0.05);
+  --vocira-accent-primary: #6c63ff;
+  --vocira-accent-secondary: #8be9fd;
+  --vocira-text-primary: #ffffff;
+  --vocira-text-secondary: #b8b8d1;
+  --vocira-radius: 16px;
+}
+

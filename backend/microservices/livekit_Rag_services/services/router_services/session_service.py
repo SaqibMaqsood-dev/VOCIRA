@@ -1,22 +1,15 @@
+from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.microservices.livekit_Rag_services.repository.session_repository import (
-SessionRepository,)
-from backend.microservices.livekit_Rag_services.models.session_model import (
-Session
-)
-from backend.microservices.livekit_Rag_services.core.rabitmq import RabbitMQ
-from backend.helper_functions.database import SessionLocal
-from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from backend.microservices.livekit_Rag_services.core.rabitmq import RabbitMQ
-from backend.microservices.livekit_Rag_services.models import session_model 
-from backend.helper_functions.database import SessionLocal
+import asyncio
 
-from uuid import UUID
-    
+from backend.microservices.livekit_Rag_services.repository.session_repository import SessionRepository
+from backend.microservices.livekit_Rag_services.core.rabitmq import RabbitMQ
+from backend.microservices.livekit_Rag_services.models import session_model
+from backend.helper_functions.database.session import SessionLocal
+from backend.microservices.livekit_Rag_services.core.config import settings
+
 
 class SessionService:
 
@@ -24,251 +17,113 @@ class SessionService:
         self.session_repo = SessionRepository()
 
     # =========================================================
-    # CREATE SESSION
+    # CREATE SESSION (transaction-safe)
     # =========================================================
+    async def create_session(self, db: AsyncSession, user_id: UUID | None):
+        try:
+            async with db.begin():  # transaction block
+                new_session = await self.session_repo.session_create(
+                    db=db,
+                    user_id=user_id,
+                )
 
-    async def create_session(
-        self,
-        user_id,
-    ) -> dict:
-        """
-        Creates a new session and publishes the session ID
-        to RabbitMQ.
+                if not new_session:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to create session",
+                    )
 
-        Used internally by LiveKit token/session creation.
-        """
-            
-        new_session = await self.session_repo.session_create(
-            user_id = user_id
-        )
+                session_id = new_session.id
+                print(f"🆕 [SessionService] Session created: {session_id} | user_id={user_id}")
 
-        if not new_session:
+                # flush + refresh inside transaction
+                await db.flush()
+                await db.refresh(new_session)
+
+            # after transaction exits, commit is guaranteed
+            # ✅ retry mechanism to handle commit visibility
+            retries = 3
+            saved_session = None
+            for attempt in range(retries):
+                result = await db.execute(
+                    select(session_model.Session).where(session_model.Session.id == session_id)
+                )
+                saved_session = result.scalar_one_or_none()
+                if saved_session:
+                    if attempt > 0:
+                        print(f"✅ [SessionService] Session found after retry {attempt}")
+                    break
+                else:
+                    if attempt < retries - 1:
+                        print(f"⚠️ [SessionService] Session not visible yet | Retrying...")
+                        await asyncio.sleep(0.2)
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Session was committed but could not be found.",
+                        )
+
+            print(f"✅ [SessionService] Session verified successfully: {session_id}")
+
+            # publish only once, after verification
+            await RabbitMQ().producer(message={"session_id": str(session_id)})
+            print(f"📤 [SessionService] Session published to RabbitMQ: {session_id}")
+
+            return saved_session
+
+        except HTTPException:
+            await db.rollback()
+            raise
+        except Exception as e:
+            await db.rollback()
+            print(f"❌ [SessionService] Failed to create session: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create session",
             )
-        
-        await RabbitMQ().producer(
-            message={
-                "session_id":str(new_session.id),
-            }
-        )
 
-        return new_session
+    # =========================================================
+    # GET USER SESSIONS
+    # =========================================================
+    async def get_user_sessions(self, db: AsyncSession, user_id: UUID, limit: int = 10, skip: int = 0):
+        return await self.session_repo.get_user_sessions(db=db, user_id=user_id, limit=limit, skip=skip)
 
     # =========================================================
     # GET ALL SESSIONS
     # =========================================================
+    async def get_all_sessions(self, db: AsyncSession, limit: int = 10, skip: int = 0):
+        return await self.session_repo.get_all_sessions(db=db, limit=limit, skip=skip)
 
-    async def get_all_sessions(
-        self,
-        db: AsyncSession,
-    ):
-        sessions = await self.session_repo.get_multi(
-            db=db,
-        )
-
-        if not sessions:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No sessions found",
-            )
-
-        return sessions
-
-    
     # =========================================================
-    # GET SESSION BY ID
+    # GET USER SESSION BY ID
     # =========================================================
-
-
-    async def get_session_by_id(
-        self,
-        db: AsyncSession,
-        id_value: UUID,
-    ):
-        session = await self.session_repo.get_by_id(
-            db=db,
-            id=id_value,
-        )
-
+    async def get_session_by_id(self, db: AsyncSession, user_id: UUID, id_value: UUID):
+        session = await self.session_repo.get_by_id(db=db, id=id_value)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No session found with id {id_value}",
-            )
-
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        if session.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
         return session
 
     # =========================================================
-    # UPDATE SESSION
+    # DASHBOARD STATS
     # =========================================================
-    
-    async def update_session(
-        self,
-        db: AsyncSession,
-        id_value: UUID,
-        request,
-    ):
-        session = await self.session_repo.get_by_id(
-            db=db,
-            id_value=id_value,
-        )
-
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No session found with id {id_value}",
-            )
-
-        data = {
-            "title": request.title,
-        }
-
-        updated_session = await self.session_repo.update(
-            db=db,
-            session=session,
-            data=data,
-        )
-
-        return updated_session
-
-    # =========================================================
-    # PARTIAL UPDATE SESSION
-    # =========================================================
-
-    async def partial_update_session(
-        self,
-        db: AsyncSession,
-        id_value: UUID,
-        request,
-    ):
-        session = await self.session_repo.get_by_id(
-            db=db,
-            id_value=id_value,
-        )
-
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No session found with id {id_value}",
-            )
-
-        data = request.model_dump(
-            exclude_unset=True,
-            exclude_none=True,
-        )
-
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No fields provided for update",
-            )
-
-        updated_session = await self.session_repo.update(
-            db=db,
-            session=session,
-            data=data,
-        )
-
-        return updated_session
-
-    # =========================================================
-    # DELETE SESSION
-    # =========================================================
-
-    async def delete_session(
-        self,
-        db: AsyncSession,
-        id_value: UUID,
-    ):
-        session = await self.session_repo.get_by_id(
-            db=db,
-            id_value=id_value,
-        )
-
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No session found with id {id_value}",
-            )
-
-        await self.session_repo.delete(
-            db=db,
-            session=session,
-        )
-
+    async def get_dashboard_stats(self, db: AsyncSession, user_id: UUID):
         return {
-            "message": f"Session deleted with id {id_value}",
+            "total_calls": await self.session_repo.count_user_sessions(db=db, user_id=user_id),
+            "today_calls": await self.session_repo.count_today_sessions(db=db, user_id=user_id),
+            "this_week_calls": await self.session_repo.count_week_sessions(db=db, user_id=user_id),
         }
 
     # =========================================================
-    # CLOSE SESSION
+    # CLOSE USER SESSION
     # =========================================================
-
-    async def close_session_by_id(
-        self,
-        session_id,
-    ) -> None:
-        """
-        Used internally by the LiveKit worker when
-        a session is finished.
-        """
-
-        try:
-            clean_session_id = UUID(session_id)
-
-        except (ValueError, TypeError):
-
-            print(
-                f"❌ [Session Cleanup] "
-                f"Invalid session_id format: {session_id}"
-            )
-
-            return
-
+    async def close_session_by_id(self, user_id: UUID, session_id: UUID):
         async with SessionLocal() as db:
-
-            try:
-
-                session = await self.session_repo.get_by_id(
-                    db=db,
-                    id=clean_session_id,
-                )
-
+            async with db.begin():  # transaction block for closing
+                session = await self.session_repo.get_by_id(db=db, id=session_id)
                 if not session:
-
-                    print(
-                        f"⚠️ [Session Cleanup] "
-                        f"No session found for ID: {clean_session_id}"
-                    )
-
-                    return
-
-                if session.status == session_model.SessionStatus.closed:
-
-                    print(
-                        f"ℹ️ [Session Cleanup] "
-                        f"Session {clean_session_id} already closed."
-                    )
-
-                    return
-
-                await self.session_repo.close_session_by_id(
-                    db=db,
-                    session=session,
-                )
-
-                print(
-                    f"🔒 [Session Cleanup] "
-                    f"Session {clean_session_id} closed."
-                )
-
-            except Exception as e:
-
-                await db.rollback()
-
-                print(
-                    f"❌ [Session Cleanup Error] "
-                    f"Transaction failed: {e}"
-                )
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+                if session.user_id != user_id:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
+                return await self.session_repo.close_session_by_id(db=db, session_id=session_id)

@@ -7,8 +7,12 @@ class APIServices:
     def __init__(self, endpoint: str):
         self.endpoint = endpoint
 
-    async def Fetching_data(self, request: Request):
-        
+    async def Fetching_data(
+        self,
+        request: Request,
+        endpoint: str | None = None,
+    ):
+
         authorization = request.headers.get("Authorization")
 
         if not authorization:
@@ -18,10 +22,12 @@ class APIServices:
             "Authorization": authorization
         }
 
+        url = endpoint or self.endpoint
+
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                self.endpoint,
-                headers=headers
+                url,
+                headers=headers,
             )
 
         response.raise_for_status()

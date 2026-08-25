@@ -7,6 +7,7 @@ from backend.microservices.auth_services.router import (
     auth_router,
     refresh_token_router,
     user_router,
+    erp_guardian_router,
 )
 
 from backend.microservices.auth_services.models import (
@@ -17,11 +18,9 @@ from backend.microservices.auth_services.models import (
     role_permision_model,
 )
 
-
-
 from backend.helper_functions.database.engine import create_database_engine
 from backend.microservices.auth_services.core.config import settings
-from backend.helper_functions.database import Base
+from backend.helper_functions.database.base import Base
 
 
 # ============================================================
@@ -66,3 +65,4 @@ app = FastAPI(
 app.include_router(user_router.router)
 app.include_router(refresh_token_router.route)
 app.include_router(auth_router.router)
+# app.include_router(erp_guardian_router.router)

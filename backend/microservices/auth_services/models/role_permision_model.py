@@ -1,5 +1,5 @@
 from sqlalchemy import Table, Column, ForeignKey
-from backend.helper_functions.database import Base
+from backend.helper_functions.database.base import Base
 
 
 class role_permissions(Base):

@@ -12,7 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as SQLUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.helper_functions.database import Base
+from backend.helper_functions.database.base import Base
 
 
 class Users(Base):

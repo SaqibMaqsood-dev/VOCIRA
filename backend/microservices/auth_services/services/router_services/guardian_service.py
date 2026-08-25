@@ -4,14 +4,14 @@
 # from sqlalchemy.ext.asyncio import AsyncSession
 
 # from backend.microservices.auth_services.repository.guardian_repo import (
-#     ERPGuardianRepository,
+# ERPGuardianService,
 # )
 
 
 # class ERPGuardianService:
 
 #     def __init__(self):
-#         self.repository = ERPGuardianRepository()
+#         self.repository = ERPGuardianService()
 
 #     async def get_erp_guardian_id(
 #         self,

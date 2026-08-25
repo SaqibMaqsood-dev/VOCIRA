@@ -13,27 +13,6 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 
-class MessageService:
-
-    def __init__(self):
-        self.message_repo = MessageRepository()
-
-    # =========================================================
-    # CREATE
-    # =========================================================
-
-    class MessageService:
-
-        def __init__(self):
-            self.message_repo = MessageRepository()
-
-        from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.microservices.livekit_Rag_services.models import message_model
-from backend.microservices.livekit_Rag_services.models.message_model import (
-    SenderTypeEnum,
-    SourceTypeEnum,
-)
 
 
 class MessageService:

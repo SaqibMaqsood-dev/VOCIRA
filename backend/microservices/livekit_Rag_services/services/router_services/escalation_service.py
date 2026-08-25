@@ -73,6 +73,22 @@ class EslcalationService:
 
         return escalation
 
+    # ---------------- OCCURRED STATS ----------------
+
+    async def get_occurred_escalations(
+        self,
+        db: AsyncSession,
+    ):
+        stats = await self.escalation_repo.get_occurred_escalation_stats(db=db)
+
+        if not stats:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No escalations found",
+            )
+
+        return stats
+
     # ---------------- UPDATE ----------------
 
     async def update_escalation(
@@ -196,4 +212,3 @@ class EslcalationService:
         )
 
         return updated_escalation
-

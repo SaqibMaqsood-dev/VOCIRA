@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import VARCHAR,  DateTime,  func , ForeignKey , Float , text , Integer , Text , Enum, VARCHAR
 from sqlalchemy.orm import Mapped, mapped_column
-from backend.helper_functions.database import Base
+from backend.helper_functions.database.base import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy import Text, Enum
 from backend.microservices.auth_services.models.role_permision_model import role_permissions

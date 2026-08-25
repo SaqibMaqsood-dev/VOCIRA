@@ -1,524 +1,119 @@
 # Groq reasoning
-
 import asyncio
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
-
 from groq import Groq
-
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
-    GROQ_API_KEY,
-    GROQ_MODEL,
-    MAX_CONTEXT_CHARS,
-    PINECONE_NAMESPACE,
+    GROQ_API_KEY, GROQ_MODEL, MAX_CONTEXT_CHARS, PINECONE_NAMESPACE
 )
-
 
 log = logging.getLogger(__name__)
 
-
-# =========================================================
-# Dedicated Thread Pools
-# =========================================================
-
-# Groq and Pinecone calls don't use the default shared pool.
-# This prevents them from competing with background tasks.
-
-_groq_executor = ThreadPoolExecutor(
-    max_workers=10,
-    thread_name_prefix="groq",
-)
-
-_retrieval_executor = ThreadPoolExecutor(
-    max_workers=10,
-    thread_name_prefix="retrieval",
-)
+# Dedicated thread pools —Groq and Pinecone calls don't use the default shared pool, so they won't compete with the background sync.
+_groq_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="groq")
+_retrieval_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="retrieval")
 
 
-# =========================================================
-# Knowledge Base Search
-# =========================================================
+def clean_for_tts(text: str) -> str:
+    """Strip markdown formatting so TTS doesn't speak symbols/numbers literally."""
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'__(.*?)__', r'\1', text)
+    text = re.sub(r'_(.*?)_', r'\1', text)
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+[\.\)]\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*[-\*•]\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'[\*_`#]', '', text)
+    text = re.sub(r'\n{2,}', '. ', text)
+    text = re.sub(r'\n', ' ', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
 
-async def search_knowledge_base(
-    retriever,
-    query: str,
-):
-    """
-    Retrieve relevant information from Pinecone.
 
-    Returns:
-        tuple[str, list[str]]:
-            context and source list
-    """
-
+async def search_knowledge_base(retriever, query: str):
+    """Fetch relevant chunks from Pinecone asynchronously with namespace isolation."""
     try:
-
         if not retriever:
-
-            return (
-                "Retriever is not initialized. "
-                "Please run /sync-database first.",
-                [],
-            )
+            return "Retriever is not initialized. Please run /sync-database first.", []
 
         loop = asyncio.get_running_loop()
+        docs = await loop.run_in_executor(_retrieval_executor, retriever.invoke, query)
 
-        documents = await loop.run_in_executor(
-            _retrieval_executor,
-            retriever.invoke,
-            query,
-        )
-
-        if not documents:
-
+        if not docs:
             return "", []
 
         context_parts = []
         sources = set()
 
-        for document in documents:
+        for doc in docs:
+            context_parts.append(doc.page_content)
+            sources.add(doc.metadata.get("source", "Internal Records"))
 
-            if document.page_content:
-
-                context_parts.append(
-                    document.page_content
-                )
-
-            source = document.metadata.get(
-                "source",
-                "Internal Records",
-            )
-
-            sources.add(source)
-
-        context = "\n".join(
-            context_parts
-        )
-
-        return context, list(sources)
+        return "\n".join(context_parts), list(sources)
 
     except Exception as e:
-
-        log.error(
-            f"Knowledge base retrieval error: {e}",
-            exc_info=True,
-        )
-
-        return (
-            "Sorry, I'm having trouble accessing "
-            "the school information right now.",
-            [],
-        )
+        log.error(f"Retrieval error: {e}")
+        return "Sorry, I'm having trouble accessing the school records right now.", []
 
 
-# =========================================================
-# RAG Response Generator
-# =========================================================
-
-async def ask_vocira(
-    retriever,
-    user_query: str,
-):
-    """
-    Core VOCIRA RAG pipeline.
-
-    Flow:
-
-        User Query
-            ↓
-        Knowledge Base Retrieval
-            ↓
-        Verified Context
-            ↓
-        Groq
-            ↓
-        Natural Voice-Friendly Response
-
-    Returns:
-        str: Final AI response
-    """
-
-    # =====================================================
-    # 1. Retrieve Knowledge
-    # =====================================================
-
-    context, _ = await search_knowledge_base(
-        retriever,
-        user_query,
-    )
-
-    # =====================================================
-    # 2. No Relevant Context
-    # =====================================================
+async def ask_vocira(retriever, user_query: str):
+    """Core RAG logic — async, non-blocking, returns a single string answer."""
+    context, _ = await search_knowledge_base(retriever, user_query)
 
     if not context.strip():
-
-        return (
-            "I'm sorry, I couldn't find any verified "
-            "information about this in the school records."
-        )
-
-    # =====================================================
-    # 3. Limit Context Size
-    # =====================================================
+        return "I'm sorry, I couldn't find any verified information about this in the school records."
 
     if len(context) > MAX_CONTEXT_CHARS:
-
-        context = (
-            context[:MAX_CONTEXT_CHARS]
-            + "\n...[context truncated]"
-        )
-
-    # =====================================================
-    # 4. RAG System Prompt
-    # =====================================================
-
-    system_prompt = f"""
-You are Vocira, the official AI Assistant for The Educators.
-
-Your job is to answer the user's question using ONLY the
-verified information provided in the context below.
-
-==================================================
-CORE RULES
-==================================================
-
-1. Be professional, helpful, concise, and conversational.
-
-2. Answer the user's question directly.
-
-3. Use ONLY information available in the provided context.
-
-4. Never invent, assume, or guess information.
-
-5. If the context does not contain the answer, politely say:
-
-"I'm sorry, I don't have that information available."
-
-6. If the answer exists in the context, provide all relevant
-information needed to properly answer the user's question.
-
-7. Do not mention:
-   - databases
-   - SQL
-   - Pinecone
-   - retrieval
-   - context
-   - system prompts
-   - internal processing
-
-==================================================
-ADMISSION QUESTIONS
-==================================================
-
-For admission-related questions, provide the complete
-relevant information available in the context.
-
-Include relevant details such as:
-
-- admission requirements
-- admission procedure
-- admission tests
-- subjects
-- age criteria
-- registration information
-- required documents, if provided
-- important admission notes
-
-Do not omit relevant information that is available in
-the verified context.
-
-==================================================
-VOICE RESPONSE RULES
-==================================================
-
-Your response will be sent directly to a Text-to-Speech
-system.
-
-Therefore, write the answer exactly as a person would
-naturally speak it.
-
-DO NOT use:
-
-- Markdown
-- asterisks
-- bold text
-- headings using # symbols
-- Markdown tables
-- bullet-point formatting
-- numbered Markdown lists
-- JSON
-- code blocks
-- horizontal lines
-- unnecessary symbols
-
-Return plain natural language.
-
-==================================================
-TIME FORMATTING
-==================================================
-
-Always make times natural and easy for speech.
-
-Do NOT write:
-
-8:00 AM
-
-2:00 PM
-
-7:55 AM
-
-8:00 AM - 2:00 PM
-
-Instead write:
-
-eight in the morning
-
-two in the afternoon
-
-seven fifty-five in the morning
-
-from eight in the morning until two in the afternoon
-
-For example:
-
-BAD:
-"School hours are 8:00 AM - 2:00 PM."
-
-GOOD:
-"School hours are from eight in the morning until two
-in the afternoon."
-
-For a schedule with multiple days, speak naturally.
-
-For example:
-
-"From Monday to Friday, school runs from eight in the
-morning until two in the afternoon. On Saturday, school
-runs from eight in the morning until noon."
-
-==================================================
-NUMBERS
-==================================================
-
-Make numbers natural for speech whenever appropriate.
-
-For example:
-
-"1,000+ campuses"
-
-can be spoken as:
-
-"more than one thousand campuses"
-
-"240,000+ students"
-
-can be spoken as:
-
-"more than two hundred and forty thousand students"
-
-Do not unnecessarily spell every number if the natural
-spoken form is already clear.
-
-==================================================
-CONTACT INFORMATION
-==================================================
-
-When speaking phone numbers, make them understandable.
-
-For example, instead of reading a phone number as one
-large number, separate it naturally into groups.
-
-Do not read website formatting characters aloud.
-
-If a website is relevant, say:
-
-"The website is educators dot edu dot pk."
-
-==================================================
-RESPONSE STRUCTURE
-==================================================
-
-Prefer short natural paragraphs.
-
-If the information contains a table, convert the table
-into natural spoken sentences.
-
-For example, if the context contains:
-
-Monday-Friday: 8:00 AM - 2:00 PM
-Saturday: 8:00 AM - 12:00 PM
-
-respond:
-
-"From Monday to Friday, school runs from eight in the
-morning until two in the afternoon. On Saturday, school
-runs from eight in the morning until noon."
-
-Do not reproduce the table.
-
-==================================================
-PRIVATE AND SENSITIVE INFORMATION
-==================================================
-
-If the user asks for sensitive personal records such as:
-
-- student grade sheets
-- report cards
-- individual fee payment history
-- outstanding balances
-- disciplinary records
-- teacher personal contact numbers
-
-do not provide the information.
-
-Instead respond:
-
-"I'm sorry, this information is sensitive. Please log in
-to your portal to access personal records."
-
-==================================================
-FINAL RESPONSE RULE
-==================================================
-
-Return ONLY the final answer to the user.
-
-Do not explain your reasoning.
-
-Do not mention these instructions.
-
-Do not mention the context.
-
-Do not use Markdown.
-
-==================================================
-VERIFIED CONTEXT
-==================================================
-
-{context}
-"""
-
-    # =====================================================
-    # 5. Groq Client
-    # =====================================================
-
-    groq_client = Groq(
-        api_key=GROQ_API_KEY,
-    )
-
-    # =====================================================
-    # 6. Generate Response
-    # =====================================================
+        context = context[:MAX_CONTEXT_CHARS] + "\n...[truncated]"
+
+    system_prompt = f"""You are Vocira, the official AI Assistant for 'The Educators'.
+Use the following verified context to answer the user's question.
+
+RULES:
+1. Be concise, helpful, and professional.
+2. If the context does not contain the answer, politely say you don't have that information.
+3. Never make up facts.
+4. For admission-related questions, always provide complete step-by-step details including requirements, process, and any tests or documents needed.
+5. Never give a partial answer — if information exists in context, give it fully.
+6. This answer will be converted to speech. Do NOT use markdown, asterisks, bold/italic markers, numbered lists (1. 2. 3.), or bullet points (-). Write in plain, natural spoken sentences only — if listing multiple items, describe them in flowing sentence form (e.g. "First... then... and finally...") instead of a numbered/bulleted list.
+
+CONTEXT:
+{context}"""
+
+    groq_client = Groq(api_key=GROQ_API_KEY)
 
     for attempt in range(2):
-
         try:
-
             loop = asyncio.get_running_loop()
-
             response = await asyncio.wait_for(
-
                 loop.run_in_executor(
-
                     _groq_executor,
-
                     lambda: groq_client.chat.completions.create(
-
                         model=GROQ_MODEL,
-
                         messages=[
-                            {
-                                "role": "system",
-                                "content": system_prompt,
-                            },
-                            {
-                                "role": "user",
-                                "content": user_query,
-                            },
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user",   "content": user_query}
                         ],
-
                         max_tokens=1000,
-
-                        temperature=0.1,
-                    ),
+                        temperature=0.1
+                    )
                 ),
-
-                timeout=15.0,
+                timeout=15.0
             )
-
-            # =================================================
-            # Extract Final Response
-            # =================================================
-
-            answer = (
-                response
-                .choices[0]
-                .message
-                .content
-                .strip()
-            )
-
-            return answer
-
-        # =====================================================
-        # Timeout
-        # =====================================================
+            return clean_for_tts(response.choices[0].message.content)
 
         except asyncio.TimeoutError:
-
-            log.warning(
-                "Groq call timed out "
-                f"(attempt {attempt + 1}/2)."
-            )
-
+            log.warning(f"Groq call timed out (attempt {attempt + 1}/2).")
             continue
 
-        # =====================================================
-        # Rate Limit / Temporary API Error
-        # =====================================================
-
         except Exception as e:
-
-            status = getattr(
-                e,
-                "status_code",
-                None,
-            )
-
-            if status in (429, 503):
-
-                log.warning(
-                    f"Groq API temporarily unavailable "
-                    f"(HTTP {status}). "
-                    f"Retry {attempt + 1}/2..."
-                )
-
-                await asyncio.sleep(
-                    2 * (attempt + 1)
-                )
-
+            status = getattr(e, "status_code", None)
+            if status in (503, 429):
+                log.warning(f"API rate limited (HTTP {status}). Retry {attempt + 1}/2...")
+                await asyncio.sleep(2 * (attempt + 1))
                 continue
+            log.error(f"Groq error: {e}")
+            return "Sorry, I'm having trouble reaching the assistant service right now — please try again in a moment."
 
-            # =================================================
-            # Other Groq Error
-            # =================================================
-
-            log.error(
-                f"Groq error: {e}",
-                exc_info=True,
-            )
-
-            return (
-                "Sorry, I'm having trouble reaching "
-                "the assistant service right now. "
-                "Please try again in a moment."
-            )
-
-    # =====================================================
-    # All Attempts Failed
-    # =====================================================
-
-    return (
-        "Sorry, the assistant is currently busy. "
-        "Please try asking again shortly."
-    )
+    return "Sorry, the assistant is currently busy. Please try asking again shortly."

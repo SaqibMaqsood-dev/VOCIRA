@@ -6,8 +6,24 @@ from uuid import UUID
 import webrtcvad
 from livekit import rtc
 
-from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore import (
-    connect_existing_store,
+from backend.helper_functions.database.session import SessionLocal
+
+from backend.microservices.livekit_Rag_services.core.config import settings
+from backend.microservices.livekit_Rag_services.core.rabitmq import RabbitMQ
+
+from backend.microservices.livekit_Rag_services.models.escalation_model import (
+    Escalation,
+    EscalationStatus,
+)
+from backend.microservices.livekit_Rag_services.models.message_model import (
+    SenderTypeEnum,
+)
+
+from backend.microservices.livekit_Rag_services.services.erp_services.auth_client import (
+    AuthClient,
+)
+from backend.microservices.livekit_Rag_services.services.erp_services.erp_service import (
+    ERPService,
 )
 
 from backend.microservices.livekit_Rag_services.services.groq import (
@@ -15,75 +31,162 @@ from backend.microservices.livekit_Rag_services.services.groq import (
     intent_prompt,
 )
 
-from backend.helper_functions.database import SessionLocal
-
-from backend.microservices.livekit_Rag_services.services.router_services.message_service import (
-    MessageService,
-)
-
-from backend.microservices.livekit_Rag_services.services.text_speech.piper_servies import (
-    tts_converter,
-)
-
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
     dataConverter,
-)
-
-from backend.microservices.livekit_Rag_services.services.rag_engine.query import (
-    ask_vocira,
 )
 
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
     INDEX_NAME,
 )
 
-from backend.microservices.livekit_Rag_services.services.erp_services.auth_client import (
-    AuthClient,
+from backend.microservices.livekit_Rag_services.services.rag_engine.query import (
+    ask_vocira,
 )
 
-from backend.microservices.livekit_Rag_services.services.erp_services.erp_service import (
-    ERPService,
+from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore import (
+    connect_existing_store,
 )
 
-from backend.microservices.livekit_Rag_services.core.config import (
-    settings,
+from backend.microservices.livekit_Rag_services.services.router_services.message_service import (
+    MessageService,
+)
+
+from backend.microservices.livekit_Rag_services.services.router_services.session_service import (
+    SessionService,
+)
+
+from backend.microservices.livekit_Rag_services.services.text_speech.piper_servies import (
+    tts_converter,
 )
 
 
 # =========================================================
-# Service Initialization
+# SERVICES
 # =========================================================
 
 message_service = MessageService()
 
 auth_client = AuthClient(
-    base_url=settings.AUTH_SERVICE_URL,
+    base_url=settings.AUTH_SERVICE_URL
 )
 
 erp_service = ERPService()
 
-
-# =========================================================
-# RAG Retriever
-# =========================================================
-
 retriever = connect_existing_store(
-    index_name=INDEX_NAME,
+    index_name=INDEX_NAME
 )
 
+rabbitmq = RabbitMQ()
+
+session_service = SessionService()
+
 
 # =========================================================
-# ERP Authorization Roles
+# AUTHORIZATION
 # =========================================================
 
 ERP_ALLOWED_ROLES = {
+    "parent",
     "guardian",
     "admin",
 }
 
+ADMIN_HANDOFF_INTENT = "ADMIN_HANDOFF"
+
 
 # =========================================================
-# Consume LiveKit Audio
+# HELPER
+# =========================================================
+
+def normalize_role(role):
+    """
+    Normalize role returned from Auth Service.
+
+    Supports:
+
+        "parent"
+
+    and:
+
+        {"name": "parent"}
+    """
+
+    if isinstance(role, dict):
+        role = role.get("name")
+
+    if role is None:
+        return None
+
+    return str(role).strip().lower()
+
+
+# =========================================================
+# READ LIVEKIT USER INFORMATION
+# =========================================================
+
+def extract_participant_identity(participant):
+    """
+    Extract user_id and metadata from LiveKit participant.
+
+    IMPORTANT:
+    LiveKit metadata is used only to identify the VOCIRA user.
+
+    It is NOT trusted as the final authorization source.
+
+    Final authorization is performed through Auth Service.
+    """
+
+    try:
+        metadata = json.loads(
+            participant.metadata or "{}"
+        )
+
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+    except (json.JSONDecodeError, TypeError):
+        print(
+            f"⚠️ Invalid metadata from participant "
+            f"{participant.identity}: "
+            f"{participant.metadata}"
+        )
+
+        metadata = {}
+
+    raw_user_id = metadata.get("user_id")
+
+    user_id = None
+
+    if raw_user_id:
+
+        raw_user_id = str(raw_user_id).strip()
+
+        if raw_user_id.lower() not in {
+            "",
+            "guest",
+            "none",
+            "null",
+            "anonymous",
+        }:
+
+            try:
+
+                user_id = UUID(raw_user_id)
+
+            except (ValueError, TypeError):
+
+                print(
+                    f"⚠️ Invalid VOCIRA user_id: "
+                    f"{raw_user_id}"
+                )
+
+                user_id = None
+
+    return metadata, user_id
+
+
+# =========================================================
+# CONSUME LIVEKIT AUDIO
 # =========================================================
 
 async def consume_audio(
@@ -95,116 +198,44 @@ async def consume_audio(
     audio_source,
 ):
     """
-    Consume audio from a LiveKit participant.
+    Consume LiveKit participant audio.
 
-    Access model:
+    Flow:
 
-        Guest:
-            user_id = None
-            RAG = allowed
-            ERP = denied
-
-        Guardian:
-            user_id = VOCIRA UUID
-            RAG = allowed
-            ERP = allowed
-
-        Admin:
-            user_id = VOCIRA UUID
-            RAG = allowed
-            ERP = allowed
-
-    Important:
-        participant.identity is never used as the VOCIRA user ID.
-        The authenticated user ID is obtained from participant metadata.
+        LiveKit Audio
+            ↓
+        VAD
+            ↓
+        STT
+            ↓
+        process_voice_intent()
     """
 
-    # =========================================================
-    # 1. Read Participant Metadata
-    # =========================================================
+    # =====================================================
+    # 1. PARTICIPANT IDENTITY
+    # =====================================================
 
-    try:
-        metadata = json.loads(
-            participant.metadata or "{}"
-        )
-
-    except (
-        json.JSONDecodeError,
-        TypeError,
-    ):
-        print(
-            f"⚠️ Invalid metadata from participant "
-            f"{participant.identity}: "
-            f"{participant.metadata}"
-        )
-
-        metadata = {}
-
-    raw_user_id = metadata.get("user_id")
-
-    user_type = metadata.get(
-        "type",
-        "guest",
+    metadata, user_id = extract_participant_identity(
+        participant
     )
 
-    user_type = str(
-        user_type
+    # -----------------------------------------------------
+    # Metadata role is informational only.
+    # -----------------------------------------------------
+
+    metadata_role = normalize_role(
+        metadata.get("role")
+    )
+
+    metadata_type = str(
+        metadata.get("type", "guest")
     ).strip().lower()
 
-    # =========================================================
-    # 2. Validate User ID
-    # =========================================================
+    # =====================================================
+    # 2. LOG IDENTITY
+    # =====================================================
 
-    user_id = None
-
-    if raw_user_id is not None:
-
-        raw_user_id = str(
-            raw_user_id
-        ).strip()
-
-        if raw_user_id.lower() not in {
-            "",
-            "guest",
-            "none",
-            "null",
-            "anonymous",
-        }:
-
-            try:
-                user_id = UUID(
-                    raw_user_id
-                )
-
-            except (
-                ValueError,
-                TypeError,
-                AttributeError,
-            ):
-                print(
-                    f"⚠️ Invalid user_id received: "
-                    f"{raw_user_id}"
-                )
-
-                print(
-                    "⚠️ Treating participant as guest."
-                )
-
-                user_id = None
-                user_type = "guest"
-
-    # =========================================================
-    # 3. Guest Normalization
-    # =========================================================
-
-    if user_id is None:
-        user_type = "guest"
-
-    # =========================================================
-    # 4. Participant Logging
-    # =========================================================
-
-    print("=" * 60)
+    print("=" * 70)
 
     print(
         f"👤 Participant Identity : "
@@ -217,8 +248,13 @@ async def consume_audio(
     )
 
     print(
-        f"👤 User Type            : "
-        f"{user_type}"
+        f"👤 Metadata Role        : "
+        f"{metadata_role}"
+    )
+
+    print(
+        f"👤 Metadata Type        : "
+        f"{metadata_type}"
     )
 
     print(
@@ -227,17 +263,18 @@ async def consume_audio(
     )
 
     print(
-        f"🔐 ERP Allowed          : "
-        f"{user_type in ERP_ALLOWED_ROLES and user_id is not None}"
+        "🔐 Auth Source          : "
+        "Auth Service"
     )
 
-    print("=" * 60)
+    print("=" * 70)
 
-    # =========================================================
-    # 5. Validate Audio Track
-    # =========================================================
+    # =====================================================
+    # 3. VALIDATE AUDIO TRACK
+    # =====================================================
 
     if not track:
+
         print(
             "⚠️ No audio track received."
         )
@@ -245,11 +282,11 @@ async def consume_audio(
         return
 
     try:
-        stream = rtc.AudioStream(
-            track
-        )
+
+        stream = rtc.AudioStream(track)
 
     except Exception as error:
+
         print(
             f"❌ Failed to create AudioStream: "
             f"{error}"
@@ -257,9 +294,9 @@ async def consume_audio(
 
         return
 
-    # =========================================================
-    # 6. Voice Activity Detection Configuration
-    # =========================================================
+    # =====================================================
+    # 4. VAD
+    # =====================================================
 
     vad = webrtcvad.Vad(2)
 
@@ -281,32 +318,43 @@ async def consume_audio(
 
     vad_frame_size = None
 
-    # =========================================================
-    # 7. Consume Audio Stream
-    # =========================================================
+    # =====================================================
+    # 5. AUDIO LOOP
+    # =====================================================
 
     try:
 
         async for event in stream:
 
+            # -------------------------------------------------
+            # ADMIN HANDOFF CHECK
+            # -------------------------------------------------
+
+            if getattr(
+                service_handle,
+                "_admin_handoff_requested",
+                False,
+            ):
+
+                print(
+                    "📞 [Admin Handoff] "
+                    "AI audio processing stopped."
+                )
+
+                break
+
             frame = event.frame
 
             # -------------------------------------------------
-            # Initialize Audio Properties
+            # INITIALIZE AUDIO
             # -------------------------------------------------
 
             if sample_rate is None:
 
-                sample_rate = (
-                    frame.sample_rate
-                )
+                sample_rate = frame.sample_rate
 
                 vad_frame_size = (
-                    int(
-                        sample_rate
-                        * 30
-                        / 1000
-                    )
+                    int(sample_rate * 30 / 1000)
                     * 2
                     * frame.num_channels
                 )
@@ -321,14 +369,24 @@ async def consume_audio(
                 frame.data
             )
 
-            # -------------------------------------------------
-            # Process Complete VAD Frames
-            # -------------------------------------------------
+            # =================================================
+            # PROCESS VAD FRAMES
+            # =================================================
 
-            while (
-                len(audio_buffer)
-                >= vad_frame_size
-            ):
+            while len(audio_buffer) >= vad_frame_size:
+
+                if getattr(
+                    service_handle,
+                    "_admin_handoff_requested",
+                    False,
+                ):
+
+                    print(
+                        "📞 [Admin Handoff] "
+                        "Stopping VAD processing."
+                    )
+
+                    return
 
                 audio_chunk = bytes(
                     audio_buffer[
@@ -340,14 +398,16 @@ async def consume_audio(
                     :vad_frame_size
                 ]
 
-                speech_detected = await asyncio.to_thread(
-                    vad.is_speech,
-                    audio_chunk,
-                    sample_rate,
+                speech_detected = (
+                    await asyncio.to_thread(
+                        vad.is_speech,
+                        audio_chunk,
+                        sample_rate,
+                    )
                 )
 
                 # =================================================
-                # User Is Speaking
+                # SPEECH
                 # =================================================
 
                 if speech_detected:
@@ -367,13 +427,8 @@ async def consume_audio(
                             f"{participant.identity}"
                         )
 
-                        # -------------------------------------------------
-                        # Barge-In
-                        # -------------------------------------------------
-
                         if (
-                            service_handle
-                            ._is_agent_speaking
+                            service_handle._is_agent_speaking
                         ):
 
                             service_handle._speech_generation += 1
@@ -381,12 +436,12 @@ async def consume_audio(
                             print(
                                 "✋ [Barge-In] "
                                 "User interrupted agent. "
-                                f"Generation: "
+                                f"Generation="
                                 f"{service_handle._speech_generation}"
                             )
 
                 # =================================================
-                # User Stopped Speaking
+                # SILENCE
                 # =================================================
 
                 elif is_speaking:
@@ -397,16 +452,9 @@ async def consume_audio(
                         audio_chunk
                     )
 
-                    # -------------------------------------------------
-                    # Speech Finished
-                    # -------------------------------------------------
-
                     if (
-                        silence_frames
-                        >= SILENCE_LIMIT
-                        or len(
-                            voice_accumulation
-                        )
+                        silence_frames >= SILENCE_LIMIT
+                        or len(voice_accumulation)
                         > MAX_ACCUMULATION_BYTES
                     ):
 
@@ -415,32 +463,27 @@ async def consume_audio(
                         )
 
                         print(
-                            "🛑 [Speech Finished] "
+                            f"🛑 [Speech Finished] "
                             f"Audio bytes: "
                             f"{len(captured_audio)}"
                         )
 
-                        # -------------------------------------------------
-                        # Start New Generation
-                        # -------------------------------------------------
-
                         service_handle._speech_generation += 1
 
                         generation_id = (
-                            service_handle
-                            ._speech_generation
+                            service_handle._speech_generation
                         )
 
-                        # -------------------------------------------------
-                        # Process User Speech
-                        # -------------------------------------------------
+                        # -----------------------------------------
+                        # CREATE BACKGROUND TASK
+                        # -----------------------------------------
 
                         task = asyncio.create_task(
                             process_voice_intent(
                                 chunk=captured_audio,
                                 stt=stt,
                                 user_id=user_id,
-                                user_type=user_type,
+                                user_type=metadata_type,
                                 session_id=session_id,
                                 audio_source=audio_source,
                                 service_handle=service_handle,
@@ -453,14 +496,8 @@ async def consume_audio(
                         )
 
                         task.add_done_callback(
-                            service_handle
-                            ._background_tasks
-                            .discard
+                            service_handle._background_tasks.discard
                         )
-
-                        # -------------------------------------------------
-                        # Reset Speech State
-                        # -------------------------------------------------
 
                         voice_accumulation.clear()
 
@@ -479,6 +516,7 @@ async def consume_audio(
     finally:
 
         try:
+
             await stream.aclose()
 
         except Exception as error:
@@ -489,11 +527,10 @@ async def consume_audio(
             )
 
 
-
-
 # =========================================================
-# Process Voice Intent
+# VOICE PROCESSING PIPELINE
 # =========================================================
+
 async def process_voice_intent(
     chunk: bytes,
     stt,
@@ -504,11 +541,52 @@ async def process_voice_intent(
     service_handle,
     generation: int,
 ):
+    """
+    Complete voice processing pipeline.
+
+    Flow:
+
+        Audio
+          ↓
+        STT
+          ↓
+        Session Validation
+          ↓
+        Save User Message
+          ↓
+        Intent Router
+          ↓
+        ┌─────────────────────────┐
+        │ ADMIN_HANDOFF           │
+        └─────────────────────────┘
+          ↓
+        ┌─────────────────────────┐
+        │ ERP_QUERY               │
+        │                         │
+        │ Auth Service            │
+        │      ↓                  │
+        │ Role Validation         │
+        │      ↓                  │
+        │ ERP Account Mapping     │
+        │      ↓                  │
+        │ ERP Service             │
+        └─────────────────────────┘
+          ↓
+        RAG
+          ↓
+        Save AI Message
+          ↓
+        TTS
+          ↓
+        LiveKit
+    """
 
     try:
 
+        ai_response_text = None
+
         # =====================================================
-        # 1. Speech -> Text
+        # 1. STT
         # =====================================================
 
         user_query = await asyncio.to_thread(
@@ -517,6 +595,7 @@ async def process_voice_intent(
         )
 
         if not user_query or not user_query.strip():
+
             return
 
         user_query = user_query.strip()
@@ -526,35 +605,101 @@ async def process_voice_intent(
         )
 
         # =====================================================
-        # 2. Database sender type
+        # 2. HANDOFF CHECK
         # =====================================================
 
-        db_sender_type = (
-            "user"
-            if user_type != "agent"
-            else "agent"
-        )
+        if getattr(
+            service_handle,
+            "_admin_handoff_requested",
+            False,
+        ):
+
+            print(
+                "📞 [Admin Handoff] "
+                "Ignoring AI processing."
+            )
+
+            return
 
         # =====================================================
-        # 3. Database transaction
+        # 3. DATABASE
         # =====================================================
 
         async with SessionLocal() as db:
 
             # =================================================
-            # Save user message
+            # SESSION VALIDATION
             # =================================================
 
-            await message_service.create_message(
-                db=db,
-                content=user_query,
-                user_id=user_id,
-                usertype=db_sender_type,
-                session_id=session_id,
+            retries = 3
+
+            for attempt in range(retries):
+
+                try:
+
+                    await session_service.get_session_by_id(
+                        db=db,
+                        user_id=user_id,
+                        id_value=session_id,
+                    )
+
+                    if attempt > 0:
+
+                        print(
+                            f"✅ [Session Check] "
+                            f"Session found after retry "
+                            f"{attempt}"
+                        )
+
+                    break
+
+                except Exception as e:
+
+                    if attempt < retries - 1:
+
+                        print(
+                            f"⚠️ [Session Check Failed] "
+                            f"{e} | Retrying..."
+                        )
+
+                        await asyncio.sleep(
+                            0.2
+                        )
+
+                    else:
+
+                        print(
+                            f"❌ [Session Check Failed] "
+                            f"{e} | Aborting."
+                        )
+
+                        return
+
+            # =================================================
+            # SAVE USER MESSAGE
+            # =================================================
+
+            user_message = (
+                await message_service.create_message(
+                    db=db,
+                    content=user_query,
+                    user_id=user_id,
+                    usertype=SenderTypeEnum.user.value,
+                    session_id=session_id,
+                )
+            )
+
+            print(
+                "💬 [Message Created]"
+            )
+
+            print(
+                f"   Message ID: "
+                f"{user_message.id}"
             )
 
             # =================================================
-            # 4. Intent Router
+            # INTENT ROUTER
             # =================================================
 
             router_prompt = (
@@ -580,175 +725,521 @@ async def process_voice_intent(
                 f"🧭 [Intent]: {intent}"
             )
 
-            ai_response_text = ""
-
             # =================================================
-            # 5. ERP QUERY
+            # ADMIN HANDOFF
             # =================================================
 
-            if "ERP_QUERY" in intent:
+            if ADMIN_HANDOFF_INTENT in intent:
+
+                print(
+                    "📞 [Route]: ADMIN HANDOFF"
+                )
+
+                # -------------------------------------------------
+                # SECURITY
+                # -------------------------------------------------
+
+                if not user_id:
+
+                    ai_response_text = (
+                        "You must be logged in with "
+                        "an authorized account to "
+                        "contact an admin."
+                    )
+
+                    await message_service.create_message(
+                        db=db,
+                        content=ai_response_text,
+                        user_id=user_id,
+                        usertype=SenderTypeEnum.ai.value,
+                        session_id=session_id,
+                    )
+
+                    return
+
+                # -------------------------------------------------
+                # CREATE ESCALATION
+                # -------------------------------------------------
+
+                escalation = Escalation(
+                    user_id=user_id,
+                    message_id=user_message.id,
+                    status=EscalationStatus.pending,
+                )
+
+                db.add(escalation)
+
+                await db.commit()
+
+                await db.refresh(
+                    escalation
+                )
+
+                print(
+                    "🚨 [Escalation Created]"
+                )
+
+                print(
+                    f"   Escalation ID : "
+                    f"{escalation.id}"
+                )
+
+                # -------------------------------------------------
+                # RABBITMQ
+                # -------------------------------------------------
+
+                rabbitmq_payload = {
+
+                    "event": "admin.call.handoff",
+
+                    "call_id": str(
+                        session_id
+                    ),
+
+                    "session_id": str(
+                        session_id
+                    ),
+
+                    "room_name":
+                        f"room-{session_id}",
+
+                    "caller_id": str(
+                        user_id
+                    ),
+
+                    "escalation_id": str(
+                        escalation.id
+                    ),
+
+                    "message_id": str(
+                        user_message.id
+                    ),
+
+                    "message": user_query,
+                }
+
+                try:
+
+                    await rabbitmq.publish_admin_handoff(
+                        rabbitmq_payload
+                    )
+
+                    print(
+                        "🔔 [RabbitMQ] "
+                        "Admin handoff published."
+                    )
+
+                except Exception as notification_error:
+
+                    print(
+                        "⚠️ [RabbitMQ] "
+                        "Failed to publish admin handoff."
+                    )
+
+                    print(
+                        notification_error
+                    )
+
+                    traceback.print_exc()
+
+                # -------------------------------------------------
+                # LIVEKIT HANDOFF
+                # -------------------------------------------------
+
+                await service_handle.request_admin_handoff(
+                    user_id=user_id,
+                    user_type=user_type,
+                    session_id=session_id,
+                    user_query=user_query,
+                    escalation_id=escalation.id,
+                    message_id=user_message.id,
+                )
+
+                return
+
+            # =================================================
+            # ERP QUERY
+            # =================================================
+
+                        # =================================================
+            # ERP QUERY
+            # =================================================
+
+            elif "ERP_QUERY" in intent:
 
                 print(
                     "🏫 [Route]: ERP Pipeline"
                 )
 
                 # =================================================
-                # Security check
+                # SECURITY MODEL
+                # =================================================
+                #
+                # LiveKit metadata is NOT trusted for authorization.
+                #
+                # LiveKit gives us:
+                #
+                #     VOCIRA user_id
+                #
+                # Then:
+                #
+                #     VOCIRA user_id
+                #            ↓
+                #       Auth Service
+                #            ↓
+                #       role + parent_id
+                #            ↓
+                #       authorization
+                #            ↓
+                #       ERP Service
+                #
                 # =================================================
 
-                if (
-                    not user_id
-                    or user_type not in ERP_ALLOWED_ROLES
-                ):
+                try:
 
-                    print(
-                        f"🚫 [ERP Access Denied] "
-                        f"user_type={user_type}, "
-                        f"user_id={user_id}"
-                    )
+                    # -------------------------------------------------
+                    # 1. USER ID REQUIRED
+                    # -------------------------------------------------
 
-                    ai_response_text = (
-                        "You are not authorized to access "
-                        "ERP information. "
-                        "Please log in with an authorized account."
-                    )
+                    if not user_id:
 
-                else:
+                        print(
+                            "🚫 [ERP Auth] "
+                            "No VOCIRA user_id."
+                        )
 
-                    try:
+                        ai_response_text = (
+                            "You are not authorized to access "
+                            "ERP information. Please log in "
+                            "with an authorized account."
+                        )
 
-                        # =============================================
-                        # Get user from Auth Service
-                        # =============================================
+                    else:
 
-                        user = await auth_client.get_user(
-                            user_id=user_id
+                        print("=" * 70)
+
+                        print(
+                            "🔎 [ERP AUTHENTICATION]"
                         )
 
                         print(
-                            f"👤 [Auth User]: {user}"
+                            f"VOCIRA User ID : "
+                            f"{user_id}"
                         )
-
-                        # =============================================
-                        # Get actual role
-                        # =============================================
-
-                        auth_role = user.get("role")
-
-                        if isinstance(auth_role, dict):
-
-                            auth_role = auth_role.get("name")
-
-                        if auth_role:
-
-                            auth_role = str(
-                                auth_role
-                            ).strip().lower()
 
                         print(
-                            f"🔐 [Auth Role]: {auth_role}"
+                            f"LiveKit Type   : "
+                            f"{user_type}"
                         )
 
-                        # =============================================
-                        # Second security check
-                        # =============================================
+                        print(
+                            "Auth Source    : "
+                            "Auth Service"
+                        )
 
-                        if (
-                            auth_role
-                            not in ERP_ALLOWED_ROLES
-                        ):
+                        print("=" * 70)
+
+                        # =================================================
+                        # 2. GET COMPLETE USER FROM AUTH SERVICE
+                        # =================================================
+
+                        auth_user = (
+                            await auth_client.get_internal_user(
+                                vocira_user_id=user_id
+                            )
+                        )
+
+                        print("=" * 70)
+
+                        print(
+                            "🔎 [AUTH SERVICE RESPONSE]"
+                        )
+
+                        print(
+                            f"Requested User ID : "
+                            f"{user_id}"
+                        )
+
+                        print(
+                            f"Auth User         : "
+                            f"{auth_user}"
+                        )
+
+                        print(
+                            f"Response Type     : "
+                            f"{type(auth_user)}"
+                        )
+
+                        print("=" * 70)
+
+                        # =================================================
+                        # 3. VALIDATE AUTH RESPONSE
+                        # =================================================
+
+                        if not auth_user:
 
                             print(
-                                f"🚫 [ERP Access Denied] "
-                                f"Auth role={auth_role}"
+                                "🚫 [ERP Auth] "
+                                "Auth Service returned no user."
                             )
 
                             ai_response_text = (
-                                "You are not authorized "
-                                "to access ERP information."
+                                "I could not verify your account. "
+                                "Please log in again."
+                            )
+
+                        elif not isinstance(
+                            auth_user,
+                            dict,
+                        ):
+
+                            print(
+                                "🚫 [ERP Auth] "
+                                "Unexpected Auth Service response."
+                            )
+
+                            ai_response_text = (
+                                "I could not verify your account. "
+                                "Please log in again."
                             )
 
                         else:
 
-                            # =========================================
-                            # Get ERP parent ID
-                            # =========================================
+                            # =================================================
+                            # 4. VERIFY RETURNED USER ID
+                            # =================================================
 
-                            erp_parent_id = user.get(
-                                "parent_id"
+                            auth_user_id = (
+                                auth_user.get("user_id")
                             )
 
-                            if not erp_parent_id:
+                            if str(auth_user_id) != str(user_id):
+
+                                print(
+                                    "🚫 [ERP Auth] "
+                                    "Auth Service returned a "
+                                    "different user_id."
+                                )
+
+                                print(
+                                    f"Requested : {user_id}"
+                                )
+
+                                print(
+                                    f"Returned  : {auth_user_id}"
+                                )
 
                                 ai_response_text = (
-                                    "Your VOCIRA account is not "
-                                    "linked to an ERP account."
+                                    "I could not verify your account. "
+                                    "Please log in again."
                                 )
 
                             else:
 
-                                print(
-                                    f"🏫 [ERP Parent ID]: "
-                                    f"{erp_parent_id}"
+                                # =================================================
+                                # 5. GET AUTH ROLE
+                                # =================================================
+
+                                auth_role = normalize_role(
+                                    auth_user.get("role")
                                 )
 
-                                # =====================================
-                                # Query ERP
-                                # =====================================
+                                print("=" * 70)
 
-                                erp_data = (
-                                    await erp_service.handle_query(
-                                        user_query=user_query,
-                                        erp_parent_id=erp_parent_id,
-                                    )
+                                print(
+                                    "🔐 [AUTHORIZATION CHECK]"
                                 )
 
                                 print(
-                                    f"🏫 [ERP Data]: "
-                                    f"{erp_data}"
+                                    f"VOCIRA User ID : "
+                                    f"{user_id}"
                                 )
 
-                                # =====================================
-                                # ERP data -> natural language
-                                # =====================================
+                                print(
+                                    f"LiveKit Type   : "
+                                    f"{user_type}"
+                                )
 
-                                response_prompt = (
-                                    human_text.build_response_prompt(
-                                        user_query=user_query,
-                                        response=erp_data,
+                                print(
+                                    f"Auth Role      : "
+                                    f"{auth_role}"
+                                )
+
+                                print(
+                                    f"Allowed Roles  : "
+                                    f"{ERP_ALLOWED_ROLES}"
+                                )
+
+                                print(
+                                    f"Role Allowed   : "
+                                    f"{auth_role in ERP_ALLOWED_ROLES}"
+                                )
+
+                                print("=" * 70)
+
+                                # =================================================
+                                # 6. ROLE AUTHORIZATION
+                                # =================================================
+
+                                if (
+                                    auth_role
+                                    not in ERP_ALLOWED_ROLES
+                                ):
+
+                                    print(
+                                        "🚫 [ERP Auth] "
+                                        "User role is not authorized."
                                     )
-                                )
 
-                                converter_response = (
-                                    await dataConverter(
-                                        prompt=response_prompt
+                                    ai_response_text = (
+                                        "You are not authorized "
+                                        "to access ERP information."
                                     )
-                                )
 
-                                ai_response_text = (
-                                    converter_response
-                                    .choices[0]
-                                    .message
-                                    .content
-                                    .strip()
-                                )
+                                else:
 
-                    except Exception as erp_error:
+                                    print(
+                                        "✅ [ERP Auth] "
+                                        "User role authorized."
+                                    )
 
-                        print(
-                            f"❌ [ERP Pipeline Error]: "
-                            f"{erp_error}"
-                        )
+                                    # =================================================
+                                    # 7. GET ERP PARENT / GUARDIAN ID
+                                    # =================================================
 
-                        traceback.print_exc()
+                                    erp_parent_id = (
+                                        auth_user.get(
+                                            "parent_id"
+                                        )
+                                    )
 
-                        ai_response_text = (
-                            "Sorry, I was unable to retrieve "
-                            "your ERP information right now."
-                        )
+                                    if not erp_parent_id:
+
+                                        print(
+                                            "🚫 [ERP Mapping] "
+                                            "No parent_id found."
+                                        )
+
+                                        print(
+                                            f"Auth User Keys: "
+                                            f"{list(auth_user.keys())}"
+                                        )
+
+                                        ai_response_text = (
+                                            "Your VOCIRA account is not "
+                                            "linked to an ERP account."
+                                        )
+
+                                    else:
+
+                                        print("=" * 70)
+
+                                        print(
+                                            "🔗 [ERP ACCOUNT MAPPING]"
+                                        )
+
+                                        print(
+                                            f"VOCIRA User ID : "
+                                            f"{user_id}"
+                                        )
+
+                                        print(
+                                            f"Auth Role      : "
+                                            f"{auth_role}"
+                                        )
+
+                                        print(
+                                            f"ERP Parent ID  : "
+                                            f"{erp_parent_id}"
+                                        )
+
+                                        print("=" * 70)
+
+                                        # =================================================
+                                        # 8. SEND QUERY TO ERP SERVICE
+                                        # =================================================
+
+                                        print(
+                                            "🏫 [ERP QUERY]"
+                                        )
+
+                                        print(
+                                            f"User Query     : "
+                                            f"{user_query}"
+                                        )
+
+                                        print(
+                                            f"ERP Parent ID  : "
+                                            f"{erp_parent_id}"
+                                        )
+
+                                        erp_data = (
+                                            await erp_service.handle_query(
+                                                user_query=user_query,
+                                                erp_parent_id=erp_parent_id,
+                                            )
+                                        )
+
+                                        print(
+                                            "🏫 [ERP DATA]"
+                                        )
+
+                                        print(
+                                            erp_data
+                                        )
+
+                                        # =================================================
+                                        # 9. CONVERT ERP DATA TO HUMAN RESPONSE
+                                        # =================================================
+
+                                        response_prompt = (
+                                            human_text.build_response_prompt(
+                                                user_query=user_query,
+                                                response=erp_data,
+                                            )
+                                        )
+
+                                        converter_response = (
+                                            await dataConverter(
+                                                prompt=response_prompt
+                                            )
+                                        )
+
+                                        ai_response_text = (
+                                            converter_response
+                                            .choices[0]
+                                            .message
+                                            .content
+                                            .strip()
+                                        )
+
+                                        print(
+                                            "🤖 [ERP AI RESPONSE]"
+                                        )
+
+                                        print(
+                                            ai_response_text
+                                        )
+
+                except Exception as erp_error:
+
+                    print(
+                        "❌ [ERP Pipeline Error]"
+                    )
+
+                    print(
+                        f"Error: {erp_error}"
+                    )
+
+                    traceback.print_exc()
+
+                    ai_response_text = (
+                        "Sorry, I was unable to retrieve "
+                        "your ERP information right now."
+                    )
 
             # =================================================
-            # 6. RAG QUERY
+            # RAG QUERY
             # =================================================
 
             else:
@@ -765,28 +1256,74 @@ async def process_voice_intent(
                 if ai_response_text:
 
                     ai_response_text = (
-                        ai_response_text
-                        .strip()
+                        ai_response_text.strip()
                     )
 
             # =================================================
-            # 7. Save AI response
+            # HANDOFF CHECK
             # =================================================
 
+            if getattr(
+                service_handle,
+                "_admin_handoff_requested",
+                False,
+            ):
+
+                print(
+                    "📞 [Admin Handoff] "
+                    "Stopping AI response."
+                )
+
+                return
+
+            # =================================================
+            # EMPTY RESPONSE
+            # =================================================
+
+            if not ai_response_text:
+
+                print(
+                    "⚠️ [AI] Empty response."
+                )
+
+                return
+
             print(
-                f"🤖 [AI]: {ai_response_text}"
+                f"🤖 [AI]: "
+                f"{ai_response_text}"
             )
+
+            # =================================================
+            # SAVE AI MESSAGE
+            # =================================================
 
             await message_service.create_message(
                 db=db,
                 content=ai_response_text,
                 user_id=user_id,
-                usertype="agent",
+                usertype=SenderTypeEnum.ai.value,
                 session_id=session_id,
             )
 
         # =====================================================
-        # 8. Text -> Speech
+        # 12. FINAL HANDOFF CHECK
+        # =====================================================
+
+        if getattr(
+            service_handle,
+            "_admin_handoff_requested",
+            False,
+        ):
+
+            print(
+                "📞 [TTS] "
+                "Admin handoff active."
+            )
+
+            return
+
+        # =====================================================
+        # 13. TTS
         # =====================================================
 
         audio_bytes = await asyncio.to_thread(
@@ -797,14 +1334,14 @@ async def process_voice_intent(
         if not audio_bytes:
 
             print(
-                "⚠️ [TTS] No audio bytes generated, "
-                "skipping voice playback."
+                "⚠️ [TTS] "
+                "No audio bytes generated."
             )
 
             return
 
         # =====================================================
-        # 9. Wait for LiveKit track
+        # 14. WAIT FOR LIVEKIT TRACK
         # =====================================================
 
         try:
@@ -818,21 +1355,29 @@ async def process_voice_intent(
 
             print(
                 "⚠️ [LiveKit Stream] "
-                "Agent track not ready after 5s — "
-                "aborting voice send."
+                "Agent track not ready."
             )
 
             return
 
         # =====================================================
-        # 10. Serialized playback
+        # 15. SERIALIZED TTS
         # =====================================================
 
         async with service_handle._tts_lock:
 
-            # =================================================
-            # Check stale generation
-            # =================================================
+            if getattr(
+                service_handle,
+                "_admin_handoff_requested",
+                False,
+            ):
+
+                print(
+                    "📞 [TTS] "
+                    "Admin handoff active."
+                )
+
+                return
 
             if (
                 generation
@@ -840,145 +1385,171 @@ async def process_voice_intent(
             ):
 
                 print(
-                    f"⏭️ [LiveKit Stream] "
-                    f"Skipping stale response "
-                    f"(gen {generation} superseded by "
-                    f"{service_handle._speech_generation})."
+                    "⏭️ [TTS] "
+                    "Stale generation."
                 )
 
                 return
 
-            # =================================================
-            # Check LiveKit room
-            # =================================================
-
-            if (
+            if not (
                 audio_source
                 and service_handle.room
                 and service_handle.room.isconnected()
             ):
 
                 print(
-                    "🔊 [LiveKit Stream] "
-                    "Shipping audio frames down "
-                    "the WebRTC track..."
+                    "⚠️ [TTS] "
+                    "Audio source or room unavailable."
                 )
 
-                sample_rate = 22050
-                num_channels = 1
-                bytes_per_sample = 2
+                return
 
-                samples_per_channel = int(
-                    sample_rate * 20 / 1000
-                )
+            # =================================================
+            # AUDIO CONFIGURATION
+            # =================================================
 
-                chunk_size = (
-                    samples_per_channel
-                    * num_channels
-                    * bytes_per_sample
-                )
+            sample_rate = 22050
 
-                service_handle._is_agent_speaking = True
+            num_channels = 1
 
-                try:
+            bytes_per_sample = 2
 
-                    for i in range(
-                        0,
-                        len(audio_bytes),
-                        chunk_size,
+            samples_per_channel = int(
+                sample_rate * 20 / 1000
+            )
+
+            chunk_size = (
+                samples_per_channel
+                * num_channels
+                * bytes_per_sample
+            )
+
+            service_handle._is_agent_speaking = True
+
+            # =================================================
+            # PLAY TTS
+            # =================================================
+
+            try:
+
+                for i in range(
+                    0,
+                    len(audio_bytes),
+                    chunk_size,
+                ):
+
+                    # -----------------------------------------
+                    # HANDOFF
+                    # -----------------------------------------
+
+                    if getattr(
+                        service_handle,
+                        "_admin_handoff_requested",
+                        False,
                     ):
 
-                        # =============================================
-                        # Check interruption
-                        # =============================================
-
-                        if (
-                            generation
-                            != service_handle._speech_generation
-                        ):
-
-                            print(
-                                "✋ [LiveKit Stream] "
-                                "Interrupted mid-stream. "
-                                "Stopping playback."
-                            )
-
-                            break
-
-                        # =============================================
-                        # Check room
-                        # =============================================
-
-                        if (
-                            not service_handle.room
-                            or not service_handle.room.isconnected()
-                        ):
-
-                            print(
-                                "🛑 [LiveKit Stream] "
-                                "Room disconnected mid-stream."
-                            )
-
-                            break
-
-                        frame_chunk = audio_bytes[
-                            i:i + chunk_size
-                        ]
-
-                        # =============================================
-                        # Pad incomplete frame
-                        # =============================================
-
-                        if len(frame_chunk) < chunk_size:
-
-                            frame_chunk += (
-                                b"\x00"
-                                * (
-                                    chunk_size
-                                    - len(frame_chunk)
-                                )
-                            )
-
-                        audio_frame = rtc.AudioFrame(
-                            data=frame_chunk,
-                            sample_rate=sample_rate,
-                            num_channels=num_channels,
-                            samples_per_channel=(
-                                samples_per_channel
-                            ),
+                        print(
+                            "📞 [TTS] "
+                            "Admin handoff requested."
                         )
 
-                        try:
+                        break
 
-                            await audio_source.capture_frame(
-                                audio_frame
+                    # -----------------------------------------
+                    # GENERATION
+                    # -----------------------------------------
+
+                    if (
+                        generation
+                        != service_handle._speech_generation
+                    ):
+
+                        print(
+                            "✋ [TTS] "
+                            "Playback interrupted."
+                        )
+
+                        break
+
+                    # -----------------------------------------
+                    # ROOM
+                    # -----------------------------------------
+
+                    if not (
+                        service_handle.room
+                        and service_handle.room.isconnected()
+                    ):
+
+                        print(
+                            "🛑 [TTS] "
+                            "Room disconnected."
+                        )
+
+                        break
+
+                    # -----------------------------------------
+                    # AUDIO CHUNK
+                    # -----------------------------------------
+
+                    frame_chunk = audio_bytes[
+                        i:i + chunk_size
+                    ]
+
+                    # -----------------------------------------
+                    # PAD LAST FRAME
+                    # -----------------------------------------
+
+                    if len(frame_chunk) < chunk_size:
+
+                        frame_chunk += (
+                            b"\x00"
+                            * (
+                                chunk_size
+                                - len(frame_chunk)
                             )
+                        )
 
-                        except Exception as frame_error:
+                    # -----------------------------------------
+                    # LIVEKIT FRAME
+                    # -----------------------------------------
 
-                            print(
-                                f"⚠️ [Stream Warning] "
-                                f"Frame submission failed: "
-                                f"{frame_error}"
-                            )
+                    audio_frame = rtc.AudioFrame(
+                        data=frame_chunk,
+                        sample_rate=sample_rate,
+                        num_channels=num_channels,
+                        samples_per_channel=(
+                            samples_per_channel
+                        ),
+                    )
 
-                            break
+                    # -----------------------------------------
+                    # SEND FRAME
+                    # -----------------------------------------
 
-                finally:
+                    try:
 
-                    service_handle._is_agent_speaking = False
+                        await audio_source.capture_frame(
+                            audio_frame
+                        )
 
-                print(
-                    "✅ [LiveKit Stream] "
-                    "Audio generation stream completed."
-                )
+                    except Exception as frame_error:
 
-            else:
+                        print(
+                            f"⚠️ [TTS] "
+                            f"Frame submission failed: "
+                            f"{frame_error}"
+                        )
 
-                print(
-                    "⚠️ [LiveKit Stream] "
-                    "audio_source or room unavailable."
-                )
+                        break
+
+            finally:
+
+                service_handle._is_agent_speaking = False
+
+            print(
+                "✅ [TTS] "
+                "Audio generation completed."
+            )
 
     except Exception:
 
