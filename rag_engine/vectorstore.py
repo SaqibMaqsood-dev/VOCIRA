@@ -55,6 +55,14 @@ def _build_vector_store_sync(chunks):
     Safe swap pattern: TEMP index poori tarah build aur verify hone tak
     production index (INDEX_NAME) ko chhua tak nahi jata, isliye live
     /ask traffic ke liye koi outage window nahi banta."""
+
+    if not chunks:
+        raise RuntimeError(
+            "assemble_knowledge_base() returned 0 chunks — nothing to upload. "
+            "Check PDF_PATH/TEXT_FILES_PATH have files and urls.txt scraping succeeded "
+            "before running the sync."
+        )
+
     log.info("Initializing embedding model...")
     embeddings = get_embeddings()
     pc         = Pinecone(api_key=PINECONE_API_KEY)
@@ -65,6 +73,16 @@ def _build_vector_store_sync(chunks):
         pc.create_index(name=INDEX_NAME, dimension=EMBEDDING_DIM, metric="cosine", spec=index_spec)
         wait_for_index(pc, INDEX_NAME)
         upload_to_pinecone(chunks, embeddings, INDEX_NAME)
+
+        # verify that the vectors actually landed — first-time creation had
+        # no verification before, which is how the index went live empty.
+        stats = pc.Index(INDEX_NAME).describe_index_stats()
+        if stats.get("total_vector_count", 0) == 0:
+            raise RuntimeError(
+                f"Index '{INDEX_NAME}' was created but 0 vectors were uploaded. "
+                "Upload silently failed — check embeddings/Pinecone credentials."
+            )
+        log.info(f"Production index verified with {stats.get('total_vector_count')} vectors.")
         return INDEX_NAME
 
     log.info("Existing index found. Building staging index (zero downtime)...")

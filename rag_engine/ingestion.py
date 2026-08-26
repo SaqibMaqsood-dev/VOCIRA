@@ -25,7 +25,9 @@ async def assemble_knowledge_base():
         pdf_loader = PyPDFDirectoryLoader(PDF_PATH)
         pdf_docs = await asyncio.to_thread(pdf_loader.load)
         all_docs.extend(pdf_docs)
-        log.info(f"PDFs loaded from {PDF_PATH}")
+        log.info(f"PDFs loaded from {PDF_PATH}: {len(pdf_docs)} pages")
+    else:
+        log.warning(f"No PDFs found at {PDF_PATH} — skipping PDF ingestion.")
 
     # 2. Load Text Files — same reason to_thread 
     if os.path.exists(TEXT_FILES_PATH) and os.listdir(TEXT_FILES_PATH):
@@ -34,7 +36,9 @@ async def assemble_knowledge_base():
         )
         text_docs = await asyncio.to_thread(text_loader.load)
         all_docs.extend(text_docs)
-        log.info(f"Text files loaded from {TEXT_FILES_PATH}")
+        log.info(f"Text files loaded from {TEXT_FILES_PATH}: {len(text_docs)} files")
+    else:
+        log.warning(f"No text files found at {TEXT_FILES_PATH} — skipping text ingestion.")
 
     # 3. Parallel Web Scraping
     if os.path.exists(URLS_FILE_PATH):
@@ -48,6 +52,8 @@ async def assemble_knowledge_base():
                 futures = [loop.run_in_executor(executor, get_dynamic_data, url) for url in urls]
                 results = await asyncio.gather(*futures)
 
+            scraped_count = 0
+            failed_urls = []
             for url, html in zip(urls, results):
                 if html:
                     soup = BeautifulSoup(html, "html.parser")
@@ -58,7 +64,24 @@ async def assemble_knowledge_base():
                         page_content=clean_text,
                         metadata={"source": url, "type": "web_live"}
                     ))
-            log.info("All URLs processed.")
+                    scraped_count += 1
+                else:
+                    failed_urls.append(url)
+
+            log.info(f"URL scraping: {scraped_count}/{len(urls)} succeeded.")
+            if failed_urls:
+                log.warning(f"Failed to scrape {len(failed_urls)} URL(s): {failed_urls}")
+        else:
+            log.warning(f"{URLS_FILE_PATH} exists but contains no URLs.")
+    else:
+        log.warning(f"No urls file found at {URLS_FILE_PATH} — skipping web scraping.")
+
+    if not all_docs:
+        log.error(
+            "assemble_knowledge_base() loaded ZERO documents from PDFs, text files, "
+            "and URLs combined. The knowledge base sync will produce an empty index."
+        )
+        return []
 
     # 4. Chunking — this is also CPU-bound work for large document sets,
     # so we send it into to_thread, so that the event loop stays responsive
@@ -69,5 +92,10 @@ async def assemble_knowledge_base():
         separators=["\n\n", "\n", ".", " "]
     )
     chunks = await asyncio.to_thread(splitter.split_documents, all_docs)
-    log.info(f"Total chunks ready: {len(chunks)}")
+
+    if not chunks:
+        log.error(f"Loaded {len(all_docs)} document(s) but splitter produced 0 chunks — check document content.")
+    else:
+        log.info(f"Total chunks ready: {len(chunks)}")
+
     return chunks

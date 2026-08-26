@@ -20,7 +20,13 @@ _driver_path_cache = None
 def _get_driver_path():
     global _driver_path_cache
     if _driver_path_cache is None:
-        _driver_path_cache = ChromeDriverManager().install()
+        try:
+            _driver_path_cache = ChromeDriverManager().install()
+        except Exception:
+            # Don't cache a failure — leave it None so the next call retries
+            # instead of permanently failing every scrape for the process lifetime.
+            log.exception("ChromeDriverManager().install() failed — is Chrome installed and is network access to the driver download host allowed?")
+            raise
     return _driver_path_cache
 
 
@@ -57,7 +63,7 @@ def get_dynamic_data(url: str):
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
         except Exception:
-            pass
+            log.warning(f"Timed out waiting for <body> on {url} — proceeding anyway.")
 
         # Step 2: loading JavaScript content
         time.sleep(4)
@@ -72,12 +78,19 @@ def get_dynamic_data(url: str):
                 EC.presence_of_element_located((By.TAG_NAME, "p"))
             )
         except Exception:
-            pass
+            log.warning(f"Timed out waiting for <p> content on {url} — page may have little/no text.")
 
-        return driver.page_source
+        page_source = driver.page_source
 
-    except Exception as e:
-        log.error(f"Scraping Error for {url}: {e}")
+        if not page_source or len(page_source.strip()) < 200:
+            log.warning(f"Suspiciously short page source ({len(page_source or '')} chars) for {url} — likely blocked, JS-only shell, or bot detection.")
+
+        return page_source
+
+    except Exception:
+        # log.exception captures the full traceback — log.error(f"...{e}") was
+        # swallowing the real cause (e.g. driver crash, timeout type, selector issue).
+        log.exception(f"Scraping Error for {url}")
         return None
 
     finally:
