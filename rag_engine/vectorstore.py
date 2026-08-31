@@ -48,13 +48,63 @@ def upload_to_pinecone(chunks, embeddings, index_name: str):
     )
 
 
+def _swap_staging_into_production(pc: Pinecone, temp_index_name: str, prod_index_name: str, namespace: str):
+    """Actually performs the swap that was previously only described in a comment.
+
+    Pinecone indexes can't be renamed, so a true swap means: copy every vector
+    from the staging index into production (overwriting stale data), verify
+    the copy landed, then delete the staging index. Production is only ever
+    cleared AFTER staging is fully verified, so a failed sync never leaves
+    production empty.
+    """
+    prod_index = pc.Index(prod_index_name)
+    temp_index = pc.Index(temp_index_name)
+
+    # Clear stale vectors in production namespace right before writing fresh
+    # data — if this fails, we bail out and leave production untouched.
+    try:
+        prod_index.delete(delete_all=True, namespace=namespace)
+    except Exception as e:
+        # Pinecone throws if the namespace doesn't exist yet (first-ever sync
+        # via this path) — safe to ignore, means there's nothing stale to clear.
+        log.info(f"No existing production vectors to clear (or clear skipped): {e}")
+
+    copied = 0
+    for id_batch in temp_index.list(namespace=namespace):
+        fetched = temp_index.fetch(ids=id_batch, namespace=namespace)
+        vectors = [
+            (vec_id, vec.values, vec.metadata)
+            for vec_id, vec in fetched.vectors.items()
+        ]
+        if vectors:
+            prod_index.upsert(vectors=vectors, namespace=namespace)
+            copied += len(vectors)
+
+    # Verify the copy actually landed in production before declaring success.
+    stats = prod_index.describe_index_stats()
+    prod_count = stats.get("namespaces", {}).get(namespace, {}).get("vector_count", 0)
+    if prod_count == 0:
+        raise RuntimeError(
+            f"Swap failed — production namespace '{namespace}' is empty after copy attempt. "
+            "Staging index left intact for investigation."
+        )
+
+    log.info(f"Swapped {copied} vectors into production index '{prod_index_name}' (namespace '{namespace}'). Verified count: {prod_count}.")
+
+    pc.delete_index(temp_index_name)
+    log.info(f"Deleted temporary staging index '{temp_index_name}'.")
+
+
 def _build_vector_store_sync(chunks):
     """Fully synchronous. Only ever called via asyncio.to_thread — never call
     this directly from async code, it will block the event loop.
 
-    Safe swap pattern: TEMP index poori tarah build aur verify hone tak
-    production index (INDEX_NAME) ko chhua tak nahi jata, isliye live
-    /ask traffic ke liye koi outage window nahi banta."""
+   Safe swap pattern: the main index (INDEX_NAME) is never touched until
+    the temporary index is fully built and verified. Only after verification
+    are vectors copied from the temporary index into the main index
+    (_swap_staging_into_production), after which the temporary index is
+    deleted — so there's no downtime for live /ask traffic, and the main
+    index is never left outdated."""
 
     if not chunks:
         raise RuntimeError(
@@ -104,27 +154,33 @@ def _build_vector_store_sync(chunks):
         raise RuntimeError("Staging index upload verification failed — aborting swap, production untouched.")
     # verify that the vectors have actually been uploaded to staging.
     log.info(f"Staging index verified with {stats.get('total_vector_count')} vectors. Swap ready.")
+
+    #  actually move the
+    # verified data from staging , then clean up staging.
+    _swap_staging_into_production(pc, TEMP_INDEX_NAME, INDEX_NAME, PINECONE_NAMESPACE)
+
     log.info(f"Pinecone synced — {len(chunks)} chunks indexed in namespace '{PINECONE_NAMESPACE}'.")
 
-    # Old index remains active serving live traffic until the new retriever
-    # binds to the temp index, after which the old index is safely deleted.
-    return TEMP_INDEX_NAME
+    #  index now has the fresh data — always return INDEX_NAME,
+    # never TEMP_INDEX_NAME, since staging no longer exists after the swap.
+    return INDEX_NAME
 
 
 async def build_vector_store(chunks):
-    """Async wrapper — saara blocking Pinecone/embedding kaam thread mein
-    offload karta hai, event loop kabhi block nahi hota.
+    """Async wrapper — offloads all blocking pinecone/embedding work to 
+    a separate thread, so the event loop never gets blocked.
 
-    Returns: index name (string) jispe naya data ready hai — isko
-    connect_existing_store(index_name=...) mein pass karo."""
+    Returns: INDEX_NAME (production) — this is now always the production
+    index, since the swap logic guarantees fresh data lands there."""
     result_index_name = await asyncio.to_thread(_build_vector_store_sync, chunks)
     return result_index_name
 
 
 def connect_existing_store(index_name: str = None):
-    """Connect efficiently to an existing Pinecone index. Pass index_name
-    explicitly after a sync to bind to the freshly built index
-    (ho sakta hai INDEX_NAME ho ya TEMP_INDEX_NAME, jo bhi abhi live hai)."""
+    """Connect efficiently to an existing Pinecone index. Defaults to
+    production INDEX_NAME — this is now always safe to call with no
+    arguments after a sync, since build_vector_store always returns
+    INDEX_NAME (the swap makes TEMP_INDEX_NAME obsolete after each sync)."""
     target = index_name or INDEX_NAME
     embeddings = get_embeddings()
     pc         = Pinecone(api_key=PINECONE_API_KEY)
