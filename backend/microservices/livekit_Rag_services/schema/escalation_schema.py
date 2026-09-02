@@ -1,43 +1,32 @@
-from pydantic import BaseModel, Field
-from typing import Optional
-from enum import Enum
+from pydantic import BaseModel
 from datetime import datetime
 from uuid import UUID
+from enum import Enum
 
 
 class EscalationStatus(str, Enum):
-    pending   = "pending"
-    open      = "open"
-    customer_waiting = "customer_waiting"
-    resolved  = "resolved"
-    closed    = "closed"
+    pending = "pending"
+    resolved = "resolved"
 
 
 class CreateEscalation(BaseModel):
-    status          : Optional[EscalationStatus]       =    EscalationStatus.pending
-    assigned_admin  : Optional[int]    = Field(default =    None , description  =   "Admin assigned to handle escalation" )
-    
+    status: EscalationStatus = EscalationStatus.pending
 
-    
 
 class EscalationResponse(BaseModel):
-    id              : UUID
-    user_id         : UUID
-    message_id      : UUID
-    status          : EscalationStatus
-    # assigned_admin  : Optional[UUID] = None
-    created_at      : datetime
-    class Config    :
-        from_attributes = True  
-
-
-
-
-class EscalationPatch(BaseModel):
-    status          : Optional[EscalationStatus] = None
-    assigned_admin  : Optional[int] = None
-    message_id      : Optional[UUID] = None
+    id: UUID
+    user_id: UUID
+    message_id: UUID
+    status: EscalationStatus
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
+
+class EscalationPatch(BaseModel):
+    status: EscalationStatus | None = None
+    message_id: UUID | None = None
+
+    class Config:
+        from_attributes = True

@@ -6,6 +6,7 @@ from backend.helper_functions.database.session import get_db
 from backend.microservices.livekit_Rag_services.models import escalation_model
 from backend.microservices.livekit_Rag_services.models  import session_model
 from backend.microservices.livekit_Rag_services.models import message_model
+from backend.helper_functions.database import Base
 
 # =========================================================
 # ALEMBIC CONFIG

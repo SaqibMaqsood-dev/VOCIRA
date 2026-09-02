@@ -11,10 +11,8 @@ from uuid import uuid4 , UUID
 
 class EscalationStatus(str , enum.Enum):
     pending = "pending"
-    open    = "open"
-    customer_waiting = "customer_waiting"
     resolved   = "resolved"
-    closed     = "closed"
+    
 
 
 class Escalation(Base):

@@ -61,12 +61,13 @@ class LivekitRoomServices:
         self.human_has_joined = False
         self.admin_has_joined = False
 
-        self._admin_handoff_requested = False
-        self._escalation_created = False
+        # =====================================================
+        # HANDOFF STATE
+        # =====================================================
 
-        # =====================================================
-        # HANDOFF INFORMATION
-        # =====================================================
+        self._admin_handoff_requested = False
+        self._admin_handoff_completed = False
+        self._escalation_created = False
 
         self._admin_handoff_user_id = None
         self._admin_handoff_session_id = None
@@ -99,6 +100,12 @@ class LivekitRoomServices:
         # =====================================================
 
         self._shutdown_event = asyncio.Event()
+
+        # =====================================================
+        # SESSION CLOSE STATE
+        # =====================================================
+
+        self._session_closed = False
 
         # =====================================================
         # TTS / SPEECH STATE
@@ -209,21 +216,15 @@ class LivekitRoomServices:
 
         elif participant_type == "guest":
 
-            identity = (
-                f"guest-{room_name}"
-            )
+            identity = f"guest-{room_name}"
 
         elif participant_type == "admin":
 
-            identity = (
-                f"admin-{self.user_id}"
-            )
+            identity = f"admin-{self.user_id}"
 
         else:
 
-            identity = (
-                f"user-{self.user_id}"
-            )
+            identity = f"user-{self.user_id}"
 
         # =====================================================
         # TOKEN
@@ -256,6 +257,91 @@ class LivekitRoomServices:
         ).to_jwt()
 
     # =========================================================
+    # CLOSE SESSION
+    # =========================================================
+
+    async def _close_session(
+        self,
+        session_id: UUID,
+    ):
+
+        if self._session_closed:
+
+            print(
+                f"ℹ️ [Session] "
+                f"Session already processed for closure: "
+                f"{session_id}"
+            )
+
+            return
+
+        print("=" * 70)
+
+        print(
+            "🔴 [Worker] Closing session..."
+        )
+
+        print(
+            f"🆔 Session ID: {session_id}"
+        )
+
+        print(
+            f"👤 Worker User ID: {self.user_id}"
+        )
+
+        print("=" * 70)
+
+        try:
+
+            # ---------------------------------------------------------
+            # CONVERT USER ID
+            # ---------------------------------------------------------
+
+            worker_user_id = None
+
+            if self.user_id:
+
+                worker_user_id = UUID(
+                    str(self.user_id)
+                )
+
+            # ---------------------------------------------------------
+            # CLOSE SESSION
+            # ---------------------------------------------------------
+
+            await self.ss_service.close_session_by_id(
+                session_id=session_id,
+                user_id=worker_user_id,
+            )
+
+            self._session_closed = True
+
+            print(
+                f"✅ [Worker] "
+                f"Session successfully closed: "
+                f"{session_id}"
+            )
+
+        except Exception as error:
+
+            print(
+                "❌ [Worker] "
+                "Failed to close session:"
+            )
+
+            print(
+                f"   Session ID : {session_id}"
+            )
+
+            print(
+                f"   User ID    : {self.user_id}"
+            )
+
+            print(
+                f"   Error      : {error}"
+            )
+
+    # =========================================================
     # CONNECT WORKER
     # =========================================================
 
@@ -279,6 +365,7 @@ class LivekitRoomServices:
         self.admin_has_joined = False
 
         self._admin_handoff_requested = False
+        self._admin_handoff_completed = False
         self._escalation_created = False
 
         self._admin_handoff_user_id = None
@@ -288,6 +375,8 @@ class LivekitRoomServices:
         self._escalation_id = None
 
         self._intentional_disconnect = False
+
+        self._session_closed = False
 
         self._shutdown_event.clear()
         self._track_ready.clear()
@@ -475,7 +564,7 @@ class LivekitRoomServices:
                 return
 
             # =================================================
-            # AUTHENTICATED USER / PARENT
+            # AUTHENTICATED USER
             # =================================================
 
             if (
@@ -504,7 +593,7 @@ class LivekitRoomServices:
                 return
 
             # =================================================
-            # UNKNOWN PARTICIPANT
+            # UNKNOWN
             # =================================================
 
             print(
@@ -590,6 +679,7 @@ class LivekitRoomServices:
             # =================================================
 
             if not self.room:
+
                 return
 
             humans_in_room = [
@@ -755,22 +845,29 @@ class LivekitRoomServices:
 
         finally:
 
-            await self.cleanup()
+            # =================================================
+            # CLOSE DATABASE SESSION
+            # =================================================
 
-            try:
+            if not self._admin_handoff_completed:
 
-                await self.ss_service.close_session_by_id(
+                await self._close_session(
                     session_id=session_id,
-                    user_id=self.user_id
-
                 )
 
-            except Exception as error:
+            else:
 
                 print(
-                    f"⚠️ [Session Cleanup Error] "
-                    f"{error}"
+                    "👨‍💼 [Worker] "
+                    "Admin handoff completed. "
+                    "Skipping automatic session closure."
                 )
+
+            # =================================================
+            # CLEAN RESOURCES
+            # =================================================
+
+            await self.cleanup()
 
     # =========================================================
     # EXPLICIT END CALL
@@ -867,13 +964,9 @@ class LivekitRoomServices:
         self._admin_handoff_requested = True
 
         self._admin_handoff_user_id = user_id
-
         self._admin_handoff_session_id = session_id
-
         self._admin_handoff_user_type = user_type
-
         self._admin_handoff_message_id = message_id
-
         self._escalation_id = escalation_id
 
         self._escalation_created = (
@@ -881,7 +974,6 @@ class LivekitRoomServices:
         )
 
         self._speech_generation += 1
-
         self._is_agent_speaking = False
 
         print(
@@ -942,9 +1034,18 @@ class LivekitRoomServices:
             "Admin successfully joined."
         )
 
-        self._speech_generation += 1
+        # =====================================================
+        # MARK HANDOFF AS COMPLETED
+        # =====================================================
 
+        self._admin_handoff_completed = True
+
+        self._speech_generation += 1
         self._is_agent_speaking = False
+
+        # =====================================================
+        # UNPUBLISH AI VOICE
+        # =====================================================
 
         try:
 
@@ -986,6 +1087,10 @@ class LivekitRoomServices:
             )
 
             print(error)
+
+        # =====================================================
+        # DISCONNECT AI WORKER
+        # =====================================================
 
         try:
 

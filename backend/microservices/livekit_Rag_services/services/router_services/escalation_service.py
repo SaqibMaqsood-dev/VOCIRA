@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,18 +7,25 @@ from backend.microservices.livekit_Rag_services.repository.escalation_repository
     EsclationRepository,
 )
 
+from backend.microservices.livekit_Rag_services.schema.escalation_schema import (
+    CreateEscalation,
+    EscalationPatch,
+)
 
-class EslcalationService:
+
+class EscalationService:
 
     def __init__(self):
         self.escalation_repo = EsclationRepository()
 
-    # ---------------- CREATE ----------------
+    # ============================================================
+    # CREATE
+    # ============================================================
 
     async def create_escalation(
         self,
         db: AsyncSession,
-        data,
+        data: CreateEscalation,
     ):
         escalation = await self.escalation_repo.create(
             data=data,
@@ -31,7 +40,9 @@ class EslcalationService:
 
         return escalation
 
-    # ---------------- GET ALL ----------------
+    # ============================================================
+    # GET ALL
+    # ============================================================
 
     async def get_all_escalations(
         self,
@@ -39,26 +50,20 @@ class EslcalationService:
         limit: int = 10,
         skip: int = 0,
     ):
-        escalations = await self.escalation_repo.get_multi(
+        return await self.escalation_repo.get_multi(
             db=db,
             limit=limit,
             skip=skip,
         )
 
-        if not escalations:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No escalations found",
-            )
-
-        return escalations
-
-    # ---------------- GET BY ID ----------------
+    # ============================================================
+    # GET BY ID
+    # ============================================================
 
     async def get_escalation_by_id(
         self,
         db: AsyncSession,
-        id_value: int,
+        id_value: UUID,
     ):
         escalation = await self.escalation_repo.get_escalation_by_id(
             db=db,
@@ -73,61 +78,35 @@ class EslcalationService:
 
         return escalation
 
-    # ---------------- OCCURRED STATS ----------------
+    # ============================================================
+    # OCCURRED ESCALATION STATS
+    # ============================================================
 
     async def get_occurred_escalations(
         self,
         db: AsyncSession,
     ):
-        stats = await self.escalation_repo.get_occurred_escalation_stats(db=db)
+        stats = await self.escalation_repo.get_occurred_escalation_stats(
+            db=db,
+        )
 
         if not stats:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No escalations found",
-            )
+            return {
+                "occurred_escalations": 0,
+                "occurred_percentage": 0,
+            }
 
         return stats
 
-    # ---------------- UPDATE ----------------
-
-    async def update_escalation(
-        self,
-        db: AsyncSession,
-        id_value: int,
-        request,
-    ):
-        escalation = await self.escalation_repo.get_escalation_by_id(
-            db=db,
-            id_value=id_value,
-        )
-
-        if not escalation:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No escalation found with id {id_value}",
-            )
-
-        data = {
-            "user_id": request.user_id,
-            "message_id": request.message_id,
-        }
-
-        updated_escalation = await self.escalation_repo.update_escalation(
-            db=db,
-            escalation=escalation,
-            data=data,
-        )
-
-        return updated_escalation
-
-    # ---------------- PARTIAL UPDATE ----------------
+    # ============================================================
+    # PARTIAL UPDATE
+    # ============================================================
 
     async def partial_update_escalation(
         self,
         db: AsyncSession,
-        id_value: int,
-        request,
+        id_value: UUID,
+        request: EscalationPatch,
     ):
         escalation = await self.escalation_repo.get_escalation_by_id(
             db=db,
@@ -151,20 +130,20 @@ class EslcalationService:
                 detail="No fields provided for update",
             )
 
-        updated_escalation = await self.escalation_repo.update_escalation(
+        return await self.escalation_repo.update_escalation(
             db=db,
             escalation=escalation,
             data=data,
         )
 
-        return updated_escalation
-
-    # ---------------- DELETE ----------------
+    # ============================================================
+    # DELETE
+    # ============================================================
 
     async def delete_escalation(
         self,
         db: AsyncSession,
-        id_value: int,
+        id_value: UUID,
     ):
         escalation = await self.escalation_repo.get_escalation_by_id(
             db=db,
@@ -174,7 +153,7 @@ class EslcalationService:
         if not escalation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No escalation found with id {id_value}",
+                detail=f"Escalation not found with id {id_value}",
             )
 
         await self.escalation_repo.delete_escalation(
@@ -183,32 +162,5 @@ class EslcalationService:
         )
 
         return {
-            "message": f"Escalation deleted with id {id_value}"
+            "message": f"Escalation deleted with id {id_value}",
         }
-
-    # ---------------- ASSIGN ----------------
-
-    async def assign_escalation(
-        self,
-        db: AsyncSession,
-        id_value: int,
-        admin_id: int,
-    ):
-        escalation = await self.escalation_repo.get_escalation_by_id(
-            db=db,
-            id_value=id_value,
-        )
-
-        if not escalation:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Escalation not found",
-            )
-
-        updated_escalation = await self.escalation_repo.assign_escalation(
-            db=db,
-            escalation=escalation,
-            admin_id=admin_id,
-        )
-
-        return updated_escalation

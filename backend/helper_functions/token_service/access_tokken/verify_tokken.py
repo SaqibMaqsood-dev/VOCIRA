@@ -15,6 +15,7 @@ def verify_jwt(token, credentials_exception):
         email = payload.get("sub")
         user_id = payload.get("user_id")
         parent_id = payload.get("parent_id")
+        role = payload.get("role")
 
         if email is None or user_id is None:
             raise credentials_exception
@@ -22,10 +23,9 @@ def verify_jwt(token, credentials_exception):
         return TokenData(
             username=email,
             user_id=user_id,
+            role=role,
             parent_id=parent_id,
         )
 
     except InvalidTokenError:
         raise credentials_exception
-
-    

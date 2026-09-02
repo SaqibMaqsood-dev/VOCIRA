@@ -1,18 +1,18 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.microservices.livekit_Rag_services.services.router_services.escalation_service import (
-    EslcalationService,
-)
+from backend.helper_functions.database.session import get_db
 
 from backend.microservices.livekit_Rag_services.schema.escalation_schema import (
     CreateEscalation,
-    EscalationPatch
-    
+    EscalationPatch,
 )
 
-from backend.helper_functions.database.session import get_db
-
+from backend.microservices.livekit_Rag_services.services.router_services.escalation_service import (
+    EscalationService,
+)
 
 
 router = APIRouter(
@@ -20,7 +20,8 @@ router = APIRouter(
     tags=["Escalations"],
 )
 
-escalation_service = EslcalationService()
+
+escalation_service = EscalationService()
 
 
 # ============================================================
@@ -38,6 +39,21 @@ async def create_escalation(
     return await escalation_service.create_escalation(
         db=db,
         data=data,
+    )
+
+
+# ============================================================
+# GET OCCURRED ESCALATIONS / STATS
+# ============================================================
+
+@router.get(
+    "/stats/occurred",
+)
+async def get_occurred_escalations(
+    db: AsyncSession = Depends(get_db),
+):
+    return await escalation_service.get_occurred_escalations(
+        db=db,
     )
 
 
@@ -68,46 +84,12 @@ async def get_all_escalations(
     "/{id_value}",
 )
 async def get_escalation_by_id(
-    id_value: int,
+    id_value: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     return await escalation_service.get_escalation_by_id(
         db=db,
         id_value=id_value,
-    )
-
-
-# ============================================================
-# GET OCCURRED ESCALATIONS / STATS
-# ============================================================
-
-@router.get(
-    "/stats/occurred",
-)
-async def get_occurred_escalations(
-    db: AsyncSession = Depends(get_db),
-):
-    return await escalation_service.get_occurred_escalations(
-        db=db,
-    )
-
-
-# ============================================================
-# FULL UPDATE
-# ============================================================
-
-@router.put(
-    "/{id_value}",
-)
-async def update_escalation(
-    id_value: int,
-    request: CreateEscalation,
-    db: AsyncSession = Depends(get_db),
-):
-    return await escalation_service.update_escalation(
-        db=db,
-        id_value=id_value,
-        request=request,
     )
 
 
@@ -119,7 +101,7 @@ async def update_escalation(
     "/{id_value}",
 )
 async def partial_update_escalation(
-    id_value: int,
+    id_value: UUID,
     request: EscalationPatch,
     db: AsyncSession = Depends(get_db),
 ):
@@ -138,29 +120,10 @@ async def partial_update_escalation(
     "/{id_value}",
 )
 async def delete_escalation(
-    id_value: int,
+    id_value: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     return await escalation_service.delete_escalation(
         db=db,
         id_value=id_value,
-    )
-
-
-# ============================================================
-# ASSIGN ESCALATION TO ADMIN
-# ============================================================
-
-@router.patch(
-    "/{id_value}/assign/{admin_id}",
-)
-async def assign_escalation(
-    id_value: int,
-    admin_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    return await escalation_service.assign_escalation(
-        db=db,
-        id_value=id_value,
-        admin_id=admin_id,
     )

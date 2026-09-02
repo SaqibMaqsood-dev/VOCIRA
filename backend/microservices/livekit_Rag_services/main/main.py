@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from huggingface_hub import login
 
 from backend.helper_functions.database import (create_database_engine , Base)
-
+from backend.microservices.livekit_Rag_services.routers.admin_route.admin_route import (
+    router as admin_router,
+)
 
 
 from backend.microservices.livekit_Rag_services.core.config import (
@@ -202,3 +204,6 @@ app.include_router(
 app.include_router(
     notification_router
 )
+
+
+app.include_router(admin_router)

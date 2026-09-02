@@ -19,6 +19,10 @@ from backend.helper_functions.token_service.access_tokken.get_current_user impor
 )
 
 
+# =========================================================
+# ROUTER
+# =========================================================
+
 router = APIRouter(
     prefix="/sessions",
     tags=["Sessions"],
@@ -43,7 +47,7 @@ async def create_my_session(
     """
     Create a session for the authenticated user.
 
-    The session is committed to PostgreSQL BEFORE
+    The session is committed to PostgreSQL before
     its ID is published to RabbitMQ.
     """
 
@@ -56,6 +60,7 @@ async def create_my_session(
 # =========================================================
 # GET MY SESSIONS
 # =========================================================
+
 @router.get(
     "/",
     response_model=List[session_schema.SessionResponse],
@@ -66,10 +71,10 @@ async def get_my_sessions(
     limit: int = 10,
     skip: int = 0,
 ):
-    print("======================================")
+    print("=" * 70)
     print("🔐 CURRENT USER:", current_user)
     print("🆔 CURRENT USER ID:", current_user.user_id)
-    print("======================================")
+    print("=" * 70)
 
     sessions = await ss_service.get_user_sessions(
         db=db,
@@ -78,15 +83,20 @@ async def get_my_sessions(
         skip=skip,
     )
 
-    print("📦 SESSIONS RETURNED:", len(sessions))
+    print(
+        f"📦 [Sessions] Returned: {len(sessions)}"
+    )
 
     return sessions
+
 
 # =========================================================
 # DASHBOARD STATS
 # =========================================================
 
-@router.get("/stats")
+@router.get(
+    "/stats",
+)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(current_user),
@@ -127,11 +137,30 @@ async def get_session_with_id(
 )
 async def close_my_session(
     id: UUID,
-    db: AsyncSession = Depends(get_db),
     current_user=Depends(current_user),
 ):
+    """
+    Close the authenticated user's session.
+
+    The SessionService creates its own database transaction.
+
+    When closed:
+
+        status  -> closed
+        end_at  -> current timestamp
+
+    The existing handler is preserved:
+
+        ai
+        OR
+        admin
+
+    Duration is calculated from:
+
+        end_at - start_at
+    """
+
     return await ss_service.close_session_by_id(
-        db=db,
         user_id=current_user.user_id,
         session_id=id,
     )
