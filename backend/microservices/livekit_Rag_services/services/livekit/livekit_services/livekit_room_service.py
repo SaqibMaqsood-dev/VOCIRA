@@ -61,6 +61,10 @@ class LivekitRoomServices:
         self.human_has_joined = False
         self.admin_has_joined = False
 
+        # Greeting sirf EK baar - warna har participant event par
+        # dobara bol deta
+        self._greeted = False
+
         self._admin_handoff_requested = False
         self._escalation_created = False
 
@@ -264,6 +268,46 @@ class LivekitRoomServices:
                 json.dumps(metadata)
             )
         ).to_jwt()
+
+    # =========================================================
+    # GREETING
+    # =========================================================
+
+    GREETING_TEXT = (
+        "Assalam o Alaikum, and welcome to The Educators. "
+        "I am Vocira, your school assistant. How may I help you today?"
+    )
+
+    async def greet_once(self):
+        """
+        Insaan ke room mein aate hi ek baar salaam karein.
+
+        Pehle koi greeting thi hi nahi - agent chup baitha rehta tha
+        aur user ko pata hi nahi chalta tha ke wo juda bhi hai ya nahi.
+        """
+
+        if self._greeted:
+            return
+
+        self._greeted = True
+
+        try:
+            await voice_pipeline.speak_text(
+                service_handle=self,
+                audio_source=self.agent_source,
+                text=self.GREETING_TEXT,
+            )
+        except Exception as error:
+            print(f"⚠️ [Greeting] fail: {error}")
+
+    def _schedule_greeting(self):
+        """
+        Greeting background task mein - event handler sync hai,
+        is liye yahan await nahi kar sakte.
+        """
+        task = asyncio.create_task(self.greet_once())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     # =========================================================
     # CONNECT WORKER
@@ -484,6 +528,8 @@ class LivekitRoomServices:
 
                     self._disconnect_timer = None
 
+                self._schedule_greeting()
+
                 return
 
             # =================================================
@@ -512,6 +558,8 @@ class LivekitRoomServices:
                     self._disconnect_timer.cancel()
 
                     self._disconnect_timer = None
+
+                self._schedule_greeting()
 
                 return
 

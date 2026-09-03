@@ -189,6 +189,97 @@ def extract_participant_identity(participant):
 
 
 # =========================================================
+# AGENT KO BULWAYEIN
+# =========================================================
+
+async def speak_text(service_handle, audio_source, text: str) -> bool:
+    """
+    Agent se koi jumla bulwayein (greeting waghera).
+
+    Wahi sentence-streaming aur locking use karta hai jo asli jawab
+    ke liye hoti hai, taake do awaazein aapas mein na takrayein.
+    """
+
+    sentences = split_sentences(text)
+
+    if not sentences:
+        return False
+
+    # Track ke tayyar hone ka intezaar
+    try:
+        await asyncio.wait_for(
+            service_handle._track_ready.wait(),
+            timeout=10,
+        )
+    except asyncio.TimeoutError:
+        print("⚠️ [Speak] Agent track tayyar nahi hui.")
+        return False
+
+    async with service_handle._tts_lock:
+
+        if not (
+            audio_source
+            and service_handle.room
+            and service_handle.room.isconnected()
+        ):
+            print("⚠️ [Speak] Room ya audio source maujood nahi.")
+            return False
+
+        sample_rate = 22050
+        num_channels = 1
+        bytes_per_sample = 2
+        samples_per_channel = int(sample_rate * 20 / 1000)
+        chunk_size = samples_per_channel * num_channels * bytes_per_sample
+
+        service_handle._is_agent_speaking = True
+
+        try:
+            for sentence in sentences:
+
+                audio_bytes = await asyncio.to_thread(
+                    tts_converter, sentence
+                )
+
+                if not audio_bytes:
+                    continue
+
+                for i in range(0, len(audio_bytes), chunk_size):
+
+                    if not (
+                        service_handle.room
+                        and service_handle.room.isconnected()
+                    ):
+                        return False
+
+                    frame_chunk = audio_bytes[i:i + chunk_size]
+
+                    if len(frame_chunk) < chunk_size:
+                        frame_chunk += b"\x00" * (
+                            chunk_size - len(frame_chunk)
+                        )
+
+                    try:
+                        await audio_source.capture_frame(
+                            rtc.AudioFrame(
+                                data=frame_chunk,
+                                sample_rate=sample_rate,
+                                num_channels=num_channels,
+                                samples_per_channel=samples_per_channel,
+                            )
+                        )
+                    except Exception as frame_error:
+                        print(f"⚠️ [Speak] Frame fail: {frame_error}")
+                        return False
+
+        finally:
+            service_handle._is_agent_speaking = False
+            service_handle._agent_speech_ended_at = time.monotonic()
+
+    print(f"✅ [Speak] bol diya: {text[:60]}")
+    return True
+
+
+# =========================================================
 # CONSUME LIVEKIT AUDIO
 # =========================================================
 
