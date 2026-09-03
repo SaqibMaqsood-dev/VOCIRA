@@ -31,6 +31,7 @@ from backend.microservices.livekit_Rag_services.routers.users_route import (
     escalation_route,
     livekit_router,
     message_route,
+    rag_route,
 )
 
 from backend.microservices.livekit_Rag_services.routers.users_route.notification_router import (
@@ -188,6 +189,13 @@ app.include_router(
 
 app.include_router(
     message_route.router,
+    prefix="/livekit",
+)
+
+# Knowledge base ka intezaam. Pehle ye endpoints thay hi nahi -
+# ingestion ka code sirf dead main.py se bulaya jata tha.
+app.include_router(
+    rag_route.router,
     prefix="/livekit",
 )
 
