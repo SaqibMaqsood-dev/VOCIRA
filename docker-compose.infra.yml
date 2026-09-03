@@ -1,0 +1,60 @@
+# VOCIRA infrastructure — Postgres, Redis, RabbitMQ, LiveKit
+#
+# Chalane ke liye:   docker compose -f docker-compose.infra.yml up -d
+# Rokne ke liye:     docker compose -f docker-compose.infra.yml stop
+#
+# NOTE: ERPNext alag compose file (frappe_test/pwd.yml) se chalta hai, port 8081.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vocira-postgres
+    environment:
+      POSTGRES_USER: vocira
+      POSTGRES_PASSWORD: vocira123
+      POSTGRES_DB: vocira
+    ports:
+      # 5432 par Windows ka native PostgreSQL pehle se hai, is liye 5433
+      - "5433:5432"
+    volumes:
+      - vocira-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vocira -d vocira"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: vocira-redis
+    ports:
+      # 6379 par Windows ka purana native Redis hai, is liye 6380
+      - "6380:6379"
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: vocira-rabbitmq
+    ports:
+      - "5672:5672"     # AMQP — code isi se connect karta hai
+      - "15672:15672"   # management UI: http://localhost:15672 (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: vocira-livekit
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    restart: unless-stopped
+
+volumes:
+  vocira-pgdata:

@@ -1,0 +1,171 @@
+"""update_users_role_and_permissions
+
+Revision ID: 3e6d06a348d0
+Revises: e1ac3066158c
+Create Date: 2026-08-20 14:46:34.823002
+
+"""
+
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+
+revision: str = "3e6d06a348d0"
+down_revision: Union[str, Sequence[str], None] = "e1ac3066158c"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+
+    # ---------------------------------------------------------
+    # 1. Drop FK from refresh_tokken -> users
+    # ---------------------------------------------------------
+    op.drop_constraint(
+        "refresh_tokken_user_id_fkey",
+        "refresh_tokken",
+        type_="foreignkey",
+    )
+
+    # ---------------------------------------------------------
+    # ---------------------------------------------------------
+
+    # ---------------------------------------------------------
+    # 3. Convert users.user_id VARCHAR -> UUID
+    # ---------------------------------------------------------
+    op.alter_column(
+        "users",
+        "user_id",
+        existing_type=sa.VARCHAR(length=100),
+        type_=postgresql.UUID(as_uuid=True),
+        existing_nullable=False,
+        postgresql_using="user_id::uuid",
+    )
+
+    # ---------------------------------------------------------
+    # 4. Convert refresh_tokken.user_id VARCHAR -> UUID
+    # ---------------------------------------------------------
+    op.alter_column(
+        "refresh_tokken",
+        "user_id",
+        existing_type=sa.VARCHAR(length=100),
+        type_=postgresql.UUID(as_uuid=True),
+        existing_nullable=False,
+        postgresql_using="user_id::uuid",
+    )
+
+    # ---------------------------------------------------------
+    # 5. Recreate FK
+    # ---------------------------------------------------------
+    op.create_foreign_key(
+        "refresh_tokken_user_id_fkey",
+        "refresh_tokken",
+        "users",
+        ["user_id"],
+        ["user_id"],
+        ondelete="CASCADE",
+    )
+
+    # ---------------------------------------------------------
+    # 6. parent_id no longer unique
+    # ---------------------------------------------------------
+    op.drop_constraint(
+        op.f("uq_users_parent_id"),
+        "users",
+        type_="unique",
+    )
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+
+    # ---------------------------------------------------------
+    # 1. Drop FK
+    # ---------------------------------------------------------
+    op.drop_constraint(
+        "refresh_tokken_user_id_fkey",
+        "refresh_tokken",
+        type_="foreignkey",
+    )
+
+    # ---------------------------------------------------------
+    # 2. Restore parent_id uniqueness
+    # ---------------------------------------------------------
+    op.create_unique_constraint(
+        op.f("uq_users_parent_id"),
+        "users",
+        ["parent_id"],
+        postgresql_nulls_not_distinct=False,
+    )
+
+    # ---------------------------------------------------------
+    # 3. Convert refresh_tokken.user_id UUID -> VARCHAR
+    # ---------------------------------------------------------
+    op.alter_column(
+        "refresh_tokken",
+        "user_id",
+        existing_type=postgresql.UUID(as_uuid=True),
+        type_=sa.VARCHAR(length=100),
+        existing_nullable=False,
+        postgresql_using="user_id::varchar",
+    )
+
+    # ---------------------------------------------------------
+    # 4. Convert users.user_id UUID -> VARCHAR
+    # ---------------------------------------------------------
+    op.alter_column(
+        "users",
+        "user_id",
+        existing_type=postgresql.UUID(as_uuid=True),
+        type_=sa.VARCHAR(length=100),
+        existing_nullable=False,
+        postgresql_using="user_id::varchar",
+    )
+
+    # ---------------------------------------------------------
+    # 5. Recreate FK
+    # ---------------------------------------------------------
+    op.create_foreign_key(
+        "refresh_tokken_user_id_fkey",
+        "refresh_tokken",
+        "users",
+        ["user_id"],
+        ["user_id"],
+        ondelete="CASCADE",
+    )
+
+    # ---------------------------------------------------------
+    # 6. Restore user_roles table
+    # ---------------------------------------------------------
+    op.create_table(
+        "user_roles",
+        sa.Column(
+            "user_id",
+            sa.VARCHAR(),
+            nullable=False,
+        ),
+        sa.Column(
+            "role_id",
+            sa.VARCHAR(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["role_id"],
+            ["role.role_id"],
+            name=op.f("user_roles_role_id_fkey"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.user_id"],
+            name=op.f("user_roles_user_id_fkey"),
+        ),
+        sa.PrimaryKeyConstraint(
+            "user_id",
+            "role_id",
+            name=op.f("user_roles_pkey"),
+        ),
+    )
