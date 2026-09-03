@@ -118,11 +118,23 @@ class SessionService:
     # =========================================================
     # CLOSE USER SESSION
     # =========================================================
-    # NOTE: pehle ye (user_id, session_id) leta tha aur apna alag
-    # SessionLocal() kholta tha, jabke router db= bhejta hai aur is
-    # class ke baqi saare methods injected db lete hain. Us mismatch
-    # ki wajah se ye endpoint har baar TypeError deta tha.
-    async def close_session_by_id(self, db: AsyncSession, user_id: UUID, session_id: UUID):
+    # Do tarah ke caller hain:
+    #   router            -> apna injected db bhejta hai
+    #   livekit worker    -> uske paas koi db session nahi hoti
+    # Is liye db optional hai; na mile to yahin ek khol lete hain.
+    async def close_session_by_id(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        db: AsyncSession | None = None,
+    ):
+        if db is not None:
+            return await self._close(db=db, user_id=user_id, session_id=session_id)
+
+        async with SessionLocal() as own_db:
+            return await self._close(db=own_db, user_id=user_id, session_id=session_id)
+
+    async def _close(self, db: AsyncSession, user_id: UUID, session_id: UUID):
         async with db.begin():  # transaction block for closing
             session = await self.session_repo.get_by_id(db=db, id=session_id)
             if not session:
