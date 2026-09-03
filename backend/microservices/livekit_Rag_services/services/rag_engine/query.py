@@ -3,9 +3,15 @@ import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from groq import Groq
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
-    GROQ_API_KEY, GROQ_MODEL, MAX_CONTEXT_CHARS, PINECONE_NAMESPACE
+    GROQ_MODEL, MAX_CONTEXT_CHARS, PINECONE_NAMESPACE
+)
+# Wahi client jo baqi system use karta hai - taake provider ek jagah
+# se badle. Pehle yahan apna alag Groq client tha, is liye jab
+# gpt-oss-20b ka quota khatam hua to ERP chalta raha magar RAG ne
+# har baar "assistant is currently busy" kaha.
+from backend.microservices.livekit_Rag_services.services.groq.groq import (
+    client as llm_client,
 )
 
 log = logging.getLogger(__name__)
@@ -76,12 +82,24 @@ RULES:
 3. Never make up facts.
 4. For admission-related questions, always provide complete step-by-step details including requirements, process, and any tests or documents needed.
 5. Never give a partial answer — if information exists in context, give it fully.
-6. This answer will be converted to speech. Do NOT use markdown, asterisks, bold/italic markers, numbered lists (1. 2. 3.), or bullet points (-). Write in plain, natural spoken sentences only — if listing multiple items, describe them in flowing sentence form (e.g. "First... then... and finally...") instead of a numbered/bulleted list.
+6. THIS ANSWER IS SPOKEN ALOUD. Write exactly how a person would SAY it.
+   No markdown, no asterisks, no bullet points, no numbered lists.
+
+7. Write every number, time, amount and code in WORDS, not digits:
+   "8:00 AM to 2:00 PM"   -> "eight in the morning until two in the afternoon"
+   "PKR 18,500"           -> "eighteen thousand five hundred rupees"
+   "7:55 AM"              -> "five minutes before eight in the morning"
+   "Grades 1 to 5"        -> "grades one to five"
+   "042-111-777-800"      -> "zero four two, one one one, seven seven seven, eight hundred"
+
+8. Never speak a URL, file name or web address such as
+   "www.example.com/contact-us.php". Say "on the school website" instead.
+
+9. If listing several things, join them in flowing sentences
+   ("First... then... and finally..."), never as a list.
 
 CONTEXT:
 {context}"""
-
-    groq_client = Groq(api_key=GROQ_API_KEY)
 
     # gpt-oss reasoning models hain - bina is flag ke ye jawab se
     # kai guna zyada tokens sirf "sochne" par kharch karte hain.
@@ -95,7 +113,7 @@ CONTEXT:
             response = await asyncio.wait_for(
                 loop.run_in_executor(
                     _groq_executor,
-                    lambda: groq_client.chat.completions.create(
+                    lambda: llm_client.chat.completions.create(
                         model=GROQ_MODEL,
                         messages=[
                             {"role": "system", "content": system_prompt},

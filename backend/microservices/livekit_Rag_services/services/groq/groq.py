@@ -1,45 +1,78 @@
+"""
+LLM client — provider .env se badla ja sakta hai.
+
+Groq aur OpenRouter dono OpenAI-compatible hain, is liye ek hi client
+dono ke liye kaafi hai. Sirf base_url aur key badalti hai:
+
+    # Groq - sab se tez, magar free tier ka daily token limit
+    LLM_BASE_URL=https://api.groq.com/openai/v1
+    LLM_API_KEY=gsk_...
+    LLM_FAST_MODEL=qwen/qwen3.8-27b
+    LLM_SMART_MODEL=openai/gpt-oss-120b
+
+    # OpenRouter - thora slow, magar quota ki tang nahi
+    LLM_BASE_URL=https://openrouter.ai/api/v1
+    LLM_API_KEY=sk-or-v1-...
+    LLM_FAST_MODEL=google/gemini-2.5-flash-lite
+    LLM_SMART_MODEL=google/gemini-2.5-flash
+
+Do model isliye hain:
+  FAST  - intent routing jaisi chhoti classification
+  SMART - jawab banana aur ERP query planning
+
+Pehle har call "openai/gpt-oss-20b" par jati thi, jo reasoning model
+hai - "RAG_QUERY" jaisa teen-lafzi jawab dene ke liye bhi sainkron
+tokens ki soch likhta tha, aur daily quota chand calls mein khatam
+ho jata tha.
+"""
+
 import os
+from pathlib import Path
 
-from groq import Groq
+from dotenv import load_dotenv
+from openai import OpenAI
 
-from backend.microservices.livekit_Rag_services.core.config import settings
+# Apni .env khud load karein.
+#
+# Pehle ye module core.config se settings import karta tha, aur wahan
+# load_dotenv chalta tha - yaani env load hone ka inhesaar is baat par
+# tha ke core.config PEHLE import ho. Jab is module ko akela import
+# kiya jata (misal test se) to koi key hi na milti aur OpenAI client
+# banate hi crash ho jata.
+#
+# load_dotenv pehle se set variables ko override nahi karta, is liye
+# dobara chalne se koi nuqsan nahi.
+_SERVICE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(_SERVICE_DIR / ".env")
 
-
-client = Groq(
-    api_key=settings.returning_groq_api
+# GROQ_API_KEY purani .env files ke liye fallback ke taur par
+_API_KEY = (
+    os.getenv("LLM_API_KEY")
+    or os.getenv("GROQ_API_KEY")
+    or ""
 )
 
-
-# =========================================================
-# MODELS
-# =========================================================
-#
-# Pehle har call "openai/gpt-oss-20b" par jati thi. Wo ek
-# reasoning model hai - sirf "RAG_QUERY" jaisa teen-lafzi
-# jawab dene ke liye bhi sainkron tokens ki soch likhta hai.
-# Natija: daily token limit (200k) chand calls mein khatam,
-# aur poora assistant chup ho jata hai.
-#
-# Ab do model:
-#
-#   FAST  - intent routing jaisi chhoti classification ke liye
-#   SMART - ERP query plan aur insani jawab ke liye
-#
-# Dono env se badle ja sakte hain.
-# =========================================================
-
-# Ye naam is account par asal mein available models se chune gaye
-# hain (test_models.py se benchmark kiye gaye - dono 3/3 sahi).
-# Account par koi llama model maujood NAHI hai.
-GROQ_FAST_MODEL = os.getenv(
-    "GROQ_FAST_MODEL",
-    "qwen/qwen3.8-27b",
+LLM_BASE_URL = os.getenv(
+    "LLM_BASE_URL",
+    "https://api.groq.com/openai/v1",
 )
 
-GROQ_SMART_MODEL = os.getenv(
-    "GROQ_SMART_MODEL",
-    "openai/gpt-oss-120b",
+client = OpenAI(
+    api_key=_API_KEY,
+    base_url=LLM_BASE_URL,
 )
+
+GROQ_FAST_MODEL = os.getenv("LLM_FAST_MODEL") or os.getenv(
+    "GROQ_FAST_MODEL", "qwen/qwen3.8-27b"
+)
+
+GROQ_SMART_MODEL = os.getenv("LLM_SMART_MODEL") or os.getenv(
+    "GROQ_SMART_MODEL", "openai/gpt-oss-120b"
+)
+
+# saaf naam, purane bhi chalte rahenge
+LLM_FAST_MODEL = GROQ_FAST_MODEL
+LLM_SMART_MODEL = GROQ_SMART_MODEL
 
 
 async def dataConverter(
@@ -48,86 +81,54 @@ async def dataConverter(
     max_tokens: int = 1024,
 ):
     """
-    Groq se jawab lein.
+    LLM se jawab lein.
 
-    model = None  ->  SMART model (query plan, insani jawab)
-    model = GROQ_FAST_MODEL  ->  chhoti classification ke liye
+    model = None             -> SMART model
+    model = LLM_FAST_MODEL   -> chhoti classification ke liye
     """
 
     selected_model = model or GROQ_SMART_MODEL
 
     kwargs = {
         "model": selected_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        # Bina hadd ke reasoning models poora din ka
-        # token budget kha jate hain.
         "max_tokens": max_tokens,
     }
 
-    # gpt-oss reasoning models hain. Bina is flag ke ye sirf
-    # "RAG_QUERY" lautane ke liye bhi sainkron lafzon ki soch
-    # likhte hain - yahi cheez daily quota kha gayi thi.
+    # gpt-oss reasoning models hain. Bina is flag ke ye jawab se kai
+    # guna zyada tokens sirf "sochne" par kharch karte hain.
     if "gpt-oss" in selected_model:
         kwargs["reasoning_effort"] = "low"
 
     try:
-
         response = client.chat.completions.create(**kwargs)
 
-        # ==================================================
-        # DEBUG GROQ RESPONSE
-        # ==================================================
-
         print("=" * 70)
-        print("🤖 [GROQ RESPONSE]")
-        print(
-            f"Model: {selected_model}"
-        )
+        print("🤖 [LLM RESPONSE]")
+        print(f"Model: {selected_model}")
 
-        usage = getattr(
-            response,
-            "usage",
-            None,
-        )
-
+        usage = getattr(response, "usage", None)
         if usage:
             print(
-                f"Tokens: "
-                f"prompt={usage.prompt_tokens} "
+                f"Tokens: prompt={usage.prompt_tokens} "
                 f"completion={usage.completion_tokens} "
                 f"total={usage.total_tokens}"
             )
 
         if response.choices:
-
             choice = response.choices[0]
-
-            print(
-                f"Finish reason: "
-                f"{choice.finish_reason}"
-            )
-
-            print(
-                f"Content repr: "
-                f"{repr(choice.message.content)}"
-            )
+            print(f"Finish reason: {choice.finish_reason}")
+            print(f"Content repr: {repr(choice.message.content)}")
 
         print("=" * 70)
-
         return response
 
     except Exception as exc:
-
         print("=" * 70)
-        print("❌ [GROQ ERROR]")
+        print("❌ [LLM ERROR]")
+        print(f"Provider: {LLM_BASE_URL}")
         print(f"Model: {selected_model}")
         print(f"Error: {exc}")
         print("=" * 70)
-
         raise

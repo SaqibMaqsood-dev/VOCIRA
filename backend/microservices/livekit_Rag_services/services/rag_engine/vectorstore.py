@@ -17,7 +17,6 @@ import asyncio
 import logging
 import time
 
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -27,8 +26,16 @@ from backend.microservices.livekit_Rag_services.services.rag_engine.config impor
     INDEX_NAME,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
+    EMBEDDING_PROVIDER,
+    GEMINI_API_KEY,
+    GEMINI_EMBEDDING_MODEL,
+    GEMINI_EMBEDDING_DIM,
+    LOCAL_EMBEDDING_MODEL,
     TOP_K,
     PINECONE_NAMESPACE,
+)
+from backend.microservices.livekit_Rag_services.services.rag_engine.embeddings import (
+    build_embeddings,
 )
 
 log = logging.getLogger(__name__)
@@ -37,9 +44,16 @@ _embeddings_instance = None
 
 
 def get_embeddings():
+    """Config ke mutabiq embeddings (local ya Gemini). Ek hi baar banta hai."""
     global _embeddings_instance
     if _embeddings_instance is None:
-        _embeddings_instance = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+        _embeddings_instance = build_embeddings(
+            EMBEDDING_PROVIDER,
+            local_model=LOCAL_EMBEDDING_MODEL,
+            gemini_api_key=GEMINI_API_KEY,
+            gemini_model=GEMINI_EMBEDDING_MODEL,
+            gemini_dimensions=GEMINI_EMBEDDING_DIM,
+        )
     return _embeddings_instance
 
 
