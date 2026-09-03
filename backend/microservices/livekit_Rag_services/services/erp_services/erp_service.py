@@ -4,6 +4,9 @@ from .ERP_client import ERPClient
 from .prompt import build_erp_prompt
 from .endpoint import ERP_RESOURCES
 
+# Voice assistant ke liye is se zyada records ka koi faida nahi.
+DEFAULT_LIMIT = 20
+
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
     dataConverter,
 )
@@ -23,173 +26,103 @@ class ERPService:
         user_query: str,
         erp_parent_id: str,
     ):
+        """
+        Sawal se resource nikal kar data laayein (LLM ke zariye).
+
+        Voice pipeline ab ye NAHI use karta - wo router ke ek hi call
+        mein resource bhi le leta hai aur seedha fetch() bulata hai.
+        Ye raasta tests aur kisi bhi aise caller ke liye rakha hua hai
+        jiske paas sirf sawal ho.
+        """
 
         print("=" * 70)
-        print("🏫 [ERP SERVICE]")
+        print("🏫 [ERP SERVICE]  (LLM planner path)")
         print(f"User Query   : {user_query}")
         print(f"ERP Parent ID: {erp_parent_id}")
         print("=" * 70)
 
-        # ======================================================
-        # 1. BUILD ERP PROMPT
-        # ======================================================
-
-        prompt = build_erp_prompt(
-            user_query=user_query,
+        result = await dataConverter(
+            build_erp_prompt(user_query=user_query)
         )
 
-        print("=" * 70)
-        print("📝 [ERP PROMPT]")
-        print(prompt)
-        print("=" * 70)
+        if not result or not result.choices:
+            raise ValueError("ERP LLM returned empty response")
 
-        # ======================================================
-        # 2. CALL LLM FOR QUERY PLAN
-        # ======================================================
-
-        result = await dataConverter(prompt)
-
-        if not result:
-            raise ValueError(
-                "ERP LLM returned empty response"
-            )
-
-        if not result.choices:
-            raise ValueError(
-                "ERP LLM returned no choices"
-            )
-
-        llm_response = (
-            result
-            .choices[0]
-            .message
-            .content
-        )
-
-        print("=" * 70)
-        print("🤖 [ERP LLM RAW RESPONSE]")
-        print(repr(llm_response))
-        print("=" * 70)
+        llm_response = (result.choices[0].message.content or "").strip()
 
         if not llm_response:
-            raise ValueError(
-                "ERP LLM returned empty content"
-            )
+            raise ValueError("ERP LLM returned empty content")
 
-        llm_response = llm_response.strip()
-
-        # ======================================================
-        # 3. CLEAN MARKDOWN
-        # ======================================================
-
+        # markdown fences hata dein
         if llm_response.startswith("```"):
-
-            lines = llm_response.splitlines()
-
-            if lines:
-                lines = lines[1:]
-
-            if (
-                lines
-                and lines[-1].strip() == "```"
-            ):
+            lines = llm_response.splitlines()[1:]
+            if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
-
-            llm_response = "\n".join(
-                lines
-            ).strip()
-
-        # ======================================================
-        # 4. PARSE JSON
-        # ======================================================
+            llm_response = "\n".join(lines).strip()
 
         try:
-
-            decision = json.loads(
-                llm_response
-            )
-
+            decision = json.loads(llm_response)
         except json.JSONDecodeError as exc:
-
-            print("=" * 70)
-            print("❌ [ERP JSON ERROR]")
-            print(
-                f"Raw LLM response: "
-                f"{repr(llm_response)}"
-            )
-            print("=" * 70)
-
+            print("❌ [ERP JSON ERROR]", repr(llm_response))
             raise ValueError(
                 "LLM returned invalid ERP query JSON"
             ) from exc
 
-        # ======================================================
-        # 5. VALIDATE QUERY PLAN
-        # ======================================================
+        if not isinstance(decision, dict):
+            raise ValueError("ERP query plan must be a JSON object")
 
-        if not isinstance(
-            decision,
-            dict,
-        ):
-            raise ValueError(
-                "ERP query plan must be a JSON object"
-            )
+        print("🧠 [ERP QUERY PLAN]", decision)
 
-        print("=" * 70)
-        print("🧠 [ERP QUERY PLAN]")
-        print(decision)
-        print("=" * 70)
-
-        # ======================================================
-        # 6. GET RESOURCE
-        # ======================================================
-
-        resource = decision.get(
-            "resource"
+        return await self.fetch(
+            resource=decision.get("resource"),
+            erp_parent_id=erp_parent_id,
+            student_name=self.extract_student_name(
+                filters=decision.get("filters", []) or []
+            ),
         )
+
+    # ==========================================================
+    # DATA FETCH  (resource pehle se maloom ho)
+    # ==========================================================
+
+    async def fetch(
+        self,
+        resource: str,
+        erp_parent_id: str,
+        student_name: str | None = None,
+    ):
+        """
+        Diye gaye resource ka data laayein.
+
+        Authorization poori tarah yahin hoti hai - caller (chahe LLM ho
+        ya router) sirf ye batata hai KYA chahiye. KIS KA milega, wo
+        hamesha erp_parent_id se tay hota hai.
+        """
+
+        print("=" * 70)
+        print("🏫 [ERP FETCH]")
+        print(f"Resource     : {resource}")
+        print(f"Student      : {student_name or '(sab)'}")
+        print(f"ERP Parent ID: {erp_parent_id}")
+        print("=" * 70)
+
+        # ======================================================
+        # RESOURCE VALIDATION (whitelist)
+        # ======================================================
 
         if not resource:
-            raise ValueError(
-                "ERP query plan does not contain a resource"
-            )
+            raise ValueError("No ERP resource given")
 
         if resource not in ERP_RESOURCES:
-            raise ValueError(
-                f"Unauthorized ERP resource: {resource}"
-            )
+            raise ValueError(f"Unauthorized ERP resource: {resource}")
 
-        resource_config = ERP_RESOURCES[
-            resource
-        ]
+        resource_config = ERP_RESOURCES[resource]
+        endpoint = resource_config["endpoint"]
+        authorization = resource_config["authorization"]
 
-        endpoint = resource_config[
-            "endpoint"
-        ]
-
-        authorization = resource_config[
-            "authorization"
-        ]
-
-        # ======================================================
-        # 7. GET LLM FILTERS
-        # ======================================================
-
-        llm_filters = decision.get(
-            "filters",
-            [],
-        )
-
-        if not isinstance(
-            llm_filters,
-            list,
-        ):
-            raise ValueError(
-                "ERP filters must be a list"
-            )
-
-        filters = list(
-            llm_filters
-        )
+        # Filters sirf application banati hai. Caller ke bheje hue
+        # filters par kabhi bharosa nahi kiya jata.
+        filters: list = []
 
         # ======================================================
         # 8. APPLICATION LEVEL AUTHORIZATION
@@ -258,11 +191,9 @@ class ERPService:
             # Check whether LLM provided student_name
             # --------------------------------------------------
 
-            student_name = (
-                self.extract_student_name(
-                    filters=filters
-                )
-            )
+            # NOTE: student_name ab fetch() ke parameter se aata hai.
+            # Pehle yahan filters se nikala jata tha - ab filters
+            # hamesha khali hoti hain, to wo parameter ko None kar deta.
 
             resolved_student_ids = student_ids
 
@@ -401,11 +332,9 @@ class ERPService:
 
             # Agar user ne kisi khaas bachay ka naam liya hai to
             # sirf usi ki class tak mehdood karein.
-            student_name = (
-                self.extract_student_name(
-                    filters=filters
-                )
-            )
+            # NOTE: student_name ab fetch() ke parameter se aata hai.
+            # Pehle yahan filters se nikala jata tha - ab filters
+            # hamesha khali hoti hain, to wo parameter ko None kar deta.
 
             resolved_student_ids = student_ids
 
@@ -489,44 +418,15 @@ class ERPService:
         # ======================================================
 
         # ------------------------------------------------------
-        # IMPORTANT
-        #
-        # LLM ki field list par bharosa NAHI kiya jata.
-        #
-        # LLM resource to sahi chunta hai, magar field ke naam
-        # aksar bana leta hai ("attendance_date", "subject",
-        # "score"), jis par Frappe HTTP 417 deta hai -
-        # yaani sawal ka jawab hi nahi milta.
-        #
-        # Is liye endpoint.py mein har resource ke asal fields
-        # likhe hain aur wahi bheje jate hain. LLM ke fields
-        # sirf debug ke liye rakhe jate hain.
+        # Fields hamesha endpoint.py se aate hain, kisi caller se
+        # nahi. LLM field ke naam bana leta tha ("attendance_date",
+        # "subject", "score") jin par Frappe HTTP 417 deta hai.
         # ------------------------------------------------------
-
-        llm_fields = decision.get(
-            "fields",
-            [],
-        )
-
-        if not isinstance(
-            llm_fields,
-            list,
-        ):
-            raise ValueError(
-                "ERP fields must be a list"
-            )
 
         fields = resource_config.get(
             "fields",
             [],
         )
-
-        if llm_fields and llm_fields != fields:
-
-            print(
-                f"ℹ️ [ERP FIELDS] LLM ne maange: {llm_fields} | "
-                f"bheje ja rahe hain: {fields}"
-            )
 
         if fields:
 
@@ -538,18 +438,8 @@ class ERPService:
         # 11. LIMIT
         # ======================================================
 
-        limit = decision.get(
-            "limit",
-            20,
-        )
-
-        if not isinstance(
-            limit,
-            int,
-        ):
-            raise ValueError(
-                "ERP limit must be an integer"
-            )
+        # Voice jawab ke liye 20 records kaafi se zyada hain.
+        limit = DEFAULT_LIMIT
 
         limit = min(
             max(limit, 1),

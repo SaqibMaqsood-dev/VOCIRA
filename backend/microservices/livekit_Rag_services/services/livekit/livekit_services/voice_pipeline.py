@@ -58,6 +58,7 @@ from backend.microservices.livekit_Rag_services.services.router_services.session
 )
 
 from backend.microservices.livekit_Rag_services.services.text_speech.piper_servies import (
+    split_sentences,
     tts_converter,
 )
 
@@ -314,7 +315,10 @@ async def consume_audio(
 
     silence_frames = 0
 
-    SILENCE_LIMIT = 25
+    # 17 frames x 30ms = ~510ms khamoshi ke baad jumla khatam mana
+    # jata hai. Pehle 25 (750ms) tha - har sawal par chauthai second
+    # khali intezaar hota tha.
+    SILENCE_LIMIT = 17
 
     # Agent ke bolna khatam karne ke baad itni der aur na sunein -
     # speaker se nikalti awaaz ki dum warna agla "sawal" ban jati hai.
@@ -760,32 +764,55 @@ async def process_voice_intent(
             # INTENT ROUTER
             # =================================================
 
-            router_prompt = (
-                intent_prompt.INTENT_ROUTER_PROMPT.format(
-                    user_query=user_query
-                )
-            )
-
-            # Intent routing sirf teen mein se ek lafz lautati hai.
-            # Iske liye chhota, tez model kaafi hai - reasoning model
-            # yahan har call par sainkron tokens zaya karta tha.
+            # Pehle yahan DO LLM calls hoti thin: ek intent ke liye,
+            # phir ek aur ERP resource chunne ke liye (810-line prompt).
+            # Ab ek hi chhota call dono kaam karta hai.
             router_result = await dataConverter(
-                router_prompt,
+                intent_prompt.ROUTER_PROMPT.format(
+                    user_query=user_query
+                ),
                 model=GROQ_FAST_MODEL,
-                max_tokens=16,
+                max_tokens=80,
             )
 
-            intent = (
+            router_raw = (
                 router_result
                 .choices[0]
                 .message
                 .content
-                .strip()
-                .upper()
-            )
+                or ""
+            ).strip()
+
+            # markdown fences hata dein
+            if router_raw.startswith("```"):
+                _lines = router_raw.splitlines()[1:]
+                if _lines and _lines[-1].strip() == "```":
+                    _lines = _lines[:-1]
+                router_raw = "\n".join(_lines).strip()
+
+            try:
+                route = json.loads(router_raw)
+                if not isinstance(route, dict):
+                    raise ValueError("route must be an object")
+            except Exception:
+                # JSON na bane to RAG par gir jayein - us se
+                # user ko kam az kam koi jawab to milta hai.
+                print(
+                    f"⚠️ [Router] JSON parse fail: "
+                    f"{router_raw!r} — RAG par ja rahe hain"
+                )
+                route = {"intent": "RAG"}
+
+            intent = str(
+                route.get("intent", "RAG")
+            ).strip().upper()
+
+            erp_resource = route.get("resource")
+            erp_student = (route.get("student") or "").strip() or None
 
             print(
-                f"🧭 [Intent]: {intent}"
+                f"🧭 [Route]: intent={intent} "
+                f"resource={erp_resource} student={erp_student}"
             )
 
             # =================================================
@@ -928,7 +955,10 @@ async def process_voice_intent(
             # ERP QUERY
             # =================================================
 
-            elif "ERP_QUERY" in intent:
+            # Router ab "ERP" deta hai (pehle "ERP_QUERY" tha).
+            # Resource na mile to ERP ka koi matlab nahi - us soorat
+            # mein RAG par chala jata hai, taake user khali haath na rahe.
+            elif intent == "ERP" and erp_resource:
 
                 print(
                     "🏫 [Route]: ERP Pipeline"
@@ -1236,10 +1266,14 @@ async def process_voice_intent(
                                             f"{erp_parent_id}"
                                         )
 
+                                        # Resource router ke usi call se
+                                        # mil chuka hai - yahan doosri
+                                        # LLM call ki zaroorat nahi.
                                         erp_data = (
-                                            await erp_service.handle_query(
-                                                user_query=user_query,
+                                            await erp_service.fetch(
+                                                resource=erp_resource,
                                                 erp_parent_id=erp_parent_id,
+                                                student_name=erp_student,
                                             )
                                         )
 
@@ -1389,16 +1423,17 @@ async def process_voice_intent(
         # 13. TTS
         # =====================================================
 
-        audio_bytes = await asyncio.to_thread(
-            tts_converter,
-            text=ai_response_text,
-        )
+        # Pehle yahan POORE jawab ka audio banaya jata tha aur tab
+        # aage barha jata tha - CPU par 1.5-2 second ki khamoshi.
+        # Ab sirf jumlon mein toRte hain (ye sasta hai); audio har
+        # jumle ka alag alag, bajne se theek pehle banta hai.
+        sentences = split_sentences(ai_response_text)
 
-        if not audio_bytes:
+        if not sentences:
 
             print(
                 "⚠️ [TTS] "
-                "No audio bytes generated."
+                "Bolne ke liye kuch nahi mila."
             )
 
             return
@@ -1515,108 +1550,147 @@ async def process_voice_intent(
 
             try:
 
-                for i in range(
-                    0,
-                    len(audio_bytes),
-                    chunk_size,
-                ):
+                # Agla jumla pichhle ke BAJTE WAQT tayyar hota hai,
+                # is liye jumlon ke darmiyan khamoshi nahi aati.
+                next_audio = asyncio.create_task(
+                    asyncio.to_thread(
+                        tts_converter,
+                        sentences[0],
+                    )
+                )
 
-                    # -----------------------------------------
-                    # HANDOFF
-                    # -----------------------------------------
+                for index, sentence in enumerate(sentences):
 
-                    if getattr(
-                        service_handle,
-                        "_admin_handoff_requested",
-                        False,
-                    ):
+                    audio_bytes = await next_audio
 
-                        print(
-                            "📞 [TTS] "
-                            "Admin handoff requested."
-                        )
-
-                        break
-
-                    # -----------------------------------------
-                    # GENERATION
-                    # -----------------------------------------
-
-                    # NOTE: Yahan pehle generation check tha jo
-                    # playback ko beech mein kaat deta tha. Ab agent
-                    # ke bolne ke dauran audio sunna hi band hai,
-                    # is liye generation barh hi nahi sakti - aur
-                    # jumla poora bola jata hai.
-
-                    # -----------------------------------------
-                    # ROOM
-                    # -----------------------------------------
-
-                    if not (
-                        service_handle.room
-                        and service_handle.room.isconnected()
-                    ):
-
-                        print(
-                            "🛑 [TTS] "
-                            "Room disconnected."
-                        )
-
-                        break
-
-                    # -----------------------------------------
-                    # AUDIO CHUNK
-                    # -----------------------------------------
-
-                    frame_chunk = audio_bytes[
-                        i:i + chunk_size
-                    ]
-
-                    # -----------------------------------------
-                    # PAD LAST FRAME
-                    # -----------------------------------------
-
-                    if len(frame_chunk) < chunk_size:
-
-                        frame_chunk += (
-                            b"\x00"
-                            * (
-                                chunk_size
-                                - len(frame_chunk)
+                    if index + 1 < len(sentences):
+                        next_audio = asyncio.create_task(
+                            asyncio.to_thread(
+                                tts_converter,
+                                sentences[index + 1],
                             )
                         )
 
-                    # -----------------------------------------
-                    # LIVEKIT FRAME
-                    # -----------------------------------------
+                    if not audio_bytes:
+                        continue
 
-                    audio_frame = rtc.AudioFrame(
-                        data=frame_chunk,
-                        sample_rate=sample_rate,
-                        num_channels=num_channels,
-                        samples_per_channel=(
-                            samples_per_channel
-                        ),
+                    print(
+                        f"🔊 [TTS] jumla {index + 1}/{len(sentences)}"
                     )
 
-                    # -----------------------------------------
-                    # SEND FRAME
-                    # -----------------------------------------
+                    stop_playback = False
 
-                    try:
+                    for i in range(
+                        0,
+                        len(audio_bytes),
+                        chunk_size,
+                    ):
 
-                        await audio_source.capture_frame(
-                            audio_frame
+                        # -----------------------------------------
+                        # HANDOFF
+                        # -----------------------------------------
+
+                        if getattr(
+                            service_handle,
+                            "_admin_handoff_requested",
+                            False,
+                        ):
+
+                            print(
+                                "📞 [TTS] "
+                                "Admin handoff requested."
+                            )
+
+                            stop_playback = True
+                            stop_playback = True
+                        break
+
+                        # -----------------------------------------
+                        # GENERATION
+                        # -----------------------------------------
+
+                        # NOTE: Yahan pehle generation check tha jo
+                        # playback ko beech mein kaat deta tha. Ab agent
+                        # ke bolne ke dauran audio sunna hi band hai,
+                        # is liye generation barh hi nahi sakti - aur
+                        # jumla poora bola jata hai.
+
+                        # -----------------------------------------
+                        # ROOM
+                        # -----------------------------------------
+
+                        if not (
+                            service_handle.room
+                            and service_handle.room.isconnected()
+                        ):
+
+                            print(
+                                "🛑 [TTS] "
+                                "Room disconnected."
+                            )
+
+                            stop_playback = True
+                            stop_playback = True
+                        break
+
+                        # -----------------------------------------
+                        # AUDIO CHUNK
+                        # -----------------------------------------
+
+                        frame_chunk = audio_bytes[
+                            i:i + chunk_size
+                        ]
+
+                        # -----------------------------------------
+                        # PAD LAST FRAME
+                        # -----------------------------------------
+
+                        if len(frame_chunk) < chunk_size:
+
+                            frame_chunk += (
+                                b"\x00"
+                                * (
+                                    chunk_size
+                                    - len(frame_chunk)
+                                )
+                            )
+
+                        # -----------------------------------------
+                        # LIVEKIT FRAME
+                        # -----------------------------------------
+
+                        audio_frame = rtc.AudioFrame(
+                            data=frame_chunk,
+                            sample_rate=sample_rate,
+                            num_channels=num_channels,
+                            samples_per_channel=(
+                                samples_per_channel
+                            ),
                         )
 
-                    except Exception as frame_error:
+                        # -----------------------------------------
+                        # SEND FRAME
+                        # -----------------------------------------
 
-                        print(
-                            f"⚠️ [TTS] "
-                            f"Frame submission failed: "
-                            f"{frame_error}"
-                        )
+                        try:
 
+                            await audio_source.capture_frame(
+                                audio_frame
+                            )
+
+                        except Exception as frame_error:
+
+                            print(
+                                f"⚠️ [TTS] "
+                                f"Frame submission failed: "
+                                f"{frame_error}"
+                            )
+
+                            stop_playback = True
+                            stop_playback = True
+                        break
+
+                    if stop_playback:
                         break
 
             finally:
