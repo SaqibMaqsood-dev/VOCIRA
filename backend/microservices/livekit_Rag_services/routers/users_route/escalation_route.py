@@ -13,6 +13,11 @@ from backend.microservices.livekit_Rag_services.schema.escalation_schema import 
 
 from backend.helper_functions.database.session import get_db
 
+from backend.helper_functions.token_service.access_tokken.get_current_user import (
+    current_user,
+)
+
+
 
 
 router = APIRouter(
@@ -34,6 +39,7 @@ escalation_service = EslcalationService()
 async def create_escalation(
     data: CreateEscalation,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.create_escalation(
         db=db,
@@ -52,6 +58,7 @@ async def get_all_escalations(
     limit: int = 10,
     skip: int = 0,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.get_all_escalations(
         db=db,
@@ -70,6 +77,7 @@ async def get_all_escalations(
 async def get_escalation_by_id(
     id_value: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.get_escalation_by_id(
         db=db,
@@ -86,6 +94,7 @@ async def get_escalation_by_id(
 )
 async def get_occurred_escalations(
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.get_occurred_escalations(
         db=db,
@@ -103,6 +112,7 @@ async def update_escalation(
     id_value: int,
     request: CreateEscalation,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.update_escalation(
         db=db,
@@ -122,6 +132,7 @@ async def partial_update_escalation(
     id_value: int,
     request: EscalationPatch,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.partial_update_escalation(
         db=db,
@@ -140,6 +151,7 @@ async def partial_update_escalation(
 async def delete_escalation(
     id_value: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.delete_escalation(
         db=db,
@@ -158,6 +170,7 @@ async def assign_escalation(
     id_value: int,
     admin_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user)
 ):
     return await escalation_service.assign_escalation(
         db=db,

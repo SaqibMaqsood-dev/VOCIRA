@@ -10,8 +10,8 @@ from backend.helper_functions.token_service.access_tokken.jtw_tokken import (
     create_access_token,
 )
 
-from backend.helper_functions.token_service.refresh_tokken import (
-    jwt_refresh_tokken,
+from backend.helper_functions.token_service.refresh_tokken.jwt_refresh_tokken import (
+    create_refresh_tokken,
 )
 from backend.helper_functions.token_service.refresh_tokken.verify_refresh_tokken import (
     verify_refresh_tokken,
@@ -68,12 +68,16 @@ async def refresh_token(
     # 4. Create New Tokens
     # -------------------------------------------------
 
+    # NOTE: pehle yahan do bug the -
+    #   1. create_access_token(data=...) - signature "payload" hai, "data" nahi
+    #   2. jwt_refresh_tokken(...) - wo MODULE hai, function nahi
+    # Dono ki wajah se /refresh endpoint har baar TypeError deta tha.
     new_access_token = create_access_token(
-        data={"sub": payload.username}
+        {"sub": payload.username}
     )
 
-    new_refresh_token = jwt_refresh_tokken(
-        data={"sub": payload.username}
+    new_refresh_token = create_refresh_tokken(
+        {"sub": payload.username}
     )
 
     # -------------------------------------------------

@@ -206,7 +206,7 @@ async def forward_livekit_request(
 # ============================================================
 
 @app.get(
-    "/auth{path:path}",
+    "/auth/{path:path}",
     operation_id="gateway_auth_get",
 )
 async def gateway_auth_get(
@@ -225,7 +225,7 @@ async def gateway_auth_get(
 # ============================================================
 
 @app.post(
-    "/auth{path:path}",
+    "/auth/{path:path}",
     operation_id="gateway_auth_post",
 )
 async def gateway_auth_post(

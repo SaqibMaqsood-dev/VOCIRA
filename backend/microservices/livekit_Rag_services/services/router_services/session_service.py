@@ -118,12 +118,15 @@ class SessionService:
     # =========================================================
     # CLOSE USER SESSION
     # =========================================================
-    async def close_session_by_id(self, user_id: UUID, session_id: UUID):
-        async with SessionLocal() as db:
-            async with db.begin():  # transaction block for closing
-                session = await self.session_repo.get_by_id(db=db, id=session_id)
-                if not session:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-                if session.user_id != user_id:
-                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
-                return await self.session_repo.close_session_by_id(db=db, session_id=session_id)
+    # NOTE: pehle ye (user_id, session_id) leta tha aur apna alag
+    # SessionLocal() kholta tha, jabke router db= bhejta hai aur is
+    # class ke baqi saare methods injected db lete hain. Us mismatch
+    # ki wajah se ye endpoint har baar TypeError deta tha.
+    async def close_session_by_id(self, db: AsyncSession, user_id: UUID, session_id: UUID):
+        async with db.begin():  # transaction block for closing
+            session = await self.session_repo.get_by_id(db=db, id=session_id)
+            if not session:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+            if session.user_id != user_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
+            return await self.session_repo.close_session_by_id(db=db, session_id=session_id)

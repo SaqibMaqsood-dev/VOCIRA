@@ -17,8 +17,7 @@ def create_refresh_tokken(data: dict):
 
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
-    print("SECRET KEY:", settings.JWT_SECRET_KEY)
-    print("ALGORITHM:", settings.JWT_ALGORITHM)
-    print("EXPIRE MINUTES:", settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    # NOTE: yahan pehle JWT_SECRET_KEY print hota tha - yaani har
+    # login par signing key logs mein chali jati thi. Hata diya gaya.
     return encoded_jwt
 

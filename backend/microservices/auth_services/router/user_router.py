@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import List
-from fastapi import APIRouter, Depends , HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from backend.microservices.auth_services.core.config import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -180,7 +181,18 @@ from uuid import UUID
 async def get_internal_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
+    x_internal_key: str | None = Header(default=None),
 ):
+    # Ye endpoint kisi bhi user ka role aur ERP parent_id deta hai -
+    # yaani ERP authorization ki chabi. Pehle bilkul khula tha.
+    # Ye service-to-service call hai (JWT ke baghair aati hai),
+    # is liye shared secret se protect kiya gaya hai.
+    if x_internal_key != settings.INTERNAL_SERVICE_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid internal service key",
+        )
+
     result = await db.execute(
         select(Users)
         .options(selectinload(Users.role))

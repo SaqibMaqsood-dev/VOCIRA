@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     PASSWORD_HASH_ALGORITHM: str = "bcrypt"
 
+    # /users/internal/{id} sirf doosri services ke liye hai, end users
+    # ke liye nahi. Wo call bina JWT ke aati hai, is liye user auth ke
+    # bajaye ye shared secret use hota hai.
+    INTERNAL_SERVICE_KEY: str = "vocira-internal-dev-key-change-me"
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         extra="ignore",

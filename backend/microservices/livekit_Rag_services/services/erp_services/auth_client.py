@@ -1,3 +1,5 @@
+import os
+
 import httpx
 
 
@@ -5,6 +7,13 @@ class AuthClient:
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+
+        # Auth service ka /users/internal/ ab shared secret maangta hai.
+        # Dono services ki .env mein ye ek jaisi honi chahiye.
+        self.internal_key = os.getenv(
+            "INTERNAL_SERVICE_KEY",
+            "vocira-internal-dev-key-change-me",
+        )
 
     async def get_internal_user(
         self,
@@ -27,7 +36,12 @@ class AuthClient:
                 timeout=10.0
             ) as client:
 
-                response = await client.get(url)
+                response = await client.get(
+                    url,
+                    headers={
+                        "X-Internal-Key": self.internal_key,
+                    },
+                )
 
                 print(
                     f"🔐 [AUTH STATUS] : "

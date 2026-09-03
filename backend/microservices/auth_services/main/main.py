@@ -7,7 +7,6 @@ from backend.microservices.auth_services.router import (
     auth_router,
     refresh_token_router,
     user_router,
-    erp_guardian_router,
 )
 
 from backend.microservices.auth_services.models import (
@@ -65,4 +64,3 @@ app = FastAPI(
 app.include_router(user_router.router)
 app.include_router(refresh_token_router.route)
 app.include_router(auth_router.router)
-# app.include_router(erp_guardian_router.router)

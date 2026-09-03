@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,7 +103,7 @@ class MessageService:
     async def get_message_by_id(
         self,
         db: AsyncSession,
-        id_value: int,
+        id_value: UUID,
     ):
         message = await self.message_repo.get_by_id(
             db=db,
@@ -125,7 +126,7 @@ class MessageService:
     async def update_message(
         self,
         db: AsyncSession,
-        id_value: int,
+        id_value: UUID,
         request,
     ):
         message = await self.message_repo.get_by_id(
@@ -161,7 +162,7 @@ class MessageService:
     async def partial_update_message(
         self,
         db: AsyncSession,
-        id_value: int,
+        id_value: UUID,
         request,
     ):
         message = await self.message_repo.get_by_id(
@@ -201,7 +202,7 @@ class MessageService:
     async def delete_message(
         self,
         db: AsyncSession,
-        id_value: int,
+        id_value: UUID,
     ):
         message = await self.message_repo.get_by_id(
             db=db,
@@ -248,7 +249,7 @@ class MessageService:
     async def get_messages_by_session(
         self,
         db: AsyncSession,
-        session_id: int,
+        session_id: UUID,
     ):
         messages = await self.message_repo.get_messages_by_session(
             db=db,
