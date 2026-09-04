@@ -29,6 +29,41 @@ from backend.microservices.livekit_Rag_services.core.config import settings
 # LiveKit 48 kHz par audio deta hai; Whisper 16 kHz chahta hai.
 TARGET_SAMPLE_RATE = 16000
 
+# Is se chhota audio bhejne ka faida nahi - Whisper us par bakwaas
+# bana deta hai. 0.35 second (48 kHz, mono, int16).
+MIN_AUDIO_BYTES = int(0.35 * 48000 * 2)
+
+# Khamoshi ka gate. int16 ki range 32768 hai; kamre ka aam shor
+# 100 se neeche rehta hai, boli hui awaaz kahin zyada.
+MIN_RMS = 260.0
+
+# Whisper khamoshi/shor par ye jumle bana deta hai. Ye asli baat nahi
+# hoti - is ki wajah se agent apni hi awaaz ka jawab dene lagta tha
+# aur "Thank you / You're welcome" ka loop ban jata tha.
+_HALLUCINATIONS = {
+    "thank you", "thanks", "thank you.", "thanks for watching",
+    "thank you for watching", "thanks for watching!", "bye", "bye.",
+    "you", "okay", "ok", "so", "uh", "um", "hmm", "mm", "mhm",
+    "subtitles by the amara.org community", "please subscribe",
+    "i'm sorry", "silence", "music", "applause",
+}
+
+
+def _is_noise(text: str) -> bool:
+    """Whisper ki jhooti transcription pakrein."""
+    cleaned = "".join(
+        c for c in text.lower() if c.isalnum() or c.isspace()
+    ).strip()
+
+    if not cleaned:
+        return True
+
+    # sirf ek ya do harf - matlab kuch bola hi nahi
+    if len(cleaned.replace(" ", "")) < 3:
+        return True
+
+    return cleaned in _HALLUCINATIONS
+
 # whisper-large-v3-turbo tez bhi hai aur multilingual bhi - Urdu/English
 # mix bolne walon ke liye munasib. Sirf English chahiye to
 # "distil-whisper-large-v3-en" is se bhi tez hai.
@@ -36,6 +71,9 @@ GROQ_STT_MODEL = os.getenv(
     "GROQ_STT_MODEL",
     "whisper-large-v3-turbo",
 )
+
+# Zaban tay kar dein. Urdu chahiye to STT_LANGUAGE=ur karein.
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en")
 
 
 class STTWhisper:
@@ -158,6 +196,29 @@ class STTWhisper:
         if not audio_bytes:
             return ""
 
+        # ------------------------------------------------------
+        # Bohat chhota ya bohat khamosh audio API tak bhejna hi
+        # nahi chahiye. Whisper us par jhooti baat bana deta hai
+        # ("Thank you.", "E ai") jise system asli sawal samajh
+        # kar jawab dene lagta hai.
+        # ------------------------------------------------------
+
+        if len(audio_bytes) < MIN_AUDIO_BYTES:
+            return ""
+
+        samples = np.frombuffer(audio_bytes, dtype=np.int16)
+
+        if samples.size == 0:
+            return ""
+
+        rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+
+        if rms < MIN_RMS:
+            print(
+                f"🔇 [STT] khamoshi chhori (rms={rms:.0f} < {MIN_RMS:.0f})"
+            )
+            return ""
+
         try:
 
             wav_bytes = self._pcm_to_wav(
@@ -173,6 +234,9 @@ class STTWhisper:
                 model=GROQ_STT_MODEL,
                 response_format="text",
                 temperature=0.0,
+                # Bina iske Whisper zaban khud "andaza" lagata hai aur
+                # shor par Portuguese/Spanish bana deta tha.
+                language=STT_LANGUAGE,
             )
 
             # response_format="text" par SDK seedha string deta hai,
@@ -183,7 +247,13 @@ class STTWhisper:
                 else getattr(result, "text", "")
             )
 
-            return (text or "").strip()
+            text = (text or "").strip()
+
+            if _is_noise(text):
+                print(f"🔇 [STT] hallucination chhori: {text!r}")
+                return ""
+
+            return text
 
         except Exception as error:
 
