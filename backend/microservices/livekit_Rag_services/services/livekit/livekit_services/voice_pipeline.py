@@ -1024,6 +1024,37 @@ async def process_voice_intent(
                     traceback.print_exc()
 
                 # -------------------------------------------------
+                # CALLER KO BATAYEIN
+                #
+                # Ye request_admin_handoff() se PEHLE hona zaroori
+                # hai: wo _admin_handoff_requested laga deta hai,
+                # aur us ke baad TTS ke saare handoff checks
+                # (1456, 1502, 1560) bolna rok dete hain. Pehle
+                # yahan kuch bola hi nahi jata tha - caller ke liye
+                # call bilkul khamosh ho jati thi aur wo samajhta
+                # tha system kharab hai.
+                # -------------------------------------------------
+
+                handoff_text = (
+                    "Please hold on. I am connecting you to "
+                    "a member of our school staff."
+                )
+
+                await message_service.create_message(
+                    db=db,
+                    content=handoff_text,
+                    user_id=user_id,
+                    usertype=SenderTypeEnum.ai.value,
+                    session_id=session_id,
+                )
+
+                await speak_text(
+                    service_handle=service_handle,
+                    audio_source=audio_source,
+                    text=handoff_text,
+                )
+
+                # -------------------------------------------------
                 # LIVEKIT HANDOFF
                 # -------------------------------------------------
 
@@ -1693,8 +1724,8 @@ async def process_voice_intent(
                             )
 
                             stop_playback = True
-                            stop_playback = True
-                        break
+
+                            break
 
                         # -----------------------------------------
                         # GENERATION
@@ -1721,8 +1752,8 @@ async def process_voice_intent(
                             )
 
                             stop_playback = True
-                            stop_playback = True
-                        break
+
+                            break
 
                         # -----------------------------------------
                         # AUDIO CHUNK
@@ -1778,8 +1809,8 @@ async def process_voice_intent(
                             )
 
                             stop_playback = True
-                            stop_playback = True
-                        break
+
+                            break
 
                     if stop_playback:
                         break

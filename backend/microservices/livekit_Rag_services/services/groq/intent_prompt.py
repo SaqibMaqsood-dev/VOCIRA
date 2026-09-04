@@ -28,9 +28,17 @@ Shape:
 {{"intent":"ADMIN_HANDOFF"}}
 
 === ADMIN_HANDOFF ===
-The user explicitly asks for a human / admin / staff member / real person,
-OR the situation is urgent or an emergency needing immediate attention.
-Not merely because they are unhappy or the question is hard.
+ONLY when the user EXPLICITLY asks to speak to a human, admin, staff
+member, teacher or real person - or clearly reports an emergency
+involving a child ("my son is hurt", "there has been an accident").
+
+NEVER choose ADMIN_HANDOFF for:
+  - short reactions or thinking aloud: "wow", "okay", "all right",
+    "hmm", "I see", "right", "bye", "I'm going to go"
+  - surprise, alarm or an exclamation on its own
+  - frustration, a hard question, or anything you cannot answer
+
+Handing off ends the AI conversation, so when in doubt choose RAG.
 
 === ERP ===
 The question is about the caller's OWN CHILDREN — private school records.
@@ -68,7 +76,11 @@ contact details, rules, facilities, or any general knowledge question.
 "Show me my children's names"            -> {{"intent":"ERP","resource":"student","student":""}}
 "What is the admission policy?"          -> {{"intent":"RAG"}}
 "What time does the school open?"        -> {{"intent":"RAG"}}
+"Wow."                                   -> {{"intent":"RAG"}}
+"Okay, all right."                       -> {{"intent":"RAG"}}
+"I'm going to go."                       -> {{"intent":"RAG"}}
 "I want to talk to an admin"             -> {{"intent":"ADMIN_HANDOFF"}}
+"Please connect me to a real person"     -> {{"intent":"ADMIN_HANDOFF"}}
 
 User question:
 {user_query}
