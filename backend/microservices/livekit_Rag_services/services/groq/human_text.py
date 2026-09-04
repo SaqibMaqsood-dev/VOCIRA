@@ -1,6 +1,35 @@
 from datetime import date
 
 
+# ERPNext ke andaroni IDs - "EDU-ATT-2026-00001", "EDU-STU-2026-00013",
+# "ACC-SINV-2026-00007". Ye bol kar sunane ke qabil nahi hain aur har
+# resource mein in ke sath parhne wala naam pehle se mojood hai
+# (student_name / customer / guardian_name / student_group_name).
+#
+# Do fayde:
+#   - har record se ~50 harf kam, yaani kam tokens (Groq ki hadd
+#     tokens-per-minute par hai, is liye seedha zyada calls milti hain)
+#   - LLM ye ID bol hi nahi sakta. Pehle bolta tha:
+#     "ACC-SINV-two thousand twenty-six-zero zero zero zero seven"
+_INTERNAL_ID_FIELDS = ("name", "student")
+
+
+def _strip_internal_ids(response):
+    """LLM ko bhejne se pehle andaroni IDs nikaal dein."""
+
+    if isinstance(response, dict):
+        return {
+            k: _strip_internal_ids(v)
+            for k, v in response.items()
+            if k not in _INTERNAL_ID_FIELDS
+        }
+
+    if isinstance(response, list):
+        return [_strip_internal_ids(v) for v in response]
+
+    return response
+
+
 def build_response_prompt(
     user_query: str,
     response: str,
@@ -15,6 +44,8 @@ def build_response_prompt(
     """
 
     today = today or date.today().isoformat()
+
+    response = _strip_internal_ids(response)
 
     return f"""
 You are Vocira, a professional AI voice assistant for The Educators.

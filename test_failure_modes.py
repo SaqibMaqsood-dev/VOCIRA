@@ -140,13 +140,16 @@ async def main():
     # ---------------------------------------------------------
     print("\n--- 2. ERP theek, LLM fail (jumla banate waqt) ---")
     # ---------------------------------------------------------
-    calls = {"n": 0}
-
+    # NOTE: pehle yahan "pehli call router hai" farz kiya gaya tha.
+    # quick_route aane ke baad ye ghalat ho gaya - aam sawal bina
+    # LLM ke rout hote hain, to pehli call HI jumla banane wali
+    # hoti hai. Ab prompt dekh kar tay karte hain: jis mein ERP
+    # data ho (AVAILABLE INFORMATION) wahi fail karayein.
     async def flaky_conv(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:               # router - chalne dein
-            return await real_conv(*a, **k)
-        raise RuntimeError("402 credits khatam")   # jumla banana - fail
+        prompt = k.get("prompt") or (a[0] if a else "")
+        if "AVAILABLE INFORMATION" in str(prompt):
+            raise RuntimeError("402 credits khatam")   # jumla banana - fail
+        return await real_conv(*a, **k)                # router - chalne dein
 
     voice_pipeline.dataConverter = flaky_conv
     h, src = await run()

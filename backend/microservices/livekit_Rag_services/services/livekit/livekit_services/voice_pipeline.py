@@ -858,41 +858,59 @@ async def process_voice_intent(
             # Pehle yahan DO LLM calls hoti thin: ek intent ke liye,
             # phir ek aur ERP resource chunne ke liye (810-line prompt).
             # Ab ek hi chhota call dono kaam karta hai.
-            router_result = await dataConverter(
-                intent_prompt.ROUTER_PROMPT.format(
-                    user_query=user_query
-                ),
-                model=GROQ_FAST_MODEL,
-                max_tokens=80,
-            )
+            #
+            # Us se bhi pehle: aam sawal bilkul saaf hote hain
+            # ("mera fees paid hai?"), un par LLM bulana faltu hai.
+            # ROUTER_PROMPT ~812 tokens ka hai aur Groq ki hadd
+            # tokens-per-MINUTE par lagti hai - yaani har bachaya
+            # hua router call seedha ek aur sawal ki gunjaish deta
+            # hai. quick_route shak hone par None deta hai, tab LLM
+            # chalti hai.
+            route = intent_prompt.quick_route(user_query)
 
-            router_raw = (
-                router_result
-                .choices[0]
-                .message
-                .content
-                or ""
-            ).strip()
+            if route is not None:
 
-            # markdown fences hata dein
-            if router_raw.startswith("```"):
-                _lines = router_raw.splitlines()[1:]
-                if _lines and _lines[-1].strip() == "```":
-                    _lines = _lines[:-1]
-                router_raw = "\n".join(_lines).strip()
-
-            try:
-                route = json.loads(router_raw)
-                if not isinstance(route, dict):
-                    raise ValueError("route must be an object")
-            except Exception:
-                # JSON na bane to RAG par gir jayein - us se
-                # user ko kam az kam koi jawab to milta hai.
                 print(
-                    f"⚠️ [Router] JSON parse fail: "
-                    f"{router_raw!r} — RAG par ja rahe hain"
+                    f"⚡ [Router] bina LLM ke: {route}"
                 )
-                route = {"intent": "RAG"}
+
+            else:
+
+                router_result = await dataConverter(
+                    intent_prompt.ROUTER_PROMPT.format(
+                        user_query=user_query
+                    ),
+                    model=GROQ_FAST_MODEL,
+                    max_tokens=80,
+                )
+
+                router_raw = (
+                    router_result
+                    .choices[0]
+                    .message
+                    .content
+                    or ""
+                ).strip()
+
+                # markdown fences hata dein
+                if router_raw.startswith("```"):
+                    _lines = router_raw.splitlines()[1:]
+                    if _lines and _lines[-1].strip() == "```":
+                        _lines = _lines[:-1]
+                    router_raw = "\n".join(_lines).strip()
+
+                try:
+                    route = json.loads(router_raw)
+                    if not isinstance(route, dict):
+                        raise ValueError("route must be an object")
+                except Exception:
+                    # JSON na bane to RAG par gir jayein - us se
+                    # user ko kam az kam koi jawab to milta hai.
+                    print(
+                        f"⚠️ [Router] JSON parse fail: "
+                        f"{router_raw!r} — RAG par ja rahe hain"
+                    )
+                    route = {"intent": "RAG"}
 
             intent = str(
                 route.get("intent", "RAG")
@@ -1427,7 +1445,14 @@ async def process_voice_intent(
 
                                         converter_response = (
                                             await dataConverter(
-                                                prompt=response_prompt
+                                                prompt=response_prompt,
+                                                # Default 1024 tha. Provider
+                                                # itne tokens RESERVE karta
+                                                # hai aur wo minute ke budget
+                                                # se kat-te hain - jabke naape
+                                                # gaye sab se lambe ERP jawab
+                                                # 574 tokens ke the.
+                                                max_tokens=640,
                                             )
                                         )
 

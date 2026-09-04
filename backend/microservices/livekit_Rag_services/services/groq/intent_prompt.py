@@ -17,6 +17,8 @@ Is liye dono kaam ek hi chhote prompt mein mila diye gaye hain.
 Ek LLM call kam, aur ~5,000 tokens ke bajaye ~400.
 """
 
+import re
+
 ROUTER_PROMPT = """You are the router for VOCIRA, a school voice assistant.
 
 Read the user's question and reply with ONE line of JSON. Nothing else.
@@ -90,3 +92,151 @@ JSON:"""
 
 # Purana naam bhi rakha hua hai taake koi purana import na toote.
 INTENT_ROUTER_PROMPT = ROUTER_PROMPT
+
+
+# =========================================================
+# BINA LLM KE ROUTING
+#
+# ROUTER_PROMPT har sawal par ~812 prompt tokens kharch karta hai.
+# Groq ki hadd tokens-per-MINUTE par hai (free tier 8000), is liye
+# ye seedha ye tay karta hai ke ek minute mein kitne sawal ho sakte
+# hain. Aam sawal saaf pehchane ja sakte hain - un par LLM bulane
+# ki zaroorat nahi.
+#
+# Usool: SIRF tab jawab dein jab bilkul yaqeen ho. Zara sa bhi shak
+# ho to None laut ta hai aur LLM faisla karta hai. Ghalat routing
+# ki qeemat (parent ko doosre bache ka data, ya "pata nahi") in
+# tokens se kahin zyada hai.
+# =========================================================
+
+# "mera/mere bache ka" - is ke baghair sawal aam maloomat ka hai.
+# Lafz poore milte hain, andar se nahi: "our" ko "your" ke andar
+# match nahi hona chahiye.
+_MINE = ("my", "our", "mine", "our's")
+
+# Ye lafz hamesha zaati record ka pata dete hain - "attendance"
+# school ki policy ka sawal nahi hota.
+_ALWAYS_ERP = {
+    "attendance": "attendance",
+    "marks": "assessment",
+    "grades": "assessment",
+    "report card": "assessment",
+    "result": "assessment",
+    "results": "assessment",
+}
+
+# Ye lafz dono taraf ja sakte hain - "fee structure" (aam) banaam
+# "my fees" (zaati). Sirf "mera/mere" ke sath ERP mante hain.
+_ERP_IF_MINE = {
+    "fee": "fee",
+    "fees": "fee",
+    "invoice": "fee",
+    "bill": "fee",
+    "outstanding": "fee",
+    "payment": "payment",
+    "present": "attendance",
+    "absent": "attendance",
+    "timetable": "schedule",
+    "time table": "schedule",
+    "exam": "exam",
+    "subjects": "course",
+    "courses": "course",
+    "children": "student",
+    "kids": "student",
+}
+
+# Ye hamesha aam maloomat hain - kabhi kisi ek bache ka record nahi
+_ALWAYS_RAG = (
+    "admission", "policy", "uniform", "fee structure", "syllabus",
+    "school timing", "school timings", "school hour", "school hours", "what time does the school",
+    "contact", "address", "principal", "about the school",
+    "your name", "who are you",
+)
+
+# Sawal ke shuru mein aane wale aam lafz - bara harf hone par bhi
+# ye kisi bache ka naam nahi hote.
+_NOT_NAMES = {
+    "what", "when", "where", "which", "who", "whose", "why", "how",
+    "is", "are", "was", "were", "do", "does", "did", "can", "could",
+    "has", "have", "had", "show", "tell", "give", "please", "my",
+    "our", "i", "the", "a", "an", "and", "or", "if", "hello", "hi",
+    "vocira", "class", "okay", "ok", "yes", "no", "sorry", "thanks",
+}
+
+
+def _has(text: str, phrase: str) -> bool:
+    """Poora lafz mile, kisi lafz ke andar nahi."""
+    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
+
+
+def _mentions_a_name(user_query: str) -> bool:
+    """
+    Kisi bache ka naam liya gaya hai? ("What marks did Alisha get?")
+
+    Aise sawal LLM ko dene chahiye - wo naam nikaal kar sirf USI
+    bache ka record mangta hai. quick_route sab bachon ka data
+    le aata, jo jawab ko kharab kar deta.
+    """
+    words = user_query.split()
+
+    for i, w in enumerate(words):
+        clean = w.strip(".,?!'\"").strip()
+
+        if not clean or not clean[0].isupper():
+            continue
+
+        # Pehla lafz bara harf hone se naam nahi ban jata
+        if i == 0:
+            continue
+
+        if clean.lower() in _NOT_NAMES:
+            continue
+
+        return True
+
+    return False
+
+
+def quick_route(user_query: str) -> dict | None:
+    """
+    Aam sawal bina LLM ke pehchanein.
+
+    Returns router jaisa dict, ya None agar zara sa bhi shak ho -
+    us surat mein caller ROUTER_PROMPT wali LLM call kare.
+    """
+
+    if not user_query:
+        return None
+
+    text = user_query.lower().strip()
+
+    # Admin handoff nadir aur ahem hai - hamesha LLM decide kare
+    for word in ("admin", "human", "real person", "staff", "someone",
+                 "emergency", "urgent"):
+        if _has(text, word):
+            return None
+
+    # Kisi bache ka naam ho to LLM nikale
+    if _mentions_a_name(user_query):
+        return None
+
+    mine = any(_has(text, m) for m in _MINE)
+
+    # Aam maloomat, magar sirf tab jab "mera" na ho
+    if not mine:
+        for phrase in _ALWAYS_RAG:
+            if _has(text, phrase):
+                return {"intent": "RAG"}
+
+    # Hamesha zaati
+    for phrase, resource in _ALWAYS_ERP.items():
+        if _has(text, phrase):
+            return {"intent": "ERP", "resource": resource, "student": ""}
+
+    # Dono taraf ja sakte hain - sirf "mera" ke sath
+    if mine:
+        for phrase, resource in _ERP_IF_MINE.items():
+            if _has(text, phrase):
+                return {"intent": "ERP", "resource": resource, "student": ""}
+
+    return None
