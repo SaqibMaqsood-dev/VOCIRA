@@ -14,6 +14,21 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 
+# Call sites `usertype` mein kabhi enum ki value bhejte hain
+# ("guardian", "ai") aur kabhi us ka naam ("user"). Pehle yahan
+# sirf "guest"/"agent"/"admin" ke literals check hote the, is liye
+# `SenderTypeEnum.ai.value` == "ai" kisi shart par pura nahi utarta
+# tha aur har AI jawab `else` branch se guzar kar `user` ban jata
+# tha - database mein agent ki apni baat guardian ke naam likhi
+# ja rahi thi. Ab dono shaklein yahan se guzarti hain.
+_SENDER_ALIASES = {
+    SenderTypeEnum.ai.value: SenderTypeEnum.ai,           # "ai"
+    "agent": SenderTypeEnum.ai,                           # purana naam
+    SenderTypeEnum.admin.value: SenderTypeEnum.admin,     # "admin"
+    SenderTypeEnum.guest.value: SenderTypeEnum.guest,     # "guest"
+    SenderTypeEnum.user.value: SenderTypeEnum.user,       # "guardian"
+    "user": SenderTypeEnum.user,
+}
 
 
 class MessageService:
@@ -36,23 +51,24 @@ class MessageService:
         # Determine sender
         # -----------------------------
 
-        if usertype == "guest":
+        sender_type = _SENDER_ALIASES.get(
+            (usertype or "").strip().lower(),
+            SenderTypeEnum.guest,
+        )
 
+        if sender_type is SenderTypeEnum.ai:
+
+            # Agent ka apna jawab kisi user se mansoob nahi hota
+            user_id = None
+
+        elif sender_type is SenderTypeEnum.guest:
+
+            user_id = None
+
+        elif sender_type is SenderTypeEnum.user and not user_id:
+
+            # Bina login ke aane wali baat guardian nahi hoti
             sender_type = SenderTypeEnum.guest
-            user_id = None
-
-        elif usertype == "agent":
-
-            sender_type = SenderTypeEnum.ai
-            user_id = None
-
-        elif usertype == "admin":
-
-            sender_type = SenderTypeEnum.admin
-
-        else:
-
-            sender_type = SenderTypeEnum.user
 
         # -----------------------------
         # Create message
