@@ -15,6 +15,10 @@ import {
   Track,
 } from "livekit-client";
 
+import { RoomContext } from "@livekit/components-react";
+
+import AgentVisualizer from "@/components/AgentVisualizer";
+
 export default function AssistantPage() {
   const [room, setRoom] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -910,60 +914,61 @@ ${JSON.stringify(
           {/* MICROPHONE */}
           {/* ================================================== */}
 
-          <div
-            id="voice-assistant-demo"
-            className={`assistant-speaker-float relative mt-10 flex h-[290px] w-[290px] items-center justify-center ${
-              isConnecting ||
-              isConnected ||
-              isEnding
-                ? "cursor-default"
-                : "cursor-pointer"
-            }`}
-            onClick={
-              !isConnected &&
-              !isConnecting &&
-              !isEnding
-                ? handleMicClick
-                : undefined
-            }
-          >
+          {/*
+            Call chal rahi ho to LiveKit ka apna visualizer - wo agent
+            ki ASLI awaaz par chalta hai. Room pehle se yahan bani hui
+            hai, is liye sirf RoomContext se neeche pahunchani hai;
+            useVoiceAssistant() wahin se agent aur us ka track uthata
+            hai.
 
-            <div className="absolute h-[250px] w-[250px] rounded-full border border-white/20 bg-white/5 shadow-[0_0_0_20px_rgba(139,233,253,0.08)] backdrop-blur-md" />
+            Pehle yahan har haal mein ek framer-motion pulse chalta tha
+            (scale 1 -> 1.08 -> 1). Wo audio se juda hua nahi tha - agent
+            bol raha ho ya chup ho, daira bilkul ek jaisa dikhta tha.
+          */}
+          {isConnected && room ? (
 
-            <motion.div
-              className="assistant-mic-core relative grid h-28 w-28 place-items-center rounded-full bg-gradient-to-b from-accent-primary/80 to-accent-secondary/85 text-white shadow-[0_14px_40px_rgba(108,99,255,0.35)]"
-              animate={
-                isConnected &&
-                !isPaused
-                  ? {
-                      scale: [
-                        1,
-                        1.08,
-                        1,
-                      ],
-                    }
-                  : {
-                      scale: [
-                        1,
-                        1.03,
-                        1,
-                      ],
-                    }
-              }
-              transition={{
-                duration:
-                  isConnected &&
-                  !isPaused
-                    ? 1.5
-                    : 3.2,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
+            <div
+              id="voice-assistant-demo"
+              className="assistant-speaker-float relative mt-10"
             >
-              <Mic className="h-9 w-9" />
-            </motion.div>
+              <RoomContext.Provider value={room}>
+                <AgentVisualizer />
+              </RoomContext.Provider>
+            </div>
 
-          </div>
+          ) : (
+
+            <div
+              id="voice-assistant-demo"
+              className={`assistant-speaker-float relative mt-10 flex h-[290px] w-[290px] items-center justify-center ${
+                isConnecting || isEnding
+                  ? "cursor-default"
+                  : "cursor-pointer"
+              }`}
+              onClick={
+                !isConnecting && !isEnding
+                  ? handleMicClick
+                  : undefined
+              }
+            >
+
+              <div className="absolute h-[250px] w-[250px] rounded-full border border-white/20 bg-white/5 shadow-[0_0_0_20px_rgba(139,233,253,0.08)] backdrop-blur-md" />
+
+              <motion.div
+                className="assistant-mic-core relative grid h-28 w-28 place-items-center rounded-full bg-gradient-to-b from-accent-primary/80 to-accent-secondary/85 text-white shadow-[0_14px_40px_rgba(108,99,255,0.35)]"
+                animate={{ scale: [1, 1.03, 1] }}
+                transition={{
+                  duration: 3.2,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+              >
+                <Mic className="h-9 w-9" />
+              </motion.div>
+
+            </div>
+
+          )}
 
           {/* ================================================== */}
           {/* CONNECTING */}

@@ -190,6 +190,47 @@ def extract_participant_identity(participant):
 
 
 # =========================================================
+# AGENT KI HAALAT FRONTEND TAK
+#
+# LiveKit ke apne UI components (useVoiceAssistant / BarVisualizer)
+# agent ki haalat "lk.agent.state" attribute se parhte hain. Hum ye
+# haalat pehle se andar track karte thay (_is_agent_speaking) magar
+# kabhi bheji nahi, is liye browser mein visualizer ko pata hi nahi
+# chalta tha ke agent sun raha hai, soch raha hai ya bol raha hai.
+#
+# Ye values LiveKit Agents SDK wali hi hain.
+# =========================================================
+
+AGENT_STATE_ATTRIBUTE = "lk.agent.state"
+
+
+async def publish_agent_state(service_handle, state: str) -> None:
+    """
+    Agent ki maujooda haalat batayein: listening / thinking / speaking.
+
+    Ye khabar dena hai, kaam nahi - is liye koi bhi nakami sirf
+    likhi jati hai, call rukti nahi.
+    """
+
+    room = getattr(service_handle, "room", None)
+
+    if not room or not room.isconnected():
+        return
+
+    if getattr(service_handle, "_agent_state", None) == state:
+        return
+
+    try:
+        await room.local_participant.set_attributes(
+            {AGENT_STATE_ATTRIBUTE: state}
+        )
+        service_handle._agent_state = state
+
+    except Exception as error:
+        print(f"⚠️ [Agent State] '{state}' bhej nahi sake: {error}")
+
+
+# =========================================================
 # AGENT KO BULWAYEIN
 # =========================================================
 
@@ -233,6 +274,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
         chunk_size = samples_per_channel * num_channels * bytes_per_sample
 
         service_handle._is_agent_speaking = True
+        await publish_agent_state(service_handle, "speaking")
 
         try:
             for sentence in sentences:
@@ -275,6 +317,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
         finally:
             service_handle._is_agent_speaking = False
             service_handle._agent_speech_ended_at = time.monotonic()
+            await publish_agent_state(service_handle, "listening")
 
     print(f"✅ [Speak] bol diya: {text[:60]}")
     return True
@@ -757,6 +800,9 @@ async def process_voice_intent(
         print(
             f"🗣️ [User]: {user_query}"
         )
+
+        # Sawal aa gaya - jawab banne tak "thinking".
+        await publish_agent_state(service_handle, "thinking")
 
         # =====================================================
         # 2. HANDOFF CHECK
@@ -1763,6 +1809,7 @@ async def process_voice_intent(
             )
 
             service_handle._is_agent_speaking = True
+            await publish_agent_state(service_handle, "speaking")
 
             # Ye jawab bola ja raha hai - is se purane jawab ab
             # khud-ba-khud rad ho jayenge.
@@ -1926,6 +1973,8 @@ async def process_voice_intent(
                 service_handle._agent_speech_ended_at = (
                     time.monotonic()
                 )
+
+                await publish_agent_state(service_handle, "listening")
 
             print(
                 "✅ [TTS] "

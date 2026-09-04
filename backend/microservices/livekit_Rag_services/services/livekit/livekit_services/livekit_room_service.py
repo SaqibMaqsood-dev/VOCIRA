@@ -122,6 +122,11 @@ class LivekitRoomServices:
 
         self._is_agent_speaking = False
 
+        # Aakhri haalat jo frontend ko bheji gayi (lk.agent.state).
+        # LiveKit ka visualizer isi se listening / thinking /
+        # speaking dikhata hai. None ka matlab abhi kuch nahi bheja.
+        self._agent_state = None
+
         # Agent ne aakhri baar kab bolna khatam kiya. Iske baad
         # thori der mic nahi suna jata, warna speaker se nikalti
         # awaaz ki dum agla "sawal" ban jati hai.
@@ -257,6 +262,16 @@ class LivekitRoomServices:
                     room=room_name,
                     can_publish=True,
                     can_subscribe=True,
+                    agent=(participant_type == "agent"),
+
+                    # Agent apni haalat "lk.agent.state" attribute se
+                    # batata hai (listening / thinking / speaking) -
+                    # LiveKit ke UI components isi ko parhte hain.
+                    # set_attributes() ke liye yehi permission chahiye;
+                    # is ke baghair wo chup-chaap nakaam ho jata hai.
+                    can_update_own_metadata=(
+                        participant_type == "agent"
+                    ),
                 )
             )
             .with_room_config(
@@ -368,6 +383,7 @@ class LivekitRoomServices:
         self._speech_generation = 0
         self._last_played_generation = 0
         self._is_agent_speaking = False
+        self._agent_state = None
         self._agent_speech_ended_at = 0.0
 
         print(
