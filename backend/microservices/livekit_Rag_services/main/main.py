@@ -27,6 +27,7 @@ from backend.microservices.livekit_Rag_services.middleware.rate_limit_middleware
 )
 
 from backend.microservices.livekit_Rag_services.routers.users_route import (
+    admin_route,
     session_route,
     escalation_route,
     livekit_router,
@@ -184,6 +185,12 @@ app.include_router(
 
 app.include_router(
     escalation_route.router,
+    prefix="/livekit",
+)
+
+# Admin panel ka apna hissa - har endpoint require_admin ke peeche.
+app.include_router(
+    admin_route.router,
     prefix="/livekit",
 )
 

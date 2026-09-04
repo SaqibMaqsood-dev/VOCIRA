@@ -17,6 +17,10 @@ from backend.helper_functions.token_service.access_tokken.get_current_user impor
     current_user,
 )
 
+from backend.helper_functions.token_service.access_tokken.require_admin import (
+    require_admin,
+)
+
 
 
 
@@ -58,7 +62,10 @@ async def get_all_escalations(
     limit: int = 10,
     skip: int = 0,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(current_user)
+    # Pehle yahan sirf `current_user` tha - yaani KOI BHI logged-in
+    # parent saari escalations dekh sakta tha, doosre khandaan ke
+    # sawal bhi. Ye poori list hai, is liye admin-only honi chahiye.
+    admin=Depends(require_admin),
 ):
     return await escalation_service.get_all_escalations(
         db=db,

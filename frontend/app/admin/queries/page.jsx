@@ -1,29 +1,38 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, Filter } from "lucide-react";
+import { Search, Filter, RefreshCw } from "lucide-react";
 import Button from "@/app/admin/_components/ui/Button";
 import Badge from "@/app/admin/_components/ui/Badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
-import { queries } from "@/app/admin/data";
+import { useAdminData, formatTime } from "@/app/admin/useAdminApi";
 
-const statusOptions = ["All", "Resolved", "Pending", "Escalated"];
+const statusOptions = ["All", "Resolved", "Escalated"];
 
 export default function QueriesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [openId, setOpenId] = useState(null);
+
+  const { data: queries, loading, error, reload } = useAdminData(
+    "/livekit/admin/queries?limit=100",
+    []
+  );
 
   const filtered = useMemo(
     () =>
       queries.filter((q) => {
+        const needle = search.toLowerCase();
         const matchesSearch =
-          q.question.toLowerCase().includes(search.toLowerCase()) ||
-          q.user.toLowerCase().includes(search.toLowerCase()) ||
-          q.id.toLowerCase().includes(search.toLowerCase());
-        const matchesStatus = statusFilter === "All" ? true : q.status === statusFilter;
+          !needle ||
+          q.question.toLowerCase().includes(needle) ||
+          (q.response || "").toLowerCase().includes(needle) ||
+          q.user.toLowerCase().includes(needle);
+        const matchesStatus =
+          statusFilter === "All" ? true : q.status === statusFilter;
         return matchesSearch && matchesStatus;
       }),
-    [search, statusFilter]
+    [queries, search, statusFilter]
   );
 
   return (
@@ -33,6 +42,11 @@ export default function QueriesPage() {
           <h1 className="text-xl font-semibold text-white">Queries</h1>
           <p className="mt-1 text-xs text-text-secondary">
             Review and manage user conversations handled by Vocira.
+            {!loading && !error && (
+              <span className="ml-1 text-text-secondary/70">
+                ({filtered.length} of {queries.length})
+              </span>
+            )}
           </p>
         </div>
 
@@ -66,57 +80,87 @@ export default function QueriesPage() {
               </button>
             ))}
           </div>
+
+          <Button variant="outline" onClick={reload}>
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
+          {error}
+        </div>
+      )}
 
       <Table>
         <THead>
           <TR>
-            <TH>Query ID</TH>
             <TH>User</TH>
             <TH>Question</TH>
             <TH>AI Response</TH>
-            <TH>Confidence</TH>
+            {/* Pehle yahan "Confidence" tha jis ki value data.js mein
+                likhi hui thi - backend aisa koi score rakhta hi nahi.
+                Intent asli hai: router har sawal par ye tay karta hai. */}
+            <TH>Route</TH>
             <TH>Status</TH>
             <TH>Timestamp</TH>
             <TH className="text-right">Actions</TH>
           </TR>
         </THead>
         <TBody>
+          {loading && (
+            <TR>
+              <TD colSpan={7} className="py-6 text-center text-xs text-text-secondary">
+                Loading…
+              </TD>
+            </TR>
+          )}
+
+          {!loading && filtered.length === 0 && !error && (
+            <TR>
+              <TD colSpan={7} className="py-6 text-center text-xs text-text-secondary">
+                {queries.length === 0
+                  ? "Abhi koi sawal nahi aaya."
+                  : "Is filter par kuch nahi mila."}
+              </TD>
+            </TR>
+          )}
+
           {filtered.map((q) => (
             <TR key={q.id}>
-              <TD className="whitespace-nowrap font-mono text-[11px] text-text-secondary">
-                {q.id}
-              </TD>
               <TD className="whitespace-nowrap text-[11px] text-text-secondary">
                 {q.user}
               </TD>
-              <TD className="max-w-xs text-xs text-white">{q.question}</TD>
-              <TD className="max-w-xs text-[11px] text-text-secondary">{q.response}</TD>
+              <TD className="max-w-xs text-xs text-white">
+                {openId === q.id ? q.question : truncate(q.question, 70)}
+              </TD>
+              <TD className="max-w-xs text-[11px] text-text-secondary">
+                {openId === q.id ? q.response : truncate(q.response, 70)}
+              </TD>
               <TD className="whitespace-nowrap text-[11px] text-text-secondary">
-                {(q.confidence * 100).toFixed(0)}%
+                {q.intent || "—"}
               </TD>
               <TD>
                 <Badge
                   label={q.status}
-                  variant={
-                    q.status === "Escalated"
-                      ? "warning"
-                      : q.status === "Resolved"
-                        ? "success"
-                        : "neutral"
-                  }
+                  variant={q.status === "Escalated" ? "warning" : "success"}
                 />
               </TD>
               <TD className="whitespace-nowrap text-[11px] text-text-secondary">
-                {q.timestamp}
+                {formatTime(q.timestamp)}
               </TD>
               <TD className="whitespace-nowrap text-right">
-                <div className="flex justify-end gap-1">
-                  <Button variant="ghost">View</Button>
-                  <Button variant="outline">Resolve</Button>
-                  <Button variant="ghost">Escalate</Button>
-                </div>
+                {/* Pehle yahan "Resolve" aur "Escalate" ke button thay
+                    jo kuch karte hi nahi thay - backend mein query ka
+                    koi status badalne wala concept nahi (escalations
+                    ka apna status hai, wo us page par hai). */}
+                <Button
+                  variant="ghost"
+                  onClick={() => setOpenId(openId === q.id ? null : q.id)}
+                >
+                  {openId === q.id ? "Collapse" : "View"}
+                </Button>
               </TD>
             </TR>
           ))}
@@ -126,3 +170,7 @@ export default function QueriesPage() {
   );
 }
 
+function truncate(text, max) {
+  if (!text) return "—";
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
