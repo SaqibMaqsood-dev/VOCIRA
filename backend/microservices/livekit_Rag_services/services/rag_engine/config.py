@@ -83,7 +83,13 @@ PINECONE_NAMESPACE = os.getenv("PINECONE_NAMESPACE", "school-general")
 
 # ── RAG ──────────────────────────────────────────────────────
 MAX_CONTEXT_CHARS = 4000
-TOP_K             = int(os.getenv("RAG_TOP_K", "10"))
+
+# 10 chunks laane par context MAX_CONTEXT_CHARS se bhi barh jata tha
+# (~6300 chars) aur phir kaat diya jata tha - yaani aakhri chunks
+# embed kar ke laaye jate the aur phenk diye jate the. Prompt phir
+# bhi ~1380 tokens ka rehta tha, jo Groq ki 8000/min hadd mein bhaari
+# parta hai. 5 chunks ab bhi MAX_CONTEXT_CHARS bhar dete hain.
+TOP_K             = int(os.getenv("RAG_TOP_K", "5"))
 
 # LLM ka model wahi jo baqi system use karta hai (services/groq/groq.py)
 GROQ_MODEL = os.getenv("LLM_SMART_MODEL") or os.getenv(

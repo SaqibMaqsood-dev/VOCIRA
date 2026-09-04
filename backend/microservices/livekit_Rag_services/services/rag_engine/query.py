@@ -119,7 +119,18 @@ CONTEXT:
                             {"role": "system", "content": system_prompt},
                             {"role": "user",   "content": user_query}
                         ],
-                        max_tokens=1000,
+                        # max_tokens sirf hadd nahi - provider itne
+                        # tokens RESERVE kar leta hai aur wo minute ke
+                        # budget se kat jate hain. Yahan 1000 tha
+                        # jabke asli bole gaye jawab 29-182 tokens ke
+                        # the. Ek sawal ~2400 tokens kha jata tha, to
+                        # Groq ki 8000/min hadd mein sirf ~2.6 sawal
+                        # aate the - us ke baad har call throttle hoti
+                        # thi, 15s ka timeout lagta tha, aur user ko
+                        # "assistant is currently busy" milta tha.
+                        # 320 sab se lambe naape gaye jawab se do guna
+                        # hai.
+                        max_tokens=320,
                         temperature=0.1,
                         **extra
                     )
