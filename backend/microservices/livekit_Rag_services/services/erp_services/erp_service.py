@@ -3,6 +3,7 @@ import json
 from .ERP_client import ERPClient
 from .prompt import build_erp_prompt
 from .endpoint import ERP_RESOURCES
+from .compact import compact_records
 
 # Voice assistant ke liye is se zyada records ka koi faida nahi.
 DEFAULT_LIMIT = 20
@@ -528,6 +529,8 @@ class ERPService:
         # ------------------------------------------------------
 
         if isinstance(data, dict):
+
+            data = compact_records(resource, data)
 
             data["_about"] = resource_config.get(
                 "description",

@@ -12,6 +12,8 @@ from backend.microservices.livekit_Rag_services.services.rag_engine.config impor
 # har baar "assistant is currently busy" kaha.
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
     client as llm_client,
+    _is_rate_limited,
+    _model_chain,
 )
 
 log = logging.getLogger(__name__)
@@ -101,20 +103,26 @@ RULES:
 CONTEXT:
 {context}"""
 
-    # gpt-oss reasoning models hain - bina is flag ke ye jawab se
-    # kai guna zyada tokens sirf "sochne" par kharch karte hain.
-    extra = {}
-    if "gpt-oss" in GROQ_MODEL:
-        extra["reasoning_effort"] = "low"
+    # Groq par har model ka apna rozana budget hai. Ek khatam ho jaye
+    # to baqi ke paas bacha hota hai - pehle yahan sirf wahi ek model
+    # try hota tha, is liye us ka budget khatam hote hi RAG ke saare
+    # sawal "assistant is currently busy" dene lagte the.
+    chain = _model_chain(GROQ_MODEL)
 
-    for attempt in range(2):
+    for attempt, model_name in enumerate(chain):
+
+        # gpt-oss reasoning models hain - bina is flag ke ye jawab se
+        # kai guna zyada tokens sirf "sochne" par kharch karte hain.
+        extra = {}
+        if "gpt-oss" in model_name:
+            extra["reasoning_effort"] = "low"
         try:
             loop = asyncio.get_running_loop()
             response = await asyncio.wait_for(
                 loop.run_in_executor(
                     _groq_executor,
                     lambda: llm_client.chat.completions.create(
-                        model=GROQ_MODEL,
+                        model=model_name,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user",   "content": user_query}
@@ -140,16 +148,16 @@ CONTEXT:
             return clean_for_tts(response.choices[0].message.content)
 
         except asyncio.TimeoutError:
-            log.warning(f"Groq call timed out (attempt {attempt + 1}/2).")
+            log.warning(f"{model_name} time out ho gaya ({attempt + 1}/{len(chain)}).")
             continue
 
         except Exception as e:
-            status = getattr(e, "status_code", None)
-            if status in (503, 429):
-                log.warning(f"API rate limited (HTTP {status}). Retry {attempt + 1}/2...")
-                await asyncio.sleep(2 * (attempt + 1))
+            if _is_rate_limited(e):
+                log.warning(
+                    f"{model_name} ka budget khatam - agla model try kar rahe hain"
+                )
                 continue
-            log.error(f"Groq error: {e}")
+            log.error(f"Groq error ({model_name}): {e}")
             return "Sorry, I'm having trouble reaching the assistant service right now — please try again in a moment."
 
     return "Sorry, the assistant is currently busy. Please try asking again shortly."

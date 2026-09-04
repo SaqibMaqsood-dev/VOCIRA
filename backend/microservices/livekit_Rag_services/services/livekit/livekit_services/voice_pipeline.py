@@ -28,6 +28,7 @@ from backend.microservices.livekit_Rag_services.services.erp_services.erp_servic
 )
 
 from backend.microservices.livekit_Rag_services.services.groq import (
+    answer_cache,
     human_text,
     intent_prompt,
 )
@@ -852,6 +853,25 @@ async def process_voice_intent(
             )
 
             # =================================================
+            # PEHLE SE MAALOOM JAWAB
+            # =================================================
+
+            # Ek hi sawal dobara poochne par poora kharcha dobara
+            # lagta tha - router, ERP, aur jawab banane wali LLM
+            # call. Cache ki key mein user_id shaamil hai, is liye
+            # ek parent ka jawab kabhi doosre ko nahi milta.
+
+            cached_answer = answer_cache.get(user_id, user_query)
+
+            if cached_answer:
+
+                print(
+                    "⚡ [Cache] yehi sawal abhi poocha gaya tha"
+                )
+
+                ai_response_text = cached_answer
+
+            # =================================================
             # INTENT ROUTER
             # =================================================
 
@@ -866,15 +886,25 @@ async def process_voice_intent(
             # hua router call seedha ek aur sawal ki gunjaish deta
             # hai. quick_route shak hone par None deta hai, tab LLM
             # chalti hai.
-            route = intent_prompt.quick_route(user_query)
+            if cached_answer:
 
-            if route is not None:
+                # Jawab pehle se mojood hai - routing ki zaroorat
+                # hi nahi. Ye intent kisi branch se mel nahi khata,
+                # is liye seedha neeche RAG wali `else` par jata
+                # hai jahan cached jawab utha liya jata hai.
+                route = {"intent": "CACHED"}
+
+            else:
+
+                route = intent_prompt.quick_route(user_query)
+
+            if route is not None and route.get("intent") != "CACHED":
 
                 print(
                     f"⚡ [Router] bina LLM ke: {route}"
                 )
 
-            else:
+            elif route is None:
 
                 router_result = await dataConverter(
                     intent_prompt.ROUTER_PROMPT.format(
@@ -1525,10 +1555,15 @@ async def process_voice_intent(
                     "📚 [Route]: RAG Pipeline"
                 )
 
-                ai_response_text = await ask_vocira(
-                    retriever=retriever,
-                    user_query=user_query,
-                )
+                # Cache hit yahin par pahunchta hai - us surat mein
+                # ai_response_text pehle se bhara hua hai aur RAG
+                # chalane ki zaroorat nahi.
+                if not cached_answer:
+
+                    ai_response_text = await ask_vocira(
+                        retriever=retriever,
+                        user_query=user_query,
+                    )
 
                 if ai_response_text:
 
@@ -1569,6 +1604,15 @@ async def process_voice_intent(
                 f"🤖 [AI]: "
                 f"{ai_response_text}"
             )
+
+            # Agli baar yehi sawal aaye to dobara kharcha na ho.
+            # put() ghalti wale jawab khud rad kar deta hai.
+            if not cached_answer:
+                answer_cache.put(
+                    user_id=user_id,
+                    question=user_query,
+                    answer=ai_response_text,
+                )
 
             # =================================================
             # SAVE AI MESSAGE

@@ -75,6 +75,56 @@ LLM_FAST_MODEL = GROQ_FAST_MODEL
 LLM_SMART_MODEL = GROQ_SMART_MODEL
 
 
+# =========================================================
+# BACKUP MODELS
+#
+# Groq par har model ka APNA rozana budget hai (tokens per day aur
+# requests per day). Ek model khatam ho jaye to baqi ke paas budget
+# bacha hota hai - magar pehle poora system ruk jata tha aur user ko
+# "assistant is currently busy" milta tha, halanke doosra model
+# bilkul tayyar tha.
+#
+# Ab 429 (rate limit) par agla model try hota hai. Tarteeb: pehle wo
+# jo mangaya gaya, phir ye.
+# =========================================================
+
+_DEFAULT_FALLBACKS = "openai/gpt-oss-20b,qwen/qwen3.8-27b,openai/gpt-oss-120b"
+
+LLM_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.getenv("LLM_FALLBACK_MODELS", _DEFAULT_FALLBACKS).split(",")
+    if m.strip()
+]
+
+
+def _is_rate_limited(error: Exception) -> bool:
+    """429 / quota khatam - doosre model par jane ke qabil ghalti."""
+
+    if getattr(error, "status_code", None) == 429:
+        return True
+
+    text = str(error).lower()
+
+    return (
+        "rate_limit" in text
+        or "rate limit" in text
+        or "tokens per day" in text
+        or "tpd" in text
+    )
+
+
+def _model_chain(selected: str) -> list[str]:
+    """Jo model manga gaya wo pehle, phir backup - bina dohraav."""
+
+    chain = [selected]
+
+    for m in LLM_FALLBACK_MODELS:
+        if m not in chain:
+            chain.append(m)
+
+    return chain
+
+
 async def dataConverter(
     prompt: str,
     model: str | None = None,
@@ -85,24 +135,59 @@ async def dataConverter(
 
     model = None             -> SMART model
     model = LLM_FAST_MODEL   -> chhoti classification ke liye
+
+    Model ka rozana budget khatam ho to khud backup model par
+    chala jata hai.
     """
 
-    selected_model = model or GROQ_SMART_MODEL
+    chain = _model_chain(model or GROQ_SMART_MODEL)
+    last_error: Exception | None = None
 
-    kwargs = {
-        "model": selected_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "max_tokens": max_tokens,
-    }
+    for attempt, selected_model in enumerate(chain):
 
-    # gpt-oss reasoning models hain. Bina is flag ke ye jawab se kai
-    # guna zyada tokens sirf "sochne" par kharch karte hain.
-    if "gpt-oss" in selected_model:
-        kwargs["reasoning_effort"] = "low"
+        kwargs = {
+            "model": selected_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_tokens": max_tokens,
+        }
+
+        # gpt-oss reasoning models hain. Bina is flag ke ye jawab se kai
+        # guna zyada tokens sirf "sochne" par kharch karte hain.
+        if "gpt-oss" in selected_model:
+            kwargs["reasoning_effort"] = "low"
+
+        try:
+            response = client.chat.completions.create(**kwargs)
+
+        except Exception as exc:
+
+            last_error = exc
+
+            if _is_rate_limited(exc) and attempt + 1 < len(chain):
+                print(
+                    f"⚠️ [LLM] {selected_model} ka budget khatam - "
+                    f"{chain[attempt + 1]} par ja rahe hain"
+                )
+                continue
+
+            print("=" * 70)
+            print("❌ [LLM ERROR]")
+            print(f"Provider: {LLM_BASE_URL}")
+            print(f"Model: {selected_model}")
+            print(f"Error: {exc}")
+            print("=" * 70)
+            raise
+
+        return _log_and_return(response, selected_model)
+
+    raise last_error  # pragma: no cover - chain kabhi khali nahi hoti
+
+
+def _log_and_return(response, selected_model):
+    """Sirf logging - jawab waisa ka waisa wapis."""
 
     try:
-        response = client.chat.completions.create(**kwargs)
 
         print("=" * 70)
         print("🤖 [LLM RESPONSE]")
@@ -122,13 +207,9 @@ async def dataConverter(
             print(f"Content repr: {repr(choice.message.content)}")
 
         print("=" * 70)
-        return response
 
-    except Exception as exc:
-        print("=" * 70)
-        print("❌ [LLM ERROR]")
-        print(f"Provider: {LLM_BASE_URL}")
-        print(f"Model: {selected_model}")
-        print(f"Error: {exc}")
-        print("=" * 70)
-        raise
+    except Exception as log_error:
+        # Logging kabhi asli jawab ke raaste mein na aaye
+        print(f"⚠️ [LLM] log fail: {log_error}")
+
+    return response
