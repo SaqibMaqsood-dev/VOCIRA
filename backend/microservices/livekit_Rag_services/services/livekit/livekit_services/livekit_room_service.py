@@ -1,5 +1,6 @@
 import asyncio
 import json
+import traceback
 from typing import Optional
 from uuid import UUID
 
@@ -292,13 +293,31 @@ class LivekitRoomServices:
         self._greeted = True
 
         try:
-            await voice_pipeline.speak_text(
+            # speak_text har nakami par exception nahi phenkta - track
+            # tayyar na ho, room na ho, ya frame bhejna fail ho jaye to
+            # wo sirf False lauta deta hai. Pehle ye return value
+            # nazarandaz hoti thi, is liye greeting bilkul khamoshi se
+            # ghayab ho jati thi aur logs mein koi nishan nahi hota tha.
+            spoken = await voice_pipeline.speak_text(
                 service_handle=self,
                 audio_source=self.agent_source,
                 text=self.GREETING_TEXT,
             )
+
+            if not spoken:
+                print(
+                    "⚠️ [Greeting] boli nahi ja saki - "
+                    "agent track ya room tayyar nahi tha. "
+                    "(upar [Speak] wali line asal wajah batati hai)"
+                )
+
         except Exception as error:
-            print(f"⚠️ [Greeting] fail: {error}")
+            print(
+                f"❌ [Greeting] fail: "
+                f"{type(error).__name__}: {error}"
+            )
+
+            traceback.print_exc()
 
     def _schedule_greeting(self):
         """
