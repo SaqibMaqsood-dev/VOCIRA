@@ -118,6 +118,47 @@ if ($Stop) {
 # =====================================================================
 
 # ---------------------------------------------------------------------
+# DOCKER PEHLE
+#
+# Docker Desktop band ho to Postgres/RabbitMQ uthte hi nahi, aur script
+# aage chal kar sirf "Postgres ne jawab nahi diya" kehti thi - asli
+# wajah nazar hi nahi aati thi. Ab shuru mein hi saaf bata dete hain.
+# ---------------------------------------------------------------------
+docker info 2>$null | Out-Null
+if (-not $?) {
+    Write-Host "`nDocker Desktop band hai." -ForegroundColor Red
+    Write-Host "  Postgres, RabbitMQ, LiveKit aur ERPNext sab isi par chalte hain."
+
+    $dockerExe = @(
+        "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+        "$env:LOCALAPPDATA\Programs\DockerDesktop\Docker Desktop.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if ($dockerExe) {
+        Write-Host "  Chala rahe hain..." -ForegroundColor Yellow
+        Start-Process $dockerExe
+
+        for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 2
+            docker info 2>$null | Out-Null
+            if ($?) { break }
+        }
+
+        docker info 2>$null | Out-Null
+        if ($?) {
+            Write-Host "  Docker tayyar." -ForegroundColor Green
+        } else {
+            Write-Host "  Docker 3 minute mein tayyar nahi hua." -ForegroundColor Red
+            Write-Host "  Docker Desktop khud khol kar dobara koshish karein."
+            return
+        }
+    } else {
+        Write-Host "  Docker Desktop khol kar dobara koshish karein." -ForegroundColor Yellow
+        return
+    }
+}
+
+# ---------------------------------------------------------------------
 # 0. PURANE PROCESSES SAAF
 #
 # Bina iske dobara chalane par purani services zinda reh jati thin.
