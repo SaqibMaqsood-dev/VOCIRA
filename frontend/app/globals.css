@@ -265,17 +265,13 @@ h6 {
 .agent-visualizer .lk-audio-bar {
   width: 10px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.22);
   transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 
 .agent-visualizer .lk-audio-bar[data-lk-highlighted="true"] {
-  background: linear-gradient(
-    to top,
-    var(--vocira-accent-primary),
-    var(--vocira-accent-secondary)
-  );
-  box-shadow: 0 0 14px rgba(139, 233, 253, 0.45);
+  background: #ffffff;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.55);
 }
 
 /* Sochte waqt bars halke se saans lete hain - taake khamoshi aur
