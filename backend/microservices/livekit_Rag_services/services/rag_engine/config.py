@@ -1,17 +1,38 @@
 """
 RAG engine settings.
 
-NOTE: ye file apni .env padhti hai (rag_engine/.env). Pehle yahan
-GROQ_MODEL alag hardcoded tha jo baqi system se mel nahi khata tha -
-jab gpt-oss-20b ka quota khatam hua to ERP sawal chalte rahe magar
-RAG wale "assistant is currently busy" dete rahe. Ab wahi env var
-padhta hai jo groq.py padhta hai.
+NOTE: ye file wahi env vars padhti hai jo groq.py padhta hai, taake
+provider ek hi jagah se badle. Pehle yahan GROQ_MODEL alag hardcoded
+tha - jab gpt-oss-20b ka quota khatam hua to ERP sawal chalte rahe
+magar RAG wale "assistant is currently busy" dete rahe.
+
+ENV LOADING KA TARTEEB AHEM HAI:
+
+Do .env files hain - service ki (livekit_Rag_services/.env) aur ek
+purani yahan (rag_engine/.env). load_dotenv pehle se set variables
+ko override NAHI karta, is liye jo file PEHLE load ho wahi jeetti
+hai. Pehle yahan sirf local file load hoti thi, to import order ke
+mutabiq kabhi service ki setting chalti thi aur kabhi local wali.
+Natija: LLM_BASE_URL service .env mein Groq par hota tha magar RAG
+phir bhi OpenRouter ko jata tha aur 402 khata tha.
+
+Ab service wali PEHLE load hoti hai (wahi asal source hai), aur
+local file sirf un keys ke liye rehti hai jo service .env mein
+nahi hain (jaise HUGGINGFACEHUB_API_TOKEN).
 """
 
 import os
 from dotenv import load_dotenv
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# service ki .env - livekit_Rag_services/.env  (asal source)
+SERVICE_ENV_PATH = os.path.abspath(
+    os.path.join(BASE_DIR, "..", "..", ".env")
+)
+load_dotenv(dotenv_path=SERVICE_ENV_PATH)
+
+# local file sirf fallback ke tor par
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(dotenv_path=ENV_PATH)
 
