@@ -1086,6 +1086,11 @@ async def process_voice_intent(
                     "🏫 [Route]: ERP Pipeline"
                 )
 
+                # Kaun sa hissa fail hua, ye neeche wale except ko
+                # batata hai. "erp" = records tak pahunch nahi saki,
+                # "llm" = data mil gaya tha magar jumla nahi bana.
+                erp_stage = "erp"
+
                 # =================================================
                 # SECURITY MODEL
                 # =================================================
@@ -1411,6 +1416,8 @@ async def process_voice_intent(
                                         # 9. CONVERT ERP DATA TO HUMAN RESPONSE
                                         # =================================================
 
+                                        erp_stage = "llm"
+
                                         response_prompt = (
                                             human_text.build_response_prompt(
                                                 user_query=user_query,
@@ -1442,20 +1449,46 @@ async def process_voice_intent(
 
                 except Exception as erp_error:
 
-                    print(
-                        "❌ [ERP Pipeline Error]"
-                    )
+                    # Pehle yahan har fail par ek hi jumla jata tha -
+                    # "unable to retrieve your ERP information". Us se
+                    # LLM ka masla bhi ERP ke khate mein chala jata tha:
+                    # jab LLM provider ne credits khatam hone par 402
+                    # diya, caller ko yehi sunai diya, halanke ERP
+                    # bilkul theek chal raha tha aur data mil bhi gaya
+                    # tha. Ab dono halaat alag pehchane jate hain.
+
+                    stage = erp_stage
+
+                    if stage == "llm":
+
+                        print(
+                            "❌ [LLM Error] ERP se data mil gaya tha, "
+                            "jawab ka jumla banate waqt fail hua"
+                        )
+
+                        ai_response_text = (
+                            "I found your record, but I am having "
+                            "trouble putting the answer together "
+                            "right now. Please ask me again in a moment."
+                        )
+
+                    else:
+
+                        print(
+                            "❌ [ERP Error] school records tak "
+                            "pahunch nahi saki"
+                        )
+
+                        ai_response_text = (
+                            "Sorry, I cannot reach the school records "
+                            "system right now. Please try again shortly."
+                        )
 
                     print(
-                        f"Error: {erp_error}"
+                        f"Error: {type(erp_error).__name__}: {erp_error}"
                     )
 
                     traceback.print_exc()
-
-                    ai_response_text = (
-                        "Sorry, I was unable to retrieve "
-                        "your ERP information right now."
-                    )
 
             # =================================================
             # RAG QUERY

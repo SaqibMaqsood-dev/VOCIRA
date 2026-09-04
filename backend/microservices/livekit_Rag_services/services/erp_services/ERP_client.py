@@ -37,11 +37,18 @@ class ERPClient:
 
         url = f"{self.base_url}{endpoint}"
 
+        # NOTE: yahan pehle poora self.headers chhapta tha, jis mein
+        # "token <API_KEY>:<API_SECRET>" hota hai - yaani ERP ki
+        # dono chabiyan har request par logs mein chali jati thin.
+        # Sirf itna batayein ke auth laga hua hai ya nahi.
         print("=" * 52)
         print("🔎 [ERP CLIENT REQUEST]")
         print(f"URL     : {url}")
         print(f"PARAMS  : {params}")
-        print(f"HEADERS : {self.headers}")
+        print(
+            f"AUTH    : "
+            f"{'set' if settings.ERP_API_KEY else 'GHAYAB'}"
+        )
         print("=" * 52)
 
         try:
