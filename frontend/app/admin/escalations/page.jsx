@@ -35,7 +35,7 @@ export default function EscalationsPage() {
       );
       await reload();
     } catch (err) {
-      setActionError(err.message || "Status badal nahi saka");
+      setActionError(err.message || "Could not change the status.");
     } finally {
       setBusyId(null);
     }

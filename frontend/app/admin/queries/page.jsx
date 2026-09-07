@@ -121,8 +121,8 @@ export default function QueriesPage() {
             <TR>
               <TD colSpan={7} className="py-6 text-center text-xs text-text-secondary">
                 {queries.length === 0
-                  ? "Abhi koi sawal nahi aaya."
-                  : "Is filter par kuch nahi mila."}
+                  ? "No questions yet."
+                  : "Nothing matches this filter."}
               </TD>
             </TR>
           )}

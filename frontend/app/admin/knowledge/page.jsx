@@ -32,7 +32,7 @@ export default function KnowledgePage() {
       setNotice(res.message || "Sync shuru ho gayi");
       setTimeout(reload, 3000);
     } catch (err) {
-      setNotice(err.message || "Sync shuru nahi ho saki");
+      setNotice(err.message || "Could not start the sync.");
     } finally {
       setSyncing(false);
     }

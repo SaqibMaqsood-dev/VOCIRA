@@ -18,7 +18,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export async function adminFetch(path, options = {}) {
   if (!API_URL) {
-    throw new Error("API URL set nahi hai (NEXT_PUBLIC_API_URL)");
+    throw new Error("API URL is not configured (NEXT_PUBLIC_API_URL).");
   }
 
   const token =
@@ -27,7 +27,7 @@ export async function adminFetch(path, options = {}) {
       : null;
 
   if (!token) {
-    const error = new Error("Login zaroori hai");
+    const error = new Error("Please log in.");
     error.code = "NO_TOKEN";
     throw error;
   }
@@ -42,14 +42,14 @@ export async function adminFetch(path, options = {}) {
   });
 
   if (response.status === 401) {
-    const error = new Error("Session khatam ho gayi - dobara login karein");
+    const error = new Error("Your session has expired. Please log in again.");
     error.code = "UNAUTHORIZED";
     throw error;
   }
 
   if (response.status === 403) {
     const error = new Error(
-      "Ye hissa sirf admin ke liye hai. Admin account se login karein."
+      "This area is for administrators only. Please log in with an admin account."
     );
     error.code = "FORBIDDEN";
     throw error;
@@ -58,7 +58,7 @@ export async function adminFetch(path, options = {}) {
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(
-      `Server ne HTTP ${response.status} diya${body ? `: ${body.slice(0, 120)}` : ""}`
+      `Server returned HTTP ${response.status}${body ? `: ${body.slice(0, 120)}` : ""}`
     );
   }
 
@@ -85,7 +85,7 @@ export function useAdminData(path, fallback) {
         window.location.href = "/login";
         return;
       }
-      setError(err.message || "Data nahi mil saka");
+      setError(err.message || "Could not load data.");
     } finally {
       setLoading(false);
     }
