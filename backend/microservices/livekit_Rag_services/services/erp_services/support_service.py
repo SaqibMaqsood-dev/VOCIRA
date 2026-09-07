@@ -48,6 +48,7 @@ class SupportService:
         subject: str,
         message: str,
         raised_by: str | None = None,
+        raised_by_name: str | None = None,
         customer: str | None = None,
         issue_type: str = TYPE_SUPPORT,
         priority: str = DEFAULT_PRIORITY,
@@ -64,15 +65,26 @@ class SupportService:
         if not subject:
             raise ValueError("Subject is required")
 
+        # Kis ne bheja - description ke upar bhi likh dete hain.
+        #
+        # raised_by field mein email pehle se jata hai, magar wo Data
+        # field hai: naam us mein nahi aa sakta, aur ERPNext ke kuch
+        # views us ko numayan nahi karte. Ticket kholte hi school ko
+        # bhejne wale ka naam aur email saaf nazar aana chahiye.
+        header = (
+            f"<p><b>From:</b> {html.escape(raised_by_name or 'Guest')} "
+            f"&lt;{html.escape(raised_by or 'no email')}&gt;</p>"
+        )
+
         payload = {
             "subject": subject,
             # description "Text Editor" field hai - HTML samajhti hai.
             # Parent ka likha hua escape karna zaroori hai, warna
             # us ka text markup ban kar tootta hai.
             "description": (
-                f"<div>{html.escape(message)}</div>"
+                f"{header}<div>{html.escape(message)}</div>"
                 if message
-                else ""
+                else header
             ),
             "status": "Open",
             "priority": priority,

@@ -100,6 +100,9 @@ def main():
         if code == 200:
             got = doc["data"].get("raised_by")
             chk("raised_by = guest ka email", got == GUEST_EMAIL, str(got))
+            gdesc = doc["data"].get("description") or ""
+            chk("guest ka email description mein bhi",
+                GUEST_EMAIL in gdesc, "<- raised_by ke ilawa")
 
     # =====================================================
     print("\n--- 4. login (gateway se) ---")
@@ -155,6 +158,15 @@ def main():
         chk("message description mein",
             "greeting" in (d.get("description") or "").lower(),
             (d.get("description") or "")[:50])
+
+        # Email aur naam description mein bhi - taake school ko
+        # ticket kholte hi nazar aayein
+        desc = d.get("description") or ""
+        chk("email description mein bhi", EMAIL in desc,
+            "<- raised_by ke ilawa")
+        chk("bhejne wale ka naam description mein",
+            "From:" in desc and len(desc.split("From:")[1][:40].strip()) > 3,
+            desc.split("From:")[1][:44].strip() if "From:" in desc else "GHAYAB")
 
     # =====================================================
     print("\n--- 7. LOGIN: doosre ka email bhejna na chale ---")

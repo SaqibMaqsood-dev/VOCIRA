@@ -54,12 +54,15 @@ class TicketResponse(BaseModel):
     opening_date: str | None = None
 
 
-async def _caller_email(db: AsyncSession, user) -> str | None:
+async def _caller_email(db: AsyncSession, user) -> tuple[str | None, str | None]:
     """
     Ticket kis ke naam par bane.
 
     Token mein username = email hota hai, magar us par akela bharosa
     nahi karte - DB se tasdeeq karte hain ke ye user waqai mojood hai.
+
+    Returns (email, naam) - naam ticket mein bhi jata hai, warna
+    school ko sirf email nazar aata hai.
     """
 
     row = (
@@ -74,7 +77,7 @@ async def _caller_email(db: AsyncSession, user) -> str | None:
             detail="User not found",
         )
 
-    return row.email or user.username
+    return row.email or user.username, row.name
 
 
 # =========================================================
@@ -104,9 +107,10 @@ async def create_ticket(
     """
 
     if user is not None:
-        email = await _caller_email(db=db, user=user)
+        email, name = await _caller_email(db=db, user=user)
 
     else:
+        name = None
         if not request.email:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -123,6 +127,7 @@ async def create_ticket(
             subject=request.subject,
             message=request.message,
             raised_by=email,
+            raised_by_name=name,
         )
 
     except HTTPException:
@@ -159,7 +164,7 @@ async def my_tickets(
     db: AsyncSession = Depends(get_db),
     user=Depends(current_user),
 ):
-    email = await _caller_email(db=db, user=user)
+    email, _ = await _caller_email(db=db, user=user)
 
     # Filter service ke andar lagti hai - parent doosre ke tickets
     # maang hi nahi sakta.
