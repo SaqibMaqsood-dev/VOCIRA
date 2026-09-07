@@ -115,7 +115,7 @@ export default function AdminDashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader
             title="Questions per day"
-            description="Last 7 days · hover for the exact count"
+            description="Last 7 days"
           />
           <div className="mt-2">
             <AreaChart

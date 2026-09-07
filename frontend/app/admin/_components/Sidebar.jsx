@@ -109,7 +109,7 @@ export default function Sidebar({
           mobileOpen ? "translate-x-0" : "-translate-x-[110%]"
         )}
       >
-        <Brand collapsed={false} />
+        <Brand collapsed={false} onNavigate={onMobileClose} />
 
         <NavList
           items={items}
@@ -123,7 +123,7 @@ export default function Sidebar({
   );
 }
 
-function Brand({ collapsed, onToggle }) {
+function Brand({ collapsed, onToggle, onNavigate }) {
   return (
     <div
       className={cn(
@@ -131,7 +131,11 @@ function Brand({ collapsed, onToggle }) {
         collapsed && "justify-center px-0"
       )}
     >
-      <Link href="/" className="flex min-w-0 items-center gap-2.5">
+      <Link
+        href="/admin"
+        onClick={onNavigate}
+        className="flex min-w-0 items-center gap-2.5"
+      >
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-accent-primary to-accent-secondary text-sm font-bold text-[#05041c] shadow-lg">
           V
         </span>
@@ -177,12 +181,6 @@ function ExpandButton({ onToggle }) {
 function NavList({ items, pathname, collapsed, pending, onNavigate }) {
   return (
     <nav className={cn("mt-4 space-y-1", collapsed ? "px-2" : "px-3")}>
-      {!collapsed && (
-        <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-secondary/60">
-          Menu
-        </p>
-      )}
-
       {items.map((item) => {
         const active =
           item.href === "/admin"
