@@ -17,11 +17,14 @@
  * chhori, aur legend bhi mojood hai.
  */
 
+import { motion, useReducedMotion } from "framer-motion";
+
 const SURFACE = "#05041c";
 
 const COLORS = ["#6c63ff", "#d95926"];
 
 export default function StackedBar({ data = [], height = 14 }) {
+  const still = useReducedMotion();
   const total = data.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
 
   if (!total) {
@@ -42,11 +45,19 @@ export default function StackedBar({ data = [], height = 14 }) {
           const pct = ((Number(d.value) || 0) / total) * 100;
           if (pct <= 0) return null;
           return (
-            <div
+            <motion.div
               key={d.label}
               title={`${d.label}: ${d.value}%`}
+              initial={still ? false : { width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{
+                duration: 0.8,
+                delay: 0.15 + i * 0.1,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              // width sirf animate mein - style mein bhi rakhne se
+              // dono takrate hain
               style={{
-                width: `${pct}%`,
                 background: COLORS[i % COLORS.length],
                 // 2px surface gap - hisse aapas mein chipke na lagein
                 marginRight:

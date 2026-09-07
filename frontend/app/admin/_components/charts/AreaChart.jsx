@@ -18,6 +18,7 @@
  *   gridlines     1px solid, halke - kabhi dashed nahi
  */
 
+import { motion, useReducedMotion } from "framer-motion";
 import { useMemo, useState } from "react";
 
 const SURFACE = "#05041c";
@@ -33,6 +34,11 @@ export default function AreaChart({
   formatValue = (v) => String(v),
 }) {
   const [hover, setHover] = useState(null);
+
+  // Jis ne system mein animation kam karne ka kaha ho, us ke liye
+  // chart foran poora bana hua aaye - harkat sajawat hai, khabar
+  // nahi.
+  const still = useReducedMotion();
 
   const W = 640; // viewBox ki chaurai - SVG khud responsive hai
   const H = height;
@@ -134,14 +140,31 @@ export default function AreaChart({
             </g>
           ))}
 
-          <path d={areaPath} fill="url(#area-fill)" />
-          <path
+          {/* Area line ke peeche se ubharta hai - pehle lakeer
+              khinchti hai, phir bharav aata hai. Origin plot ke
+              neeche rakha hai taake wo baseline se upar uthe. */}
+          <motion.path
+            d={areaPath}
+            fill="url(#area-fill)"
+            initial={still ? false : { opacity: 0, scaleY: 0.4 }}
+            animate={{ opacity: 1, scaleY: 1 }}
+            transition={{ duration: 0.7, delay: 0.35, ease: "easeOut" }}
+            style={{ transformOrigin: `50% ${plotH}px` }}
+          />
+
+          {/* pathLength framer-motion ka apna intezaam hai -
+              stroke-dasharray khud sambhal leta hai, hamein path
+              ki lambai naapni nahi parti. */}
+          <motion.path
             d={linePath}
             fill="none"
             stroke={SERIES}
             strokeWidth="2"
             strokeLinejoin="round"
             strokeLinecap="round"
+            initial={still ? false : { pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 1.1, ease: "easeInOut" }}
           />
 
           {/* hover: crosshair + dot */}

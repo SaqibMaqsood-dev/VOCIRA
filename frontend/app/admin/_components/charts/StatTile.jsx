@@ -12,6 +12,8 @@
  * sparkline, aur ek chhoti sharah.
  */
 
+import { motion, useReducedMotion } from "framer-motion";
+
 const SERIES = "#6c63ff";
 
 export default function StatTile({
@@ -69,6 +71,7 @@ export default function StatTile({
 
 /** Chhoti si line - sirf shakl batati hai, ginti nahi. */
 function Sparkline({ values, color }) {
+  const still = useReducedMotion();
   const W = 200;
   const H = 28;
   const max = Math.max(1, ...values);
@@ -88,7 +91,7 @@ function Sparkline({ values, color }) {
       style={{ height: H }}
       aria-hidden="true"
     >
-      <path
+      <motion.path
         d={d}
         fill="none"
         stroke={color}
@@ -96,8 +99,19 @@ function Sparkline({ values, color }) {
         strokeLinejoin="round"
         strokeLinecap="round"
         opacity="0.85"
+        initial={still ? false : { pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 0.9, ease: "easeInOut" }}
       />
-      <circle cx={last.x} cy={last.y} r="3" fill={color} />
+      <motion.circle
+        cx={last.x}
+        cy={last.y}
+        r="3"
+        fill={color}
+        initial={still ? false : { scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.3, delay: 0.85 }}
+      />
     </svg>
   );
 }
