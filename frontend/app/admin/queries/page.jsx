@@ -71,11 +71,11 @@ function QueriesPageInner() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search queries..."
-              className="w-full rounded-lg border border-white/10 bg-white/5 py-2 pl-8 pr-3 text-xs text-white placeholder:text-text-secondary/70 outline-none focus:ring-2 focus:ring-accent-primary/60"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-8 pr-3 text-xs text-white placeholder:text-text-secondary/70 outline-none transition-colors focus:border-accent-primary/50 focus:bg-white/[0.07] focus:ring-2 focus:ring-accent-primary/40"
             />
           </div>
 
-          <div className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs">
+          <div className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs">
             <Filter className="mr-1 h-3.5 w-3.5 text-text-secondary" />
             {statusOptions.map((s) => (
               <button
@@ -100,7 +100,7 @@ function QueriesPageInner() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
+        <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
           {error}
         </div>
       )}

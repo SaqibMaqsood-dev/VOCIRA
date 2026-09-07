@@ -61,7 +61,7 @@ export default function EscalationsPage() {
       </div>
 
       {(error || actionError) && (
-        <div className="rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
+        <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
           {error || actionError}
         </div>
       )}
