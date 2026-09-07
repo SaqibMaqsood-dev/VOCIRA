@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function SupportPage() {
+  const [email, setEmail] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
 
@@ -28,10 +29,18 @@ export default function SupportPage() {
   const [tickets, setTickets] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
 
-  const token =
-    typeof window === "undefined"
-      ? null
-      : localStorage.getItem("access_token");
+  // Token ko state mein rakhna zaroori hai: server par localStorage
+  // nahi hota, to pehle render par null hi milega. Seedha padhne se
+  // React ka hydration mismatch aa jata hai.
+  const [token, setToken] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    setToken(localStorage.getItem("access_token"));
+    setAuthChecked(true);
+  }, []);
+
+  const loggedIn = Boolean(token);
 
   // ---- pehle ke tickets ----
   const loadTickets = async () => {
@@ -57,9 +66,10 @@ export default function SupportPage() {
   };
 
   useEffect(() => {
+    if (!authChecked) return;
     loadTickets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authChecked, token]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -72,8 +82,8 @@ export default function SupportPage() {
       return;
     }
 
-    if (!token) {
-      setError("Please log in to submit a support ticket.");
+    if (!loggedIn && !email.trim()) {
+      setError("Please enter your email address so we can reply.");
       return;
     }
 
@@ -89,9 +99,13 @@ export default function SupportPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          // Login ho to token, warna kuch nahi - backend dono
+          // sooraton mein chalta hai.
+          ...(loggedIn ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ subject, message }),
+        body: JSON.stringify(
+          loggedIn ? { subject, message } : { subject, message, email }
+        ),
       });
 
       if (res.status === 401) {
@@ -121,6 +135,7 @@ export default function SupportPage() {
       setTicket(data);
       setSubject("");
       setMessage("");
+      setEmail("");
       loadTickets();
     } catch {
       setError(
@@ -190,6 +205,40 @@ export default function SupportPage() {
           )}
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
+            {/*
+              Email sirf tab poocha jata hai jab login na ho. Logged-in
+              parent ka email account se aata hai - us se dobara poochna
+              faltu hai, aur backend request ka email nazarandaz bhi
+              kar deta hai (warna koi doosre ke naam par ticket khol
+              sakta).
+            */}
+            {authChecked && !loggedIn && (
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold tracking-wide text-text-secondary">
+                  Email
+                </span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  disabled={sending}
+                  placeholder="you@example.com"
+                  className="w-full rounded-xl border border-white/10 bg-bg-primary/30 px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary/60 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] backdrop-blur-xl focus:outline-none focus:ring-2 focus:ring-accent-primary/60 disabled:opacity-60"
+                />
+                <span className="mt-1.5 block text-xs leading-5 text-text-secondary">
+                  We will reply to this address.{" "}
+                  <a
+                    href="/login"
+                    className="text-accent-secondary underline decoration-dotted hover:opacity-80"
+                  >
+                    Log in
+                  </a>{" "}
+                  to track your tickets.
+                </span>
+              </label>
+            )}
+
             <label className="block">
               <span className="mb-2 block text-xs font-semibold tracking-wide text-text-secondary">
                 Subject

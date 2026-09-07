@@ -10,7 +10,7 @@ poora UI rakhta hai (localhost:8081/app/issue).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from backend.helper_functions.database.session import get_db
 
 from backend.helper_functions.token_service.access_tokken.get_current_user import (
     current_user,
+    optional_current_user,
 )
 
 from backend.microservices.auth_services.models.user_model import Users
@@ -38,6 +39,11 @@ support_service = SupportService()
 class TicketRequest(BaseModel):
     subject: str = Field(min_length=3, max_length=140)
     message: str = Field(default="", max_length=5000)
+
+    # Guest ke liye lazmi, logged-in parent ke liye faltu.
+    # Kaun sa haal hai, wo endpoint tay karta hai - schema dono
+    # sooraton mein chalta hai.
+    email: EmailStr | None = None
 
 
 class TicketResponse(BaseModel):
@@ -83,9 +89,34 @@ async def _caller_email(db: AsyncSession, user) -> str | None:
 async def create_ticket(
     request: TicketRequest,
     db: AsyncSession = Depends(get_db),
-    user=Depends(current_user),
+    user=Depends(optional_current_user),
 ):
-    email = await _caller_email(db=db, user=user)
+    """
+    Ticket banayein - login ke sath ya us ke baghair.
+
+    Login ho    : email account se aata hai
+    Login na ho : email form mein bharna lazmi hai
+
+    AHEM: logged-in surat mein request ka email JAAN BUJH KAR
+    nazarandaz hota hai. Warna koi bhi apne token ke sath doosre ka
+    email bhej kar us ke naam par ticket khol sakta - aur wo us ki
+    ticket list mein nazar aane lagta.
+    """
+
+    if user is not None:
+        email = await _caller_email(db=db, user=user)
+
+    else:
+        if not request.email:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Please provide your email address, "
+                    "or log in to submit a ticket."
+                ),
+            )
+
+        email = str(request.email).strip().lower()
 
     try:
         result = await support_service.create_ticket(
@@ -112,7 +143,7 @@ async def create_ticket(
 
     print(
         f"🎫 [Support] ticket bana: {result['ticket_id']}  "
-        f"({email})"
+        f"({email}, {'login' if user else 'guest'})"
     )
 
     return result
