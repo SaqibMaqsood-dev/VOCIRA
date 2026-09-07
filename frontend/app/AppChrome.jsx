@@ -10,8 +10,18 @@ export default function AppChrome({ children }) {
   const pathname = usePathname();
   const isAdmin = pathname?.startsWith("/admin");
 
+  // Background dono taraf. Pehle admin ye branch se seedha nikal
+  // jata tha, is liye panel par gradient tha hi nahi.
+  //
+  // Mount ek hi jagah hai - GradFlow ek WebGL canvas hai, har page
+  // par apna context banana faltu hai.
   if (isAdmin) {
-    return <Providers>{children}</Providers>;
+    return (
+      <>
+        <BackgroundGradient />
+        <Providers>{children}</Providers>
+      </>
+    );
   }
 
   return (

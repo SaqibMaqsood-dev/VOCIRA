@@ -31,7 +31,7 @@ export default function Sidebar({
     <>
       <aside
         className={cn(
-          "relative hidden border-r border-white/10 bg-[#05041c]/95 backdrop-blur-xl transition-all duration-300 md:block",
+          "relative hidden border-r border-white/10 bg-[#05041c]/60 backdrop-blur-xl transition-all duration-300 md:block",
           collapsed ? "w-[72px]" : "w-60"
         )}
       >
@@ -85,7 +85,7 @@ export default function Sidebar({
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-64 border-r border-white/10 bg-[#05041c]/95 backdrop-blur-xl transition-transform duration-300 md:hidden",
+          "fixed inset-y-0 left-0 z-40 w-64 border-r border-white/10 bg-[#05041c]/60 backdrop-blur-xl transition-transform duration-300 md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >

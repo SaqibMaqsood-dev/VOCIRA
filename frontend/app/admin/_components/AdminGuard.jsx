@@ -61,7 +61,7 @@ export default function AdminGuard({ children }) {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-[#05041c] text-white">
+    <div className="grid min-h-screen place-items-center text-white">
       <div className="flex items-center gap-3 text-sm text-white/70">
         {state === "checking" ? (
           <>
