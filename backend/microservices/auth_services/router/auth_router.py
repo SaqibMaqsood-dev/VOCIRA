@@ -142,6 +142,11 @@ async def login(
             "sub": user.email,
             "user_id": str(user_id),
             "role": role,
+            # Naam bhi - warna UI ke paas sirf email hoti hai aur
+            # "Muhammad Ahmed" ki jagah "ahmed@test.com" dikhana
+            # parta hai. Ye DB mein pehle se mojood hai, is ke
+            # liye alag endpoint banana faltu tha.
+            "name": user.name,
         }
     )
 

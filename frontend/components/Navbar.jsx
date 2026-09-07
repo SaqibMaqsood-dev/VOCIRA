@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import BrandLogo from "@/components/BrandLogo";
 
@@ -21,6 +21,7 @@ export default function Navbar() {
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [who, setWho] = useState(null);
 
   /*
    * Check whether the user is authenticated.
@@ -30,6 +31,7 @@ export default function Navbar() {
       localStorage.getItem("access_token");
 
     setIsLoggedIn(Boolean(accessToken));
+    setWho(accessToken ? readUser(accessToken) : null);
   };
 
   /*
@@ -159,14 +161,36 @@ export default function Navbar() {
 
               </>
             ) : (
-              /* Logout */
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-xl px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:text-text-primary"
-              >
-                Logout
-              </button>
+              <>
+                {/* Kaun login hai - pehle iska koi nishaan hi
+                    nahi tha, sirf "Logout" para rehta tha aur
+                    ye pata nahi chalta ke kis ka session hai. */}
+                <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.06] py-1.5 pl-1.5 pr-3.5 shadow-card backdrop-blur-xl">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent-primary to-accent-secondary text-xs font-bold text-[#05041c]">
+                    {initialsOf(who)}
+                  </span>
+                  <span className="flex flex-col leading-tight">
+                    <span className="max-w-[150px] truncate text-sm font-semibold text-text-primary">
+                      {who?.name || who?.email || "Signed in"}
+                    </span>
+                    {who?.name && who?.email && (
+                      <span className="max-w-[150px] truncate text-[11px] text-text-secondary">
+                        {who.email}
+                      </span>
+                    )}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  title="Log out"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-200"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </button>
+              </>
             )}
 
           </div>
@@ -252,14 +276,32 @@ export default function Navbar() {
 
                   </>
                 ) : (
-                  /* Mobile Logout */
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="rounded-lg px-3 py-2 text-left text-sm font-semibold text-text-secondary hover:bg-white/5 hover:text-text-primary"
-                  >
-                    Logout
-                  </button>
+                  <>
+                    <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.06] px-2.5 py-2">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent-primary to-accent-secondary text-xs font-bold text-[#05041c]">
+                        {initialsOf(who)}
+                      </span>
+                      <span className="flex min-w-0 flex-col leading-tight">
+                        <span className="truncate text-sm font-semibold text-text-primary">
+                          {who?.name || who?.email || "Signed in"}
+                        </span>
+                        {who?.name && who?.email && (
+                          <span className="truncate text-[11px] text-text-secondary">
+                            {who.email}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-sm font-semibold text-text-secondary hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-200"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Logout
+                    </button>
+                  </>
                 )}
 
               </div>
@@ -269,4 +311,47 @@ export default function Navbar() {
       </AnimatePresence>
     </header>
   );
+}
+
+
+/**
+ * JWT se naam aur email.
+ *
+ * Login ke waqt backend token mein "name" bhi daalta hai (pehle sirf
+ * sub/user_id/role thay). Us se pehle UI ke paas naam tha hi nahi -
+ * "Muhammad Ahmed" ki jagah "ahmed@test.com" dikhana parta.
+ *
+ * Signature yahan nahi jaanchi jati: ye sirf dikhane ke liye hai,
+ * asli rok har API call par backend lagata hai.
+ */
+function readUser(token) {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+
+    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const claims = JSON.parse(atob(padded));
+
+    return { name: claims?.name || null, email: claims?.sub || null };
+  } catch {
+    return null;
+  }
+}
+
+/** "Muhammad Ahmed" -> "MA" · "ahmed@test.com" -> "AT" */
+function initialsOf(who) {
+  if (who?.name) {
+    const parts = who.name.trim().split(/\s+/);
+    const first = parts[0]?.[0] || "";
+    const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+    return (first + last).toUpperCase() || "U";
+  }
+
+  if (who?.email) {
+    const [local, domain] = who.email.split("@");
+    return ((local?.[0] || "") + (domain?.[0] || "")).toUpperCase() || "U";
+  }
+
+  return "U";
 }
