@@ -12,11 +12,15 @@ X-Internal-Key se protect kiye gaye hain (wahi jo /users/internal par).
 """
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, status
 
+from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
+    DATA_DIR,
+)
 from backend.microservices.livekit_Rag_services.services.rag_engine.ingestion import (
     assemble_knowledge_base,
 )
@@ -45,6 +49,52 @@ _last_sync: dict = {
     "result": None,
     "error": None,
 }
+
+# Sync ka nateeja disk par bhi.
+#
+# Pehle ye sirf memory mein tha, is liye service restart hone par
+# "never" ho jata tha - halanke Pinecone mein data mojood hota.
+# Admin panel phir har file par "not indexed" dikhata tha aur user
+# bewajah dobara sync chalata.
+_STATE_FILE = os.path.join(
+    os.path.dirname(DATA_DIR), "data", ".sync_state.json"
+)
+
+
+def _save_state() -> None:
+    """Ye khabar hai, kaam nahi - nakami par sirf likh dein."""
+    try:
+        os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
+        with open(_STATE_FILE, "w", encoding="utf-8") as handle:
+            json.dump(_last_sync, handle)
+    except Exception as error:
+        print(f"⚠️ [RAG Sync] state save nahi hui: {error}")
+
+
+def _load_state() -> None:
+    """Service shuru hote waqt purani state wapis le aayein."""
+    try:
+        if not os.path.isfile(_STATE_FILE):
+            return
+
+        with open(_STATE_FILE, encoding="utf-8") as handle:
+            saved = json.load(handle)
+
+        if isinstance(saved, dict):
+            # "running" bharosay ke qabil nahi: agar service us waqt
+            # mari thi jab sync chal rahi thi, wo sync ab kahin nahi
+            # chal rahi.
+            if saved.get("state") == "running":
+                saved["state"] = "failed"
+                saved["error"] = "Service restarted while syncing"
+
+            _last_sync.update(saved)
+
+    except Exception as error:
+        print(f"⚠️ [RAG Sync] purani state nahi parhi ja saki: {error}")
+
+
+_load_state()
 
 
 def _check_key(key: str | None):
@@ -94,12 +144,14 @@ async def _run_sync():
                     counts[key] = counts.get(key, 0) + 1
 
             _last_sync["sources"] = counts
+            _save_state()
 
             _last_sync.update(
                 state="success",
                 finished_at=_now(),
                 result=result,
             )
+            _save_state()
             print(f"✅ [RAG Sync] mukammal: {result}")
 
         except Exception as exc:
@@ -108,6 +160,7 @@ async def _run_sync():
                 finished_at=_now(),
                 error=f"{type(exc).__name__}: {exc}",
             )
+            _save_state()
             print(f"❌ [RAG Sync] fail: {exc}")
 
 

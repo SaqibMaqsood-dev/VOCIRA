@@ -326,3 +326,4 @@ __pycache__/
 frappe_test/
 *.zip
 *.sql.gz
+.sync_state.json
