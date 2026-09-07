@@ -33,6 +33,7 @@ from backend.microservices.livekit_Rag_services.routers.users_route import (
     livekit_router,
     message_route,
     rag_route,
+    support_route,
 )
 
 from backend.microservices.livekit_Rag_services.routers.users_route.notification_router import (
@@ -203,6 +204,13 @@ app.include_router(
 # ingestion ka code sirf dead main.py se bulaya jata tha.
 app.include_router(
     rag_route.router,
+    prefix="/livekit",
+)
+
+# Support tickets - ERPNext ke Issue doctype mein jate hain.
+# Support page pehle murda form tha (koi fetch hi nahi tha).
+app.include_router(
+    support_route.router,
     prefix="/livekit",
 )
 
