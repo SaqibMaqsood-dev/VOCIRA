@@ -85,12 +85,12 @@ export default function Header({ onMenuClick }) {
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/10 bg-[#05041c]/60 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+    <header className="sticky top-4 z-30 rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_8px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+      <div className="flex h-16 items-center justify-between gap-3 px-4">
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-text-secondary hover:bg-white/10 md:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-text-secondary transition-colors hover:bg-white/[0.12] hover:text-white md:hidden"
             onClick={onMenuClick}
           >
             <PanelLeftOpen className="h-4 w-4" />
@@ -107,7 +107,7 @@ export default function Header({ onMenuClick }) {
               value={term}
               onChange={(e) => setTerm(e.target.value)}
               placeholder="Search queries…"
-              className="w-full rounded-lg border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-xs text-white placeholder:text-text-secondary/70 outline-none focus:ring-2 focus:ring-accent-primary/60"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.06] py-2.5 pl-9 pr-3 text-xs text-white placeholder:text-text-secondary/70 outline-none transition-colors focus:border-accent-primary/50 focus:bg-white/[0.09] focus:ring-2 focus:ring-accent-primary/40"
             />
           </form>
         </div>
@@ -121,7 +121,7 @@ export default function Header({ onMenuClick }) {
                 ? `${pending} escalation${pending === 1 ? "" : "s"} waiting`
                 : "No pending escalations"
             }
-            className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-text-secondary hover:bg-white/10"
+            className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-text-secondary transition-colors hover:bg-white/[0.12] hover:text-white"
           >
             <Bell className="h-4 w-4" />
             {pending > 0 && (
@@ -135,7 +135,7 @@ export default function Header({ onMenuClick }) {
             <button
               type="button"
               onClick={() => setMenuOpen((open) => !open)}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-white/10"
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-white/[0.12] hover:text-white"
             >
               <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-accent-primary to-accent-secondary text-[11px] font-semibold text-[#05041c]">
                 {initialsFrom(email)}
@@ -147,7 +147,7 @@ export default function Header({ onMenuClick }) {
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-white/10 bg-[#0b0a2a] shadow-xl">
+              <div className="absolute right-0 z-50 mt-2 w-60 overflow-hidden rounded-2xl border border-white/10 bg-[#0b0a2a]/95 shadow-2xl backdrop-blur-xl">
                 <div className="border-b border-white/10 px-4 py-3">
                   <p className="truncate text-xs text-white">
                     {email || "Admin"}
