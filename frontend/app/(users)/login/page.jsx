@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
-import Link from "next/link";
 
 /**
  * JWT ke andar se role padhein.
@@ -421,14 +420,21 @@ export default function LoginPage() {
 
             </form>
 
+            {/*
+              Self-signup jaan bujh kar nahi hai.
+
+              Parent ka account ERPNext ke Guardian record se juRa
+              hota hai (parent_id). Wo ID school banati hai - parent
+              na use jaanta hai, na sabit kar sakta hai. Khud banaya
+              hua account ya to bekaar hota (koi bachcha nahi milta),
+              ya - agar parent_id likhne di jaye - doosre khandaan ka
+              data khol deta.
+
+              Is liye account school deti hai. Ye link /signup par
+              jata tha jo mojood hi nahi (404).
+            */}
             <div className="mt-6 text-center text-sm text-text-secondary">
-              Don't have an account?{" "}
-              <Link
-                href="/signup"
-                className="font-medium text-accent-secondary hover:underline"
-              >
-                Create Account
-              </Link>
+              Need an account? Please contact the school office.
             </div>
 
           </div>

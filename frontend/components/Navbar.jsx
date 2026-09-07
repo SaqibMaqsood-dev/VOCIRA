@@ -157,17 +157,6 @@ export default function Navbar() {
                   Login
                 </Link>
 
-                {/* Create Account */}
-                <Link
-                  href="/signup"
-                  className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-text-primary shadow-card transition-transform hover:-translate-y-0.5"
-                >
-                  <span className="absolute -left-24 top-1/2 h-24 w-24 -translate-y-1/2 rotate-12 bg-accent-primary/35 blur-2xl transition-opacity group-hover:opacity-90" />
-
-                  <span className="relative">
-                    Create Account
-                  </span>
-                </Link>
               </>
             ) : (
               /* Logout */
@@ -261,16 +250,6 @@ export default function Navbar() {
                       Login
                     </Link>
 
-                    {/* Create Account */}
-                    <Link
-                      href="/signup"
-                      onClick={() =>
-                        setMobileOpen(false)
-                      }
-                      className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-semibold text-text-primary shadow-card"
-                    >
-                      Create Account
-                    </Link>
                   </>
                 ) : (
                   /* Mobile Logout */
