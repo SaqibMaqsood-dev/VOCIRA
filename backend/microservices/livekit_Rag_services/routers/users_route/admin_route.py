@@ -306,7 +306,7 @@ async def admin_sync_knowledge():
 
     return {
         "state": "started",
-        "message": "Sync started. Refresh in a moment.",
+        "message": "Sync started in the background.",
     }
 
 

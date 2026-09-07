@@ -18,7 +18,7 @@
  * magar ye pata nahi chalta tha ke wo kis kis cheez se bane.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FileText,
   FileType,
@@ -63,6 +63,35 @@ export default function KnowledgePage() {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
 
+  // Sync ka intezaar lamba ho sakta hai. Agar us dauran user kisi
+  // aur page par chala jaye to component hat jata hai - aur us ke
+  // baad setState karna React ka warning deta hai aur bekaar bhi
+  // hai. Is liye har await ke baad ye dekh lete hain.
+  const alive = useRef(true);
+  const flashTimer = useRef(null);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      clearTimeout(flashTimer.current);
+    };
+  }, []);
+
+  /**
+   * Ek paighaam jo khud chala jata hai.
+   *
+   * Pehle notice hamesha ke liye chipka reh jata tha - "Sync started"
+   * screen par para rehta chahe sync kab ki mukammal ho chuki ho.
+   */
+  const flash = (message, ms = 4000) => {
+    setNotice(message);
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => {
+      if (alive.current) setNotice("");
+    }, ms);
+  };
+
   const index = data.index || {};
   const sync = data.last_sync || {};
   const docs = docsData.documents || [];
@@ -75,19 +104,72 @@ export default function KnowledgePage() {
   };
 
   async function runSync() {
+    setProblem("");
+    setSyncing(true);
+    setNotice("Syncing… this can take a moment.");
+
     try {
-      setSyncing(true);
-      setProblem("");
-      const res = await adminFetch("/livekit/admin/knowledge/sync", {
-        method: "POST",
-      });
-      setNotice(res.message || "Sync started.");
-      setTimeout(refreshAll, 4000);
+      await adminFetch("/livekit/admin/knowledge/sync", { method: "POST" });
+
+      // Server 202 foran de deta hai - sync background mein chalti
+      // hai. Pehle yahan ek setTimeout(4s) tha aur bas: notice hamesha
+      // ke liye chipka reh jata tha, aur sync 4s se lambi hoti to
+      // panel purane numbers dikhata rehta.
+      //
+      // Ab poochte rehte hain ke khatam hui ya nahi.
+      const finished = await waitForSync();
+
+      if (!alive.current) return;
+
+      if (finished.state === "success") {
+        refreshAll();
+        flash("Sync complete — Vocira is using the latest documents.");
+      } else if (finished.state === "failed") {
+        setNotice("");
+        // Ghalti poll se seedha lete hain, `data` se nahi - wo abhi
+        // purani halat rakhta hai kyunke refresh hua hi nahi.
+        setProblem(
+          finished.error || "The sync failed. Check the server logs."
+        );
+      } else {
+        // itni der ho gayi ke hum ne poochna chhor diya - sync shayad
+        // ab bhi chal rahi ho, is liye ise nakami nahi kehte
+        setNotice("");
+        refreshAll();
+      }
     } catch (err) {
+      if (!alive.current) return;
+      setNotice("");
       setProblem(err.message || "Could not start the sync.");
     } finally {
-      setSyncing(false);
+      if (alive.current) setSyncing(false);
     }
+  }
+
+  /**
+   * State "running" se nikalne ka intezaar.
+   *
+   * Do minute (60 x 2s) tak poochte hain. Us se aage sync shayad ab
+   * bhi chal rahi ho - is liye "timeout" ko nakami nahi kehte, bas
+   * poochna chhor dete hain.
+   */
+  async function waitForSync() {
+    for (let i = 0; i < 60; i++) {
+      await sleep(2000);
+      if (!alive.current) return { state: "gone" };
+
+      try {
+        const fresh = await adminFetch("/livekit/admin/knowledge");
+        const last = fresh?.last_sync || {};
+        if (last.state === "success" || last.state === "failed") {
+          return last;
+        }
+      } catch {
+        // ek poochne mein nakami se sab kuch nahi rukna chahiye -
+        // agli baar phir koshish ho jayegi
+      }
+    }
+    return { state: "timeout" };
   }
 
   async function onUpload(event) {
@@ -102,7 +184,7 @@ export default function KnowledgePage() {
         "/livekit/admin/knowledge/documents",
         file
       );
-      setNotice(`${res.name} uploaded. Run a sync to index it.`);
+      flash(`${res.name} uploaded. Run a sync to index it.`, 6000);
       reloadDocs();
     } catch (err) {
       setProblem(err.message || "Upload failed.");
@@ -121,7 +203,7 @@ export default function KnowledgePage() {
         method: "POST",
         body: JSON.stringify({ title, text }),
       });
-      setNotice(`${res.name} saved. Run a sync to index it.`);
+      flash(`${res.name} saved. Run a sync to index it.`, 6000);
       setTitle("");
       setText("");
       setNoteOpen(false);
@@ -141,7 +223,7 @@ export default function KnowledgePage() {
         `/livekit/admin/knowledge/documents/${encodeURIComponent(name)}`,
         { method: "DELETE" }
       );
-      setNotice(`${name} removed. Run a sync to update the index.`);
+      flash(`${name} removed. Run a sync to update the index.`, 6000);
       reloadDocs();
     } catch (err) {
       setProblem(err.message || "Could not remove the document.");
@@ -188,7 +270,7 @@ export default function KnowledgePage() {
           </Button>
 
           <Button onClick={runSync} disabled={syncing}>
-            {syncing ? "Starting…" : "Re-sync"}
+            {syncing ? "Syncing…" : "Re-sync"}
           </Button>
         </div>
       </div>
@@ -437,6 +519,8 @@ function Row({ label, value }) {
     </TR>
   );
 }
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 /** 7827 -> "7.6 KB" */
 function formatSize(bytes) {
