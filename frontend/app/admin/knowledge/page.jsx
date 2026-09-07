@@ -42,9 +42,9 @@ export default function KnowledgePage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-white">Knowledge base</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-white">Knowledge base</h1>
           <p className="mt-1 text-xs text-text-secondary">
-            Vocira ke aam jawab isi vector index se bante hain.
+            Vocira answers general questions from this vector index.
           </p>
         </div>
         <div className="flex gap-2">

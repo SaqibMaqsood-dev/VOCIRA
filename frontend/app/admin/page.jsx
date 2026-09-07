@@ -1,9 +1,37 @@
 "use client";
 
+/**
+ * Admin dashboard.
+ *
+ * Pehle yahan chaar chhote cards thay, aur do "chart" jo asal mein
+ * divs thay: bars ke liye height wali div, aur ratio ke liye progress
+ * bar. Na axis, na grid, na hover - kis din kitne sawal aaye, ye
+ * sirf title attribute se pata chalta tha.
+ *
+ * Ab:
+ *   KPI row        stat tiles - number bara, icon, aur jahan waqt
+ *                  ka data hai wahan sparkline
+ *   Trend          asli area chart - axis, grid, hover crosshair
+ *   Part-to-whole  stacked bar (do slices ka pie ghalat hota hai)
+ *
+ * Rang dataviz validator se jaanche gaye hain - tafseel StackedBar
+ * mein likhi hai.
+ */
+
 import { motion } from "framer-motion";
+import {
+  AlertTriangle,
+  MessagesSquare,
+  PhoneCall,
+  TrendingUp,
+} from "lucide-react";
+
 import { Card, CardHeader } from "@/app/admin/_components/ui/Card";
 import Badge from "@/app/admin/_components/ui/Badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
+import AreaChart from "@/app/admin/_components/charts/AreaChart";
+import StackedBar from "@/app/admin/_components/charts/StackedBar";
+import StatTile from "@/app/admin/_components/charts/StatTile";
 import { useAdminData, formatTime } from "@/app/admin/useAdminApi";
 
 const EMPTY_STATS = {
@@ -29,18 +57,21 @@ export default function AdminDashboardPage() {
     error: recentError,
   } = useAdminData("/livekit/admin/queries?limit=8", []);
 
-  // Pehle bar ki oonchai (value / 200) se nikalti thi - 200 hardcoded
-  // tha. Asli data mein koi din 200 se ooper ja sakta hai (bar chart
-  // se bahar) ya sab 200 se bohat neeche (chart khali dikhta hai).
-  // Ab sab se oonche din ke hisab se scale hota hai.
-  const peak = Math.max(1, ...stats.queriesPerDay.map((d) => d.value));
+  const spark = stats.queriesPerDay.map((d) => d.value);
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: "easeOut" }}
+      className="space-y-6 pb-4"
+    >
       <div>
-        <h1 className="text-xl font-semibold text-white">Overview</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-white">
+          Overview
+        </h1>
         <p className="mt-1 text-xs text-text-secondary">
-          High-level metrics across Vocira&apos;s AI assistant.
+          Live metrics from Vocira&apos;s voice assistant.
         </p>
       </div>
 
@@ -50,86 +81,85 @@ export default function AdminDashboardPage() {
         </Card>
       )}
 
+      {/* ---- KPI row ---- */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader title="Total Queries Today" />
-          <p className="text-2xl font-semibold text-white">
-            {statsLoading ? "…" : stats.today}
-          </p>
-        </Card>
-        <Card>
-          <CardHeader title="Total Queries This Week" />
-          <p className="text-2xl font-semibold text-white">
-            {statsLoading ? "…" : stats.week}
-          </p>
-        </Card>
-        <Card>
-          <CardHeader title="Escalated Queries" />
-          <p className="text-2xl font-semibold text-amber-200">
-            {statsLoading ? "…" : stats.escalated}
-          </p>
-        </Card>
-        <Card>
-          <CardHeader title="Voice Sessions" />
-          <p className="text-2xl font-semibold text-emerald-200">
-            {statsLoading ? "…" : stats.sessions}
-          </p>
-        </Card>
+        <StatTile
+          label="Questions today"
+          value={stats.today}
+          hint="Since midnight"
+          icon={MessagesSquare}
+          loading={statsLoading}
+        />
+        <StatTile
+          label="This week"
+          value={stats.week}
+          hint="Last 7 days"
+          icon={TrendingUp}
+          spark={spark}
+          loading={statsLoading}
+        />
+        <StatTile
+          label="Voice calls"
+          value={stats.sessions}
+          hint="Sessions started"
+          icon={PhoneCall}
+          accent="#199e70"
+          loading={statsLoading}
+        />
+        <StatTile
+          label="Escalated"
+          value={stats.escalated}
+          hint="Waiting for a human"
+          icon={AlertTriangle}
+          accent="#d95926"
+          loading={statsLoading}
+        />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <Card className="relative overflow-hidden">
+      {/* ---- charts ---- */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
           <CardHeader
-            title="Queries per day"
-            description="Last 7 days of activity"
+            title="Questions per day"
+            description="Last 7 days · hover for the exact count"
           />
-          <div className="mt-4 flex h-[140px] items-end gap-3">
-            {stats.queriesPerDay.map((d) => (
-              <motion.div
-                key={d.date || d.day}
-                title={`${d.day}: ${d.value}`}
-                initial={{ height: 0 }}
-                animate={{ height: `${Math.max(2, (d.value / peak) * 140)}px` }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
-                className="flex-1 rounded-t-md bg-gradient-to-t from-accent-primary/10 via-accent-primary/70 to-accent-secondary/90"
-              >
-                <span className="sr-only">{d.value}</span>
-              </motion.div>
-            ))}
-          </div>
-          <div className="mt-2 flex justify-between text-[11px] text-text-secondary">
-            {stats.queriesPerDay.map((d) => (
-              <span key={d.date || d.day}>{d.day}</span>
-            ))}
+          <div className="mt-2">
+            <AreaChart
+              data={stats.queriesPerDay}
+              height={220}
+              formatValue={(v) =>
+                `${v} question${v === 1 ? "" : "s"}`
+              }
+            />
           </div>
         </Card>
 
         <Card>
           <CardHeader
-            title="Escalation rate"
-            description="Share of AI vs human handled"
+            title="How questions end"
+            description="AI answered vs handed to a person"
           />
-          <div className="mt-4 space-y-3">
-            {stats.escalationRate.map((e) => (
-              <div key={e.label} className="space-y-1">
-                <div className="flex items-center justify-between text-xs text-text-secondary">
-                  <span>{e.label}</span>
-                  <span>{e.value}%</span>
-                </div>
-                <div className="h-2 rounded-full bg-white/5">
-                  <div
-                    className="h-2 rounded-full bg-gradient-to-r from-accent-secondary to-accent-primary"
-                    style={{ width: `${e.value}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+          <div className="mt-6">
+            <StackedBar data={stats.escalationRate} />
+          </div>
+
+          <div className="mt-6 border-t border-white/10 pt-4">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-text-secondary">
+              Total questions
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-white">
+              {statsLoading ? "…" : stats.total}
+            </p>
           </div>
         </Card>
       </div>
 
+      {/* ---- recent ---- */}
       <Card>
-        <CardHeader title="Recent queries" />
+        <CardHeader
+          title="Recent questions"
+          description="The last eight, newest first"
+        />
 
         {recentError && (
           <p className="py-3 text-xs text-amber-200">{recentError}</p>
@@ -147,7 +177,10 @@ export default function AdminDashboardPage() {
           <TBody>
             {recentLoading && (
               <TR>
-                <TD colSpan={4} className="py-6 text-center text-xs text-text-secondary">
+                <TD
+                  colSpan={4}
+                  className="py-6 text-center text-xs text-text-secondary"
+                >
                   Loading…
                 </TD>
               </TR>
@@ -155,8 +188,11 @@ export default function AdminDashboardPage() {
 
             {!recentLoading && recent.length === 0 && !recentError && (
               <TR>
-                <TD colSpan={4} className="py-6 text-center text-xs text-text-secondary">
-                  Abhi koi sawal nahi aaya.
+                <TD
+                  colSpan={4}
+                  className="py-6 text-center text-xs text-text-secondary"
+                >
+                  No questions yet.
                 </TD>
               </TR>
             )}
@@ -166,7 +202,9 @@ export default function AdminDashboardPage() {
                 <TD className="whitespace-nowrap text-[11px] text-text-secondary">
                   {q.user}
                 </TD>
-                <TD className="text-xs text-white">{q.question}</TD>
+                <TD className="max-w-[420px] truncate text-xs text-white">
+                  {q.question}
+                </TD>
                 <TD>
                   <Badge
                     label={q.status}
@@ -187,6 +225,6 @@ export default function AdminDashboardPage() {
           </TBody>
         </Table>
       </Card>
-    </div>
+    </motion.div>
   );
 }

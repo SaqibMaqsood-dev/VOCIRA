@@ -45,7 +45,7 @@ export default function EscalationsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-white">Escalations</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-white">Escalations</h1>
           <p className="mt-1 text-xs text-text-secondary">
             Queries that required human review.
             {!loading && !error && (
