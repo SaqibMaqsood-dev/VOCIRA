@@ -126,8 +126,8 @@ async def _run_sync():
 
             if not chunks:
                 raise RuntimeError(
-                    "Koi content nahi mila - data/pdf, data/text_files "
-                    "aur data/urls.txt check karein"
+                    "No content found — check data/pdf, data/text_files "
+                    "and data/urls.txt"
                 )
 
             print(f"📚 [RAG Sync] {len(chunks)} chunks -> Pinecone")
@@ -183,14 +183,14 @@ async def sync_knowledge_base(
     if _last_sync["state"] == "running":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Sync pehle se chal rahi hai",
+            detail="A sync is already running.",
         )
 
     asyncio.create_task(_run_sync())
 
     return {
         "state": "started",
-        "message": "Sync background mein shuru ho gayi. /rag/status dekhein.",
+        "message": "Sync started in the background. Check /rag/status.",
     }
 
 

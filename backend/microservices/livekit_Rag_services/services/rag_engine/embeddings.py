@@ -41,7 +41,7 @@ class GeminiEmbeddings(Embeddings):
         timeout: float = 60.0,
     ):
         if not api_key:
-            raise ValueError("GEMINI_API_KEY nahi mili")
+            raise ValueError("GEMINI_API_KEY is not set")
 
         self.api_key = api_key
         self.model = model

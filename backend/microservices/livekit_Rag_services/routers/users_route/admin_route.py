@@ -300,13 +300,13 @@ async def admin_sync_knowledge():
     )
 
     if rag_route._last_sync.get("state") == "running":
-        return {"state": "running", "message": "Sync pehle se chal rahi hai"}
+        return {"state": "running", "message": "A sync is already running."}
 
     asyncio.create_task(rag_route._run_sync())
 
     return {
         "state": "started",
-        "message": "Sync shuru ho gayi. Thori der baad refresh karein.",
+        "message": "Sync started. Refresh in a moment.",
     }
 
 
