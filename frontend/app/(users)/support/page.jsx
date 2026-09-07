@@ -68,17 +68,17 @@ export default function SupportPage() {
     setTicket(null);
 
     if (!API_URL) {
-      setError("API URL set nahi hai (NEXT_PUBLIC_API_URL).");
+      setError("API URL is not configured (NEXT_PUBLIC_API_URL).");
       return;
     }
 
     if (!token) {
-      setError("Ticket bhejne ke liye login karna zaroori hai.");
+      setError("Please log in to submit a support ticket.");
       return;
     }
 
     if (subject.trim().length < 3) {
-      setError("Subject kam az kam 3 harf ka hona chahiye.");
+      setError("Subject must be at least 3 characters.");
       return;
     }
 
@@ -95,13 +95,13 @@ export default function SupportPage() {
       });
 
       if (res.status === 401) {
-        setError("Aap ka session khatam ho gaya - dobara login karein.");
+        setError("Your session has expired. Please log in again.");
         return;
       }
 
       if (!res.ok) {
         // Backend ki asli wajah dikhayein, apni banai hui nahi
-        let detail = `Ticket nahi ban saka (HTTP ${res.status}).`;
+        let detail = `Could not create the ticket (HTTP ${res.status}).`;
         try {
           const body = await res.json();
           if (body?.detail) {
@@ -124,7 +124,7 @@ export default function SupportPage() {
       loadTickets();
     } catch {
       setError(
-        "Server se rabta nahi ho saka. Dekh lein ke API Gateway chal raha hai."
+        "Could not reach the server. Please make sure the API Gateway is running."
       );
     } finally {
       setSending(false);
@@ -161,7 +161,7 @@ export default function SupportPage() {
                 <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
                 <div>
                   <p className="text-sm font-semibold text-emerald-200">
-                    Ticket ban gaya
+                    Ticket created
                   </p>
                   <p className="mt-1 flex items-center gap-2 font-mono text-base font-semibold tracking-wide text-text-primary">
                     <Ticket className="h-4 w-4 text-emerald-300" />
@@ -173,8 +173,8 @@ export default function SupportPage() {
                     {ticket.opening_date ? ` · ${ticket.opening_date}` : ""}
                   </p>
                   <p className="mt-2 text-xs leading-5 text-text-secondary">
-                    School ka staff jald rabta karega. Ye number sambhal kar
-                    rakhein.
+                    Our school staff will get back to you shortly. Please
+                    keep this reference number.
                   </p>
                 </div>
               </div>
@@ -231,7 +231,7 @@ export default function SupportPage() {
               <span className="absolute -right-28 top-1/2 h-28 w-28 -translate-y-1/2 -rotate-12 bg-accent-secondary/18 blur-2xl transition-opacity group-hover:opacity-90" />
               <span className="relative flex items-center justify-center gap-2">
                 {sending && <Loader2 className="h-4 w-4 animate-spin" />}
-                {sending ? "Bhej rahe hain…" : "Submit"}
+                {sending ? "Submitting…" : "Submit"}
               </span>
             </motion.button>
           </form>
