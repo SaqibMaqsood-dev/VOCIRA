@@ -18,7 +18,6 @@
  * mein likhi hai.
  */
 
-import { motion } from "framer-motion";
 import {
   AlertTriangle,
   MessagesSquare,
@@ -60,12 +59,7 @@ export default function AdminDashboardPage() {
   const spark = stats.queriesPerDay.map((d) => d.value);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: "easeOut" }}
-      className="space-y-6 pb-4"
-    >
+    <div className="space-y-6 pb-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-white">
           Overview
@@ -225,6 +219,6 @@ export default function AdminDashboardPage() {
           </TBody>
         </Table>
       </Card>
-    </motion.div>
+    </div>
   );
 }

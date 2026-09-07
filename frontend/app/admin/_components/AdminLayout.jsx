@@ -15,6 +15,7 @@
 import { useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import PageTransition from "./PageTransition";
 
 export default function AdminLayout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -35,7 +36,9 @@ export default function AdminLayout({ children }) {
         <Header onMenuClick={() => setMobileOpen((open) => !open)} />
 
         <main className="min-w-0 flex-1 pb-2">
-          <div className="mx-auto w-full max-w-[1400px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1400px]">
+            <PageTransition>{children}</PageTransition>
+          </div>
         </main>
       </div>
     </div>
