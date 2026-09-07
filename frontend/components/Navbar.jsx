@@ -62,6 +62,7 @@ export default function Navbar() {
    */
   const handleLogout = () => {
     localStorage.removeItem("access_token");
+    localStorage.removeItem("role");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("token_type");
     localStorage.removeItem("auth_response");

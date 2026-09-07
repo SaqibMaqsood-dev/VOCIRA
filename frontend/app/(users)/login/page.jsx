@@ -5,6 +5,32 @@ import { motion } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 
+/**
+ * JWT ke andar se role padhein.
+ *
+ * Ye sirf raasta chunne ke liye hai (admin -> /admin, warna
+ * /dashboard). Asli rok backend par hai: require_admin parent ke
+ * token par 403 deta hai. Is liye yahan signature jaanchna zaroori
+ * nahi - aur bina library ke ho bhi nahi sakta.
+ *
+ * Token kharab ho to null - us surat mein /dashboard chala jata hai.
+ */
+function readRoleFromToken(token) {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+
+    // JWT base64url use karta hai; atob base64 chahta hai
+    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+
+    const claims = JSON.parse(atob(padded));
+    return claims?.role || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -170,10 +196,22 @@ export default function LoginPage() {
       );
 
       /*
-       * Login successful.
+       * Login successful - role ke hisab se bhejein.
+       *
+       * Role JWT ke andar hota hai. Yahan use sirf raasta chunne ke
+       * liye padha jata hai - asli rok backend par lagti hai
+       * (require_admin, jo parent ke token par 403 deta hai). Is
+       * liye token ki signature yahan jaanchne ki zaroorat nahi.
        */
 
-      window.location.href = "/dashboard";
+      const role = readRoleFromToken(data.access_token);
+
+      if (role) {
+        localStorage.setItem("role", role);
+      }
+
+      window.location.href =
+        role === "admin" ? "/admin" : "/dashboard";
 
     } catch (error) {
       /*
@@ -207,6 +245,7 @@ export default function LoginPage() {
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("token_type");
     localStorage.removeItem("auth_response");
+    localStorage.removeItem("role");
 
     /*
      * Notify navbar/components that the user logged out.

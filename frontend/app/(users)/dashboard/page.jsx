@@ -53,6 +53,7 @@ export default function DashboardPage() {
 
         if (statsResponse.status === 401) {
           localStorage.removeItem("access_token");
+          localStorage.removeItem("role");
           localStorage.removeItem("refresh_token");
           localStorage.removeItem("token_type");
           localStorage.removeItem("auth_response");
@@ -96,6 +97,7 @@ export default function DashboardPage() {
 
         if (sessionsResponse.status === 401) {
           localStorage.removeItem("access_token");
+          localStorage.removeItem("role");
           localStorage.removeItem("refresh_token");
           localStorage.removeItem("token_type");
           localStorage.removeItem("auth_response");
