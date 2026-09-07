@@ -88,7 +88,7 @@ export default function EscalationsPage() {
           {!loading && escalations.length === 0 && !error && (
             <TR>
               <TD colSpan={5} className="py-6 text-center text-xs text-text-secondary">
-                Koi escalation nahi — sab sawal AI ne hal kar diye.
+                No escalations — the AI handled every question.
               </TD>
             </TR>
           )}
