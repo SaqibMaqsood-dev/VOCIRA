@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import BrandLogo from "@/components/BrandLogo";
 import { adminFetch } from "@/app/admin/useAdminApi";
 
 const items = [
@@ -136,9 +137,7 @@ function Brand({ collapsed, onToggle, onNavigate }) {
         onClick={onNavigate}
         className="flex min-w-0 items-center gap-2.5"
       >
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-accent-primary to-accent-secondary text-sm font-bold text-[#05041c] shadow-lg">
-          V
-        </span>
+        <BrandLogo variant="icon" className="h-9 w-9 shrink-0" />
         {!collapsed && (
           <span className="truncate text-sm font-semibold tracking-wide text-white">
             Vocira Admin
