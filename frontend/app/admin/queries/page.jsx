@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Search, Filter, RefreshCw } from "lucide-react";
 import Button from "@/app/admin/_components/ui/Button";
 import Badge from "@/app/admin/_components/ui/Badge";
@@ -9,8 +10,19 @@ import { useAdminData, formatTime } from "@/app/admin/useAdminApi";
 
 const statusOptions = ["All", "Resolved", "Escalated"];
 
+// Header ka search ?q= ke sath yahan bhejta hai. useSearchParams
+// Suspense maangta hai, is liye asal page andar hai.
 export default function QueriesPage() {
-  const [search, setSearch] = useState("");
+  return (
+    <Suspense fallback={null}>
+      <QueriesPageInner />
+    </Suspense>
+  );
+}
+
+function QueriesPageInner() {
+  const params = useSearchParams();
+  const [search, setSearch] = useState(params.get("q") || "");
   const [statusFilter, setStatusFilter] = useState("All");
   const [openId, setOpenId] = useState(null);
 
