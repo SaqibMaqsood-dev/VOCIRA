@@ -83,6 +83,18 @@ async def _run_sync():
             print(f"📚 [RAG Sync] {len(chunks)} chunks -> Pinecone")
             result = await rebuild_vector_store(chunks)
 
+            # Kis file se kitne chunks bane - admin panel ye
+            # dikhata hai. Pinecone se ye ginti poochna mehnga
+            # hai, aur yahan wo pehle se haath mein hai.
+            counts = {}
+            for chunk in chunks:
+                source = (chunk.metadata or {}).get("source")
+                if source:
+                    key = os.path.realpath(source) if os.path.exists(source) else source
+                    counts[key] = counts.get(key, 0) + 1
+
+            _last_sync["sources"] = counts
+
             _last_sync.update(
                 state="success",
                 finished_at=_now(),

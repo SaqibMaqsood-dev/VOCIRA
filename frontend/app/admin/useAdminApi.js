@@ -110,3 +110,56 @@ export function formatTime(value) {
     `${pad(d.getHours())}:${pad(d.getMinutes())}`
   );
 }
+
+
+/**
+ * File upload.
+ *
+ * adminFetch hamesha "Content-Type: application/json" lagata hai -
+ * multipart us se toot jata hai. Browser ko khud Content-Type
+ * banane dena parta hai, kyunke us mein boundary bhi hoti hai jo
+ * hum nahi jaante.
+ */
+export async function adminUpload(path, file) {
+  if (!API_URL) {
+    throw new Error("API URL is not configured (NEXT_PUBLIC_API_URL).");
+  }
+
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("access_token")
+      : null;
+
+  if (!token) {
+    const error = new Error("Please log in.");
+    error.code = "NO_TOKEN";
+    throw error;
+  }
+
+  const body = new FormData();
+  body.append("file", file);
+
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body,
+  });
+
+  if (!response.ok) {
+    let detail = `Upload failed (HTTP ${response.status}).`;
+    try {
+      const parsed = await response.json();
+      if (parsed?.detail) {
+        detail =
+          typeof parsed.detail === "string"
+            ? parsed.detail
+            : JSON.stringify(parsed.detail);
+      }
+    } catch {
+      /* body JSON nahi thi */
+    }
+    throw new Error(detail);
+  }
+
+  return response.json();
+}

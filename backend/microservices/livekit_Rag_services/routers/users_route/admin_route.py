@@ -13,7 +13,16 @@ Har endpoint `require_admin` ke peeche hai.
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -322,3 +331,126 @@ async def set_escalation_status(
     await db.commit()
 
     return {"updated": True, "id": escalation_id, "status": new_status.value}
+
+
+# =========================================================
+# KNOWLEDGE BASE - DOCUMENTS
+#
+# Pehle naya data daalne ka sirf ek tareeqa tha: file server par
+# manually rakho, phir sync dabao. Ab panel se hi ho jata hai.
+# =========================================================
+
+@router.get("/knowledge/documents")
+async def admin_knowledge_documents():
+    """
+    Kaunse documents mojood hain, aur har ek se kitne chunks bane.
+
+    Chunk ki ginti aakhri sync se aati hai. Jo file us ke baad rakhi
+    gayi ho us ka count null hota hai - yaani "abhi index mein nahi,
+    sync chalayein".
+    """
+
+    from backend.microservices.livekit_Rag_services.routers.users_route import (
+        rag_route,
+    )
+    from backend.microservices.livekit_Rag_services.services.rag_engine import (
+        documents,
+    )
+
+    sources = getattr(rag_route, "_last_sync", {}).get("sources") or {}
+
+    docs = documents.list_documents(chunks_by_source=sources)
+
+    return {
+        "documents": docs,
+        "total": len(docs),
+        "indexed": sum(1 for d in docs if d["indexed"]),
+        "chunks": sum(d["chunks"] or 0 for d in docs),
+    }
+
+
+@router.post("/knowledge/documents", status_code=201)
+async def admin_upload_document(file: UploadFile = File(...)):
+    """PDF ya TXT upload karein."""
+
+    from backend.microservices.livekit_Rag_services.services.rag_engine import (
+        documents,
+    )
+
+    content = await file.read()
+
+    try:
+        saved = documents.save_upload(
+            filename=file.filename,
+            content=content,
+        )
+    except documents.DocumentError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        )
+
+    print(f"📄 [Knowledge] upload: {saved['name']} ({saved['size']} bytes)")
+
+    return {**saved, "message": "Uploaded. Run a sync to index it."}
+
+
+class NoteRequest(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    text: str = Field(min_length=10, max_length=20000)
+
+
+@router.post("/knowledge/notes", status_code=201)
+async def admin_add_note(request: NoteRequest):
+    """
+    Chhoti baat seedha likh dein - PDF banane ki zaroorat nahi.
+
+    Note wahi text_files folder mein .txt ban kar jata hai, is liye
+    ingestion ke liye us mein aur kisi file mein koi farq nahi.
+    """
+
+    from backend.microservices.livekit_Rag_services.services.rag_engine import (
+        documents,
+    )
+
+    try:
+        saved = documents.save_note(
+            title=request.title,
+            text=request.text,
+        )
+    except documents.DocumentError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        )
+
+    print(f"📝 [Knowledge] note: {saved['name']}")
+
+    return {**saved, "message": "Saved. Run a sync to index it."}
+
+
+@router.delete("/knowledge/documents/{name}")
+async def admin_delete_document(name: str):
+    """Document hatayein. Index se wo agli sync par nikalta hai."""
+
+    from backend.microservices.livekit_Rag_services.services.rag_engine import (
+        documents,
+    )
+
+    try:
+        removed = documents.delete_document(name)
+    except documents.DocumentError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        )
+
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    print(f"🗑️ [Knowledge] hataya: {name}")
+
+    return {"deleted": True, "name": name}
