@@ -72,6 +72,12 @@ export default function UsersPage() {
 
   const chosen = (guardians || []).find((g) => g.id === picked) || null;
 
+  // Har row ko us ka ERPNext guardian record - login email us se mel
+  // khati hai ya nahi, ye dikhane ke liye.
+  const guardianById = Object.fromEntries(
+    (guardians || []).map((g) => [g.id, g])
+  );
+
   const emailValue =
     emailTyped !== null ? emailTyped : chosen?.email || "";
 
@@ -442,6 +448,7 @@ export default function UsersPage() {
         rows={parents}
         loading={loading}
         showGuardian
+        guardianById={guardianById}
         emptyText="No parent accounts yet."
         busy={busy}
         onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(null); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
@@ -461,6 +468,7 @@ export default function UsersPage() {
  */
 function AccountTable({
   title,
+  guardianById,
   description,
   rows,
   loading,
@@ -513,6 +521,23 @@ function AccountTable({
               <TD className="text-xs font-medium text-white">{u.name}</TD>
               <TD className="whitespace-nowrap text-[11px] text-text-secondary">
                 {u.email}
+                {(() => {
+                  // Login email ERPNext ke guardian record se alag ho
+                  // to bata dein. Ye kharabi nahi - VOCIRA parent_id
+                  // se joRta hai, email se nahi - magar school ke paas
+                  // ek hi parent ke do pate hona uljhan paida karta hai.
+                  const g = guardianById?.[u.parent_id];
+                  if (!g?.email || g.email === u.email) return null;
+                  return (
+                    <span
+                      title={`ERPNext has ${g.email}`}
+                      className="ml-2 inline-flex items-center gap-1 rounded-md bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-200"
+                    >
+                      <AlertTriangle className="h-2.5 w-2.5" />
+                      differs from ERPNext
+                    </span>
+                  );
+                })()}
               </TD>
               <TD>
                 <Badge
