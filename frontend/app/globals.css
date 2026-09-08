@@ -37,6 +37,19 @@ h6 {
   background: rgba(108, 99, 255, 0.35);
 }
 
+/*
+ * Edge/IE apna password-reveal button khud lagate hain (::-ms-reveal).
+ * Hamare paas apna eye ka button pehle se hai, is liye do icons nazar
+ * aane lagte thay - aur Edge wala kaala hota hai jo gehre theme par
+ * bhadda lagta hai.
+ *
+ * ::-ms-clear bhi isi tarah ka hai - text fields mein "x" ka button.
+ */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
 @layer components {
   .glass {
     @apply rounded-xl border border-white/10 bg-white/[0.05] shadow-card backdrop-blur-xl;
