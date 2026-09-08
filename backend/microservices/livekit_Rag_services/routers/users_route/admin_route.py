@@ -10,6 +10,8 @@ admin ke nazariye se (yaani SAARE users ka) koi endpoint nahi tha:
 Har endpoint `require_admin` ke peeche hai.
 """
 
+import json
+
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -454,3 +456,87 @@ async def admin_delete_document(name: str):
     print(f"🗑️ [Knowledge] hataya: {name}")
 
     return {"deleted": True, "name": name}
+
+
+# =========================================================
+# ERPNEXT KE GUARDIANS
+#
+# Admin panel ka Users page account banate waqt Guardian ID
+# maangta tha - haath se likhi hui. Ek harf idhar udhar aur account
+# kisi bhi bachche tak nahi pahunchta, aur ghalti tab pakri jati jab
+# parent shikayat karta.
+#
+# Ab wahan list se chunte hain aur email ERPNext se khud bhar jati
+# hai. Ye endpoint yahan hai (auth service mein nahi) kyunke ERP
+# tak pahunch isi service ke paas hai.
+# =========================================================
+
+@router.get("/guardians")
+async def admin_guardians():
+    """
+    ERPNext ke saare guardians - naam, email aur kitne bachche.
+
+    email_address khali bhi ho sakta hai. Us surat mein hum khud koi
+    email nahi ghadte: account us email par banta hai jis se parent
+    login karega, aur andaze se banaya hua pata us ke kisi kaam ka
+    nahi. Panel wahan school ko pehle ERPNext mein email bharne ka
+    kehta hai.
+    """
+
+    from backend.microservices.livekit_Rag_services.services.erp_services.ERP_client import (
+        ERPClient,
+    )
+
+    client = ERPClient()
+
+    try:
+        rows = await client.get(
+            "/api/resource/Guardian",
+            params={
+                "limit_page_length": 0,
+                "fields": json.dumps(
+                    ["name", "guardian_name", "email_address", "mobile_number"]
+                ),
+                "order_by": "guardian_name asc",
+            },
+        )
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach the school system: {error}",
+        )
+
+    guardians = (rows or {}).get("data") or []
+
+    # Har guardian ke kitne bachche hain - ek hi call mein, har
+    # guardian ke liye alag nahi
+    try:
+        links = (
+            await client.get(
+                "/api/resource/Student Guardian",
+                params={
+                    "limit_page_length": 0,
+                    "parent": "Student",
+                    "fields": json.dumps(["guardian"]),
+                },
+            )
+        ).get("data") or []
+    except Exception:
+        links = []
+
+    counts = {}
+    for link in links:
+        key = link.get("guardian")
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+
+    return [
+        {
+            "id": g["name"],
+            "name": g.get("guardian_name") or g["name"],
+            "email": (g.get("email_address") or "").strip() or None,
+            "mobile": g.get("mobile_number"),
+            "students": counts.get(g["name"], 0),
+        }
+        for g in guardians
+    ]

@@ -15,6 +15,7 @@
 
 import { useState } from "react";
 import {
+  AlertTriangle,
   Eye,
   EyeOff,
   KeyRound,
@@ -39,11 +40,24 @@ export default function UsersPage() {
   const { data, loading, error, reload } = useAdminData(BASE, EMPTY);
   const { data: roles } = useAdminData(`${BASE}/roles`, []);
 
+  // ERPNext ke guardians - account banate waqt list se chunne ke
+  // liye. Pehle Guardian ID haath se likhi jati thi: ek harf idhar
+  // udhar aur account kisi bachche tak nahi pahunchta, aur ghalti
+  // tab pakri jati jab parent shikayat karta.
+  const { data: guardians } = useAdminData("/livekit/admin/guardians", []);
+
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [problem, setProblem] = useState("");
 
   const [form, setForm] = useState(null);   // { mode, user }
+  const [picked, setPicked] = useState("");  // chuna hua Guardian ID
+
+  // Email aur naam guardian se bharte hain, magar admin unhein badal
+  // bhi sakta hai. "typed" null ho to guardian wali value chalti hai;
+  // ek baar likh diya to admin ki marzi chalti hai.
+  const [emailTyped, setEmailTyped] = useState(null);
+  const [nameTyped, setNameTyped] = useState(null);
   const [pwFor, setPwFor] = useState(null); // password reset ke liye
 
   const users = data.users || [];
@@ -55,6 +69,16 @@ export default function UsersPage() {
   const parents = users.filter((u) => u.role !== "admin");
 
   const unlinked = parents.filter((u) => u.role === "guardian" && !u.parent_id);
+
+  const chosen = (guardians || []).find((g) => g.id === picked) || null;
+
+  const emailValue =
+    emailTyped !== null ? emailTyped : chosen?.email || "";
+
+  const nameValue =
+    nameTyped !== null
+      ? nameTyped
+      : chosen?.name || form?.user?.name || "";
 
   const say = (message) => {
     setProblem("");
@@ -156,7 +180,7 @@ export default function UsersPage() {
           <Button variant="outline" onClick={reload}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
-          <Button onClick={() => setForm({ mode: "create", user: null })}>
+          <Button onClick={() => { setPicked(""); setEmailTyped(null); setNameTyped(null); setForm({ mode: "create", user: null }); }}>
             <Plus className="h-3.5 w-3.5" />
             Add account
           </Button>
@@ -237,13 +261,69 @@ export default function UsersPage() {
           </div>
 
           <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
+            {/* Guardian pehle chunte hain - email aur naam usi se
+                bhar jate hain. Pehle email haath se likhi jati thi,
+                jo ERPNext wale record se mel na khaye to school ke
+                paas do alag pate ho jate. */}
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                Guardian (from ERPNext)
+              </span>
+              <select
+                value={picked}
+                onChange={(e) => setPicked(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white outline-none focus:border-accent-primary/50 focus:ring-2 focus:ring-accent-primary/30"
+              >
+                <option value="" className="bg-[#0b0a2a]">
+                  Not linked — no child records
+                </option>
+                {(guardians || []).map((g) => (
+                  <option key={g.id} value={g.id} className="bg-[#0b0a2a]">
+                    {g.name} · {g.students} student
+                    {g.students === 1 ? "" : "s"}
+                    {g.email ? "" : "  (no email in ERPNext)"}
+                  </option>
+                ))}
+              </select>
+              <input type="hidden" name="parent_id" value={picked} />
+
+              {chosen && (
+                <span className="mt-1.5 block font-mono text-[11px] text-text-secondary/70">
+                  {chosen.id}
+                </span>
+              )}
+            </label>
+
+            {/* Guardian ka email ERPNext mein nahi hai */}
+            {chosen && !chosen.email && (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/[0.07] px-3 py-2.5 text-[11px] leading-5 text-amber-100 sm:col-span-2">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  <span className="font-semibold">
+                    {chosen.name} has no email address in ERPNext.
+                  </span>{" "}
+                  Set it first in ERPNext (Education → Guardian →{" "}
+                  {chosen.name} → Email Address), then reload this page.
+                  The login email must match the guardian record.
+                </span>
+              </div>
+            )}
+
             {form.mode === "create" && (
               <Field
                 label="Email"
                 name="email"
                 type="email"
                 required
+                readOnly={Boolean(chosen?.email)}
+                value={emailValue}
+                onChange={(e) => setEmailTyped(e.target.value)}
                 placeholder="parent@example.com"
+                hint={
+                  chosen?.email
+                    ? "Taken from the guardian record in ERPNext."
+                    : "No guardian selected — type the email manually."
+                }
               />
             )}
 
@@ -251,7 +331,8 @@ export default function UsersPage() {
               label="Full name"
               name="name"
               required
-              defaultValue={form.user?.name || ""}
+              value={nameValue}
+              onChange={(e) => setNameTyped(e.target.value)}
               placeholder="Muhammad Ahmed"
             />
 
@@ -350,7 +431,7 @@ export default function UsersPage() {
         showGuardian={false}
         emptyText="No administrators."
         busy={busy}
-        onEdit={(u) => { setPwFor(null); setForm({ mode: "edit", user: u }); }}
+        onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(null); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
         onPassword={(u) => { setForm(null); setPwFor(u); }}
         onDelete={remove}
       />
@@ -363,7 +444,7 @@ export default function UsersPage() {
         showGuardian
         emptyText="No parent accounts yet."
         busy={busy}
-        onEdit={(u) => { setPwFor(null); setForm({ mode: "edit", user: u }); }}
+        onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(null); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
         onPassword={(u) => { setForm(null); setPwFor(u); }}
         onDelete={remove}
       />
@@ -482,6 +563,10 @@ function AccountTable({
 }
 
 function Field({ label, hint, ...props }) {
+  // readOnly field par cursor aur rang batate hain ke ye khud bhari
+  // gayi hai - warna admin type karta rehta hai aur kuch nahi hota.
+  const locked = props.readOnly;
+
   return (
     <label className="block">
       <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
@@ -489,7 +574,11 @@ function Field({ label, hint, ...props }) {
       </span>
       <input
         {...props}
-        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white placeholder:text-text-secondary/60 outline-none transition-colors focus:border-accent-primary/50 focus:ring-2 focus:ring-accent-primary/30"
+        className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition-colors placeholder:text-text-secondary/60 ${
+          locked
+            ? "cursor-default border-white/[0.06] bg-white/[0.02] text-text-secondary"
+            : "border-white/10 bg-white/[0.04] text-white focus:border-accent-primary/50 focus:ring-2 focus:ring-accent-primary/30"
+        }`}
       />
       {hint && (
         <span className="mt-1.5 block text-[11px] leading-4 text-text-secondary/70">
