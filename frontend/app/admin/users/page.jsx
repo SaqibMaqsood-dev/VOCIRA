@@ -111,6 +111,7 @@ export default function UsersPage() {
         await adminFetch(`${BASE}/${form.user.user_id}`, {
           method: "PATCH",
           body: JSON.stringify({
+            email: payload.email,
             name: payload.name,
             parent_id: payload.parent_id,
             role: payload.role,
@@ -315,23 +316,60 @@ export default function UsersPage() {
               </div>
             )}
 
-            {form.mode === "create" && (
-              <Field
-                label="Email"
+            {/*
+                Email dono halaton mein badli ja sakti hai.
+
+                Banate waqt wo guardian se khud bhar jati hai aur
+                readOnly hoti hai - wahan matching ka usool lagana
+                theek hai.
+
+                Edit karte waqt readOnly NAHI: parent ka pata badal
+                sakta hai, ya purane account ki email ERPNext se mel
+                nahi khati aur usay theek karna ho. Rok lagane se
+                admin ke paas koi raasta hi na bachta.
+            */}
+            <label className="block">
+              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                Email
+              </span>
+              <input
                 name="email"
                 type="email"
                 required
-                readOnly={Boolean(chosen?.email)}
+                readOnly={form.mode === "create" && Boolean(chosen?.email)}
                 value={emailValue}
                 onChange={(e) => setEmailTyped(e.target.value)}
                 placeholder="parent@example.com"
-                hint={
-                  chosen?.email
-                    ? "Taken from the guardian record in ERPNext."
-                    : "No guardian selected — type the email manually."
-                }
+                className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition-colors placeholder:text-text-secondary/60 ${
+                  form.mode === "create" && chosen?.email
+                    ? "cursor-default border-white/[0.06] bg-white/[0.02] text-text-secondary"
+                    : "border-white/10 bg-white/[0.04] text-white focus:border-accent-primary/50 focus:ring-2 focus:ring-accent-primary/30"
+                }`}
               />
-            )}
+
+              {form.mode === "create" ? (
+                <span className="mt-1.5 block text-[11px] leading-4 text-text-secondary/70">
+                  {chosen?.email
+                    ? "Taken from the guardian record in ERPNext."
+                    : "No guardian selected — type the email manually."}
+                </span>
+              ) : chosen?.email && chosen.email !== emailValue ? (
+                // Sirf tab jab waqai farq ho - warna ye ek button
+                // hota jo kuch karta hi nahi
+                <button
+                  type="button"
+                  onClick={() => setEmailTyped(chosen.email)}
+                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-amber-400/10 px-2 py-1 text-[11px] font-medium text-amber-200 transition-colors hover:bg-amber-400/20"
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  Use {chosen.email} from ERPNext
+                </button>
+              ) : (
+                <span className="mt-1.5 block text-[11px] leading-4 text-text-secondary/70">
+                  Changing this changes how they log in.
+                </span>
+              )}
+            </label>
 
             <Field
               label="Full name"
@@ -437,7 +475,7 @@ export default function UsersPage() {
         showGuardian={false}
         emptyText="No administrators."
         busy={busy}
-        onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(null); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
+        onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(u.email); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
         onPassword={(u) => { setForm(null); setPwFor(u); }}
         onDelete={remove}
       />
@@ -451,7 +489,7 @@ export default function UsersPage() {
         guardianById={guardianById}
         emptyText="No parent accounts yet."
         busy={busy}
-        onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(null); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
+        onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(u.email); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
         onPassword={(u) => { setForm(null); setPwFor(u); }}
         onDelete={remove}
       />

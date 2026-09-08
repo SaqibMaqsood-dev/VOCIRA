@@ -168,6 +168,40 @@ def main():
                 json={"parent_id": "EDU-GRD-2026-00003"})
 
     # =====================================================
+    print("\n--- 5b. email badalna ---")
+    # =====================================================
+    MOVED = "moved.parent@vocira-test.com"
+
+    r = httpx.patch(f"{BASE}/{uid}", headers=auth, timeout=40,
+                    json={"email": MOVED})
+    chk("email patch 200", r.status_code == 200, f"HTTP {r.status_code}")
+    if r.status_code == 200:
+        chk("nayi email lauti", r.json()["email"] == MOVED, r.json()["email"])
+
+    # ASLI IMTIHAN: login ab nayi email se chale, purani se nahi
+    chk("nayi email se login chalta hai",
+        login(MOVED, NEW_PASS) is not None)
+    chk("purani email se login NAHI chalta",
+        login(NEW_EMAIL, NEW_PASS) is None)
+
+    # kisi aur ke account ki email par le jana
+    r = httpx.patch(f"{BASE}/{uid}", headers=auth, timeout=40,
+                    json={"email": "ahmed@test.com"})
+    chk("doosre ki email par 409", r.status_code == 409,
+        f"HTTP {r.status_code}")
+
+    # kharab email
+    r = httpx.patch(f"{BASE}/{uid}", headers=auth, timeout=40,
+                    json={"email": "ye-email-nahi"})
+    chk("kharab email 422", r.status_code == 422, f"HTTP {r.status_code}")
+
+    # wapis le aayein taake aage ke test chalte rahen
+    httpx.patch(f"{BASE}/{uid}", headers=auth, timeout=40,
+                json={"email": NEW_EMAIL})
+    chk("wapis purani email par", login(NEW_EMAIL, NEW_PASS) is not None)
+
+
+    # =====================================================
     print("\n--- 6. password reset ---")
     # =====================================================
     r = httpx.post(f"{BASE}/{uid}/password", headers=auth, timeout=40,

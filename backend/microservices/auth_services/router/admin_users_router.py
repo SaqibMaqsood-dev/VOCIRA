@@ -63,6 +63,10 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    # Email badalna login badalna hai - purani se andar aana band ho
+    # jata hai. Ye jaan bujh kar mumkin rakha hai: parent ka pata
+    # badal sakta hai, ya ERPNext wale record se mel khana ho.
+    email: Optional[EmailStr] = None
     name: Optional[str] = Field(default=None, min_length=2, max_length=100)
     parent_id: Optional[str] = Field(default=None, max_length=100)
     role: Optional[str] = None
@@ -201,6 +205,31 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+    if request.email is not None:
+        email = str(request.email).strip().lower()
+
+        if email != user.email:
+            # Doosre account ki email par le jana - warna do accounts
+            # ek hi email par ho jate aur login kis ka chale, ye tay
+            # hi nahi hota.
+            taken = (
+                await db.execute(
+                    select(Users).where(
+                        Users.email == email,
+                        Users.user_id != user_id,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if taken is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Another account already uses {email}",
+                )
+
+            print(f"👤 [Admin] email badli: {user.email} -> {email}")
+            user.email = email
 
     if request.name is not None:
         user.name = request.name.strip()
