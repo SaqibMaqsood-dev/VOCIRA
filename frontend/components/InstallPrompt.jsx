@@ -120,16 +120,37 @@ export default function InstallPrompt() {
       className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex justify-center px-4 pb-4 sm:justify-end sm:px-6 sm:pb-6"
     >
       <div className="pointer-events-auto w-full max-w-sm animate-install-in">
-        <div className="relative overflow-hidden rounded-2xl border border-white/12 bg-[#0b0a2a]/92 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+        {/*
+            Border pehle white/12 tha - gehre card par wo ek saaf
+            safaid lakeer ban kar kinare ko kaat raha tha.
+
+            Ab teen halki parton se kinara banta hai:
+              border   bohat halka, sirf shakl batane ko
+              inset    andar ki taraf ek baal barabar roshni - shishe
+                       ka kinara aisa hi lagta hai
+              shadow   gehri aur phaili hui, yehi card ko background
+                       se alag karti hai (border nahi)
+        */}
+        <div
+          className="relative overflow-hidden rounded-2xl bg-[#0b0a2a]/94 p-4 backdrop-blur-2xl"
+          style={{
+            boxShadow: [
+              "0 0 0 1px rgba(255,255,255,0.06)",
+              "inset 0 1px 0 rgba(255,255,255,0.07)",
+              "0 24px 70px -12px rgba(0,0,0,0.7)",
+              "0 8px 24px -8px rgba(108,99,255,0.22)",
+            ].join(", "),
+          }}
+        >
           {/* upar roshni ki patli lakeer */}
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent"
           />
           {/* halka sa glow */}
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-accent-primary/25 blur-3xl"
+            className="pointer-events-none absolute -right-12 -top-14 h-36 w-36 rounded-full bg-accent-primary/20 blur-3xl"
           />
 
           <button
@@ -159,7 +180,7 @@ export default function InstallPrompt() {
           </div>
 
           {isIOS ? (
-            <div className="relative mt-3.5 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-[11px] leading-5 text-text-secondary">
+            <div className="relative mt-3.5 flex items-center gap-2 rounded-xl bg-white/[0.05] px-3 py-2.5 text-[11px] leading-5 text-text-secondary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
               <Share className="h-3.5 w-3.5 shrink-0 text-accent-secondary" />
               <span>
                 Tap <span className="font-semibold text-white">Share</span>,
@@ -174,7 +195,7 @@ export default function InstallPrompt() {
               <button
                 type="button"
                 onClick={dismiss}
-                className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-xs font-semibold text-text-secondary transition-colors hover:bg-white/[0.1] hover:text-white"
+                className="flex-1 rounded-xl bg-white/[0.05] px-3 py-2.5 text-xs font-semibold text-text-secondary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors hover:bg-white/[0.1] hover:text-white"
               >
                 Not now
               </button>
