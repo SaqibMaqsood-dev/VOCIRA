@@ -6,7 +6,11 @@ import asyncio
 
 from backend.microservices.livekit_Rag_services.repository.session_repository import SessionRepository
 from backend.microservices.livekit_Rag_services.core.rabitmq import RabbitMQ
-from backend.microservices.livekit_Rag_services.models import session_model
+from backend.microservices.livekit_Rag_services.models import (
+    escalation_model,
+    message_model,
+    session_model,
+)
 from backend.helper_functions.database.session import SessionLocal
 from backend.microservices.livekit_Rag_services.core.config import settings
 
@@ -86,7 +90,63 @@ class SessionService:
     # GET USER SESSIONS
     # =========================================================
     async def get_user_sessions(self, db: AsyncSession, user_id: UUID, limit: int = 10, skip: int = 0):
-        return await self.session_repo.get_user_sessions(db=db, user_id=user_id, limit=limit, skip=skip)
+        rows = await self.session_repo.get_user_sessions(
+            db=db, user_id=user_id, limit=limit, skip=skip
+        )
+        return await self._decorate(db=db, sessions=rows)
+
+    # =========================================================
+    # DURATION AUR HANDLER
+    # =========================================================
+
+    async def _decorate(self, db: AsyncSession, sessions: list):
+        """
+        Har session par duration aur handler chipka dein.
+
+        Dashboard ki ye do columns hamesha "-" dikhati thin kyunke API
+        ye maloomat deti hi nahi thi.
+
+        Escalations ek hi query mein nikaali jati hain, har session ke
+        liye alag nahi - warna 20 rows ka matlab 20 queries hota.
+        """
+
+        if not sessions:
+            return sessions
+
+        ids = [s.id for s in sessions]
+
+        # Kis kis session mein insaan tak baat gayi.
+        # Escalation message se juRi hai, message session se.
+        escalated = set(
+            (
+                await db.execute(
+                    select(message_model.Message.session_id)
+                    .join(
+                        escalation_model.Escalation,
+                        escalation_model.Escalation.message_id
+                        == message_model.Message.id,
+                    )
+                    .where(message_model.Message.session_id.in_(ids))
+                    .distinct()
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        for row in sessions:
+            row.handler = "Human" if row.id in escalated else "AI"
+
+            # Chalti hui call ki koi duration nahi hoti - wo abhi barh
+            # rahi hai. Us par koi ginti dikhana jhoot hoga.
+            if row.end_at and row.start_at:
+                row.duration_seconds = max(
+                    0, int((row.end_at - row.start_at).total_seconds())
+                )
+            else:
+                row.duration_seconds = None
+
+        return sessions
 
     # =========================================================
     # GET ALL SESSIONS

@@ -185,28 +185,30 @@ export default function DashboardPage() {
     // DURATION
     // =======================================================
 
-    let duration = "—";
+    // Backend ab duration_seconds seedha deta hai. Purana hisaab
+    // fallback ke tor par rakha hai - agar kabhi wo field na aaye.
+    let seconds = session.duration_seconds;
 
-    if (session.start_at && session.end_at) {
-      const start = new Date(session.start_at);
-      const end = new Date(session.end_at);
+    if (seconds === null || seconds === undefined) {
+      if (session.start_at && session.end_at) {
+        const start = new Date(session.start_at);
+        const end = new Date(session.end_at);
 
-      if (
-        !Number.isNaN(start.getTime()) &&
-        !Number.isNaN(end.getTime())
-      ) {
-        const durationSeconds = Math.floor(
-          (end.getTime() - start.getTime()) / 1000
-        );
-
-        if (durationSeconds >= 0) {
-          const minutes = Math.floor(durationSeconds / 60);
-          const seconds = durationSeconds % 60;
-
-          duration = `${minutes}m ${seconds}s`;
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+          seconds = Math.floor((end.getTime() - start.getTime()) / 1000);
         }
       }
     }
+
+    // Chalti hui call ki duration nahi hoti - wo abhi barh rahi hai.
+    // "—" se ye pata nahi chalta ke data nadarad hai ya call jaari
+    // hai, is liye saaf likh dete hain.
+    const duration =
+      seconds === null || seconds === undefined || seconds < 0
+        ? session.status === "active"
+          ? "In progress"
+          : "—"
+        : formatDuration(seconds);
 
     // =======================================================
     // TIME
@@ -261,8 +263,7 @@ export default function DashboardPage() {
 
       duration,
 
-      // Backend currently doesn't provide handler
-      handler: session.handler ?? "—",
+      handler: session.handler || "—",
 
       time,
     };
@@ -361,4 +362,32 @@ export default function DashboardPage() {
 
     </div>
   );
+}
+
+
+/**
+ * Seconds ko parhne laayak banayein.
+ *
+ * Pehle hamesha "Xm Ys" likha jata tha, is liye 34 second ki call
+ * "0m 34s" dikhti thi - jo padhne mein ajeeb hai aur "0" bekaar
+ * jagah leta hai.
+ *
+ *     34    ->  34s
+ *     124   ->  2m 4s
+ *     180   ->  3m
+ *     3661  ->  1h 1m
+ */
+function formatDuration(total) {
+  if (total < 60) return `${total}s`;
+
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+
+  // Ghanton mein seconds bemani hain - koi "1h 1m 7s" nahi padhta
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
