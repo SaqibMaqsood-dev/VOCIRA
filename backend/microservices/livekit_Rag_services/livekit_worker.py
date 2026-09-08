@@ -36,7 +36,7 @@ def make_worker() -> LivekitRoomServices:
 async def main() -> None:
     print("=" * 60)
     print("🎧 VOCIRA agent worker")
-    print(f"   ek waqt mein calls : {MAX_CONCURRENT_CALLS}")
+    print(f"   concurrent calls  : {MAX_CONCURRENT_CALLS}")
     print(f"   call ki max lambai : {MAX_CALL_SECONDS}s")
     print("=" * 60)
 

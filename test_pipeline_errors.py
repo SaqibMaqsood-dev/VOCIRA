@@ -95,7 +95,7 @@ async def main():
     from backend.microservices.auth_services.models.user_model import Users
     async with SessionLocal() as db:
         uid = (await db.execute(
-            select(Users).where(Users.email == "ahmed@test.com")
+            select(Users).where(Users.email == "muhmmadahmed763@edu.com")
         )).scalar_one().user_id
         sess = Session(id=uuid.uuid4(), user_id=uid, title="error test",
                        status=SessionStatus.active)

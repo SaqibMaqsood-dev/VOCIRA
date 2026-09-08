@@ -68,7 +68,7 @@ def _save_state() -> None:
         with open(_STATE_FILE, "w", encoding="utf-8") as handle:
             json.dump(_last_sync, handle)
     except Exception as error:
-        print(f"⚠️ [RAG Sync] state save nahi hui: {error}")
+        print(f"⚠️ [RAG Sync] could not save state: {error}")
 
 
 def _load_state() -> None:
@@ -91,7 +91,7 @@ def _load_state() -> None:
             _last_sync.update(saved)
 
     except Exception as error:
-        print(f"⚠️ [RAG Sync] purani state nahi parhi ja saki: {error}")
+        print(f"⚠️ [RAG Sync] could not read the saved state: {error}")
 
 
 _load_state()
@@ -121,7 +121,7 @@ async def _run_sync():
         )
 
         try:
-            print("📚 [RAG Sync] knowledge base assemble ho rahi hai...")
+            print("📚 [RAG Sync] assembling the knowledge base...")
             chunks = await assemble_knowledge_base()
 
             if not chunks:
@@ -152,7 +152,7 @@ async def _run_sync():
                 result=result,
             )
             _save_state()
-            print(f"✅ [RAG Sync] mukammal: {result}")
+            print(f"✅ [RAG Sync] done: {result}")
 
         except Exception as exc:
             _last_sync.update(

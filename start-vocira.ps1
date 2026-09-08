@@ -322,7 +322,7 @@ Write-Host @"
 if ($WithErp) { Write-Host "  ERPNext   http://localhost:8081     (Administrator / admin)" -ForegroundColor Cyan }
 Write-Host @"
 
-  Login     ahmed@test.com / Test@1234
+  Login     muhmmadahmed763@edu.com / Test@1234
   Band      .\start-vocira.ps1 -Stop
   Haal      .\start-vocira.ps1 -Status
 ---------------------------------------------------------------

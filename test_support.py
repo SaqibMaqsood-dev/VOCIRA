@@ -24,7 +24,7 @@ ERP_HEADERS = {
     "Accept": "application/json",
 }
 
-EMAIL = "ahmed@test.com"
+EMAIL = "muhmmadahmed763@edu.com"
 PASSWORD = "Test@1234"
 GUEST_EMAIL = "walid.guest@example.com"
 

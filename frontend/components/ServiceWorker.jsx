@@ -23,7 +23,7 @@ export default function ServiceWorker() {
       navigator.serviceWorker.register("/sw.js").catch((error) => {
         // Register na ho to app phir bhi theek chalti hai - bas
         // install aur offline page nahi milega.
-        console.warn("Service worker register nahi hua:", error);
+        console.warn("Service worker did not register:", error);
       });
     };
 

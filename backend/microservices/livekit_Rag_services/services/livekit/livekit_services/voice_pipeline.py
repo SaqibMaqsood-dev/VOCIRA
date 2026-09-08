@@ -227,7 +227,7 @@ async def publish_agent_state(service_handle, state: str) -> None:
         service_handle._agent_state = state
 
     except Exception as error:
-        print(f"⚠️ [Agent State] '{state}' bhej nahi sake: {error}")
+        print(f"⚠️ [Agent State] '{state}' could not send: {error}")
 
 
 # =========================================================
@@ -254,7 +254,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
             timeout=10,
         )
     except asyncio.TimeoutError:
-        print("⚠️ [Speak] Agent track tayyar nahi hui.")
+        print("⚠️ [Speak] Agent track is not ready.")
         return False
 
     async with service_handle._tts_lock:
@@ -264,7 +264,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
             and service_handle.room
             and service_handle.room.isconnected()
         ):
-            print("⚠️ [Speak] Room ya audio source maujood nahi.")
+            print("⚠️ [Speak] No room or audio source.")
             return False
 
         sample_rate = 22050

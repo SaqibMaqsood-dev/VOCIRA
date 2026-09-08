@@ -453,7 +453,7 @@ async def admin_delete_document(name: str):
             detail="Document not found",
         )
 
-    print(f"🗑️ [Knowledge] hataya: {name}")
+    print(f"🗑️ [Knowledge] deleted: {name}")
 
     return {"deleted": True, "name": name}
 

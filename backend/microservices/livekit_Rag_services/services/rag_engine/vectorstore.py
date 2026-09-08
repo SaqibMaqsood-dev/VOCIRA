@@ -88,7 +88,7 @@ def _rebuild_sync(chunks) -> dict:
 
     # ---- index maujood na ho to bana dein ----
     if INDEX_NAME not in existing:
-        log.info("Index '%s' bana rahe hain (dim=%s)", INDEX_NAME, EMBEDDING_DIM)
+        log.info("Creating index '%s' (dim=%s)", INDEX_NAME, EMBEDDING_DIM)
         pc.create_index(
             name=INDEX_NAME,
             dimension=EMBEDDING_DIM,
@@ -117,8 +117,8 @@ def _rebuild_sync(chunks) -> dict:
         .get("vector_count", 0)
     )
     if before:
-        log.info("Namespace '%s' se %s purane vectors hata rahe hain",
-                 PINECONE_NAMESPACE, before)
+        log.info("Removing %s old vectors from namespace '%s'",
+                 before, PINECONE_NAMESPACE)
         try:
             index.delete(delete_all=True, namespace=PINECONE_NAMESPACE)
             time.sleep(2)
@@ -218,5 +218,5 @@ def connect_existing_store(index_name: str = None):
         log.info("Pinecone '%s' se juda (namespace '%s')", target, PINECONE_NAMESPACE)
         return retriever
 
-    log.error("Index '%s' Pinecone par nahi mili", target)
+    log.error("Index '%s' not found on Pinecone", target)
     return None

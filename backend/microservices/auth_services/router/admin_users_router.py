@@ -3,7 +3,7 @@ Parents ke accounts sambhalne ke liye - admin panel ke waaste.
 
 Kyun zaroori tha:
 
-VOCIRA ke apne accounts (ahmed@test.com waghera) Postgres mein hain,
+VOCIRA ke apne accounts (muhmmadahmed763@edu.com waghera) Postgres mein hain,
 ERPNext mein nahi. Aur unhein dekhne ya badalne ka KOI raasta nahi
 tha - na admin panel mein koi page, na password badalne ka endpoint,
 na "forgot password". Har cheez ke liye psql ya koi script chalani
@@ -181,7 +181,7 @@ async def create_user(
     await db.commit()
     await db.refresh(user)
 
-    print(f"👤 [Admin] account bana: {email} -> {user.parent_id}")
+    print(f"👤 [Admin] account created: {email} -> {user.parent_id}")
 
     return _shape(user, request.role.strip().lower())
 
@@ -228,7 +228,7 @@ async def update_user(
                     detail=f"Another account already uses {email}",
                 )
 
-            print(f"👤 [Admin] email badli: {user.email} -> {email}")
+            print(f"👤 [Admin] email changed: {user.email} -> {email}")
             user.email = email
 
     if request.name is not None:
@@ -329,6 +329,6 @@ async def delete_user(
     await db.delete(user)
     await db.commit()
 
-    print(f"🗑️ [Admin] account hataya: {email}")
+    print(f"🗑️ [Admin] account deleted: {email}")
 
     return {"deleted": True, "email": email}

@@ -15,7 +15,7 @@ import httpx
 
 GATEWAY = "http://localhost:9000"
 ADMIN = ("admin@vocira.com", "Admin@1234")
-PARENT = ("ahmed@test.com", "Test@1234")
+PARENT = ("muhmmadahmed763@edu.com", "Test@1234")
 
 DATA = os.path.join(
     "backend", "microservices", "livekit_Rag_services",

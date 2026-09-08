@@ -4,7 +4,7 @@ Demo ke guardian accounts - VOCIRA ke login jo ERPNext se juRe hain.
 Kyun zaroori hai:
 
 ERPNext mein teen guardians aur un ke bachche mojood thay, magar
-VOCIRA mein login sirf ahmed@test.com ka tha. Yaani Bilal aur Sana
+VOCIRA mein login sirf muhmmadahmed763@edu.com ka tha. Yaani Bilal aur Sana
 ke 4 bachchon ka data - attendance, grades, fees - kisi ke liye bhi
 pahunch se bahar tha. Voice assistant un tak ja hi nahi sakta tha.
 
@@ -34,9 +34,9 @@ PASSWORD = "Test@1234"
 
 # email, naam, ERPNext ka Guardian record
 PEOPLE = [
-    ("ahmed@test.com", "Muhammad Ahmed", "EDU-GRD-2026-00002"),
-    ("bilal@test.com", "Bilal Hussain",  "EDU-GRD-2026-00003"),
-    ("sana@test.com",  "Sana Tariq",     "EDU-GRD-2026-00004"),
+    ("muhmmadahmed763@edu.com", "Muhammad Ahmed", "EDU-GRD-2026-00002"),
+    ("bilal.hussain@edu.com", "Bilal Hussain",  "EDU-GRD-2026-00003"),
+    ("sana.tariq@edu.com",  "Sana Tariq",     "EDU-GRD-2026-00004"),
 ]
 
 

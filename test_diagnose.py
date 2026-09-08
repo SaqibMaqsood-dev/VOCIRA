@@ -111,11 +111,11 @@ async def main():
 
         async with SessionLocal() as db:
             u = (await db.execute(
-                select(Users).where(Users.email == "ahmed@test.com")
+                select(Users).where(Users.email == "muhmmadahmed763@edu.com")
             )).scalar_one_or_none()
 
         if u is None:
-            report("test user DB mein", False, "ahmed@test.com nahi mila")
+            report("test user DB mein", False, "muhmmadahmed763@edu.com nahi mila")
         else:
             report("test user DB mein", True, f"parent_id={u.parent_id}")
             ac = AuthClient(base_url=settings.AUTH_SERVICE_URL)

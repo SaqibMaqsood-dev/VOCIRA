@@ -106,7 +106,7 @@ export default function UsersPage() {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        say(`${made.email} ka account ban gaya`);
+        say(`Account created for ${made.email}`);
       } else {
         await adminFetch(`${BASE}/${form.user.user_id}`, {
           method: "PATCH",
@@ -117,7 +117,7 @@ export default function UsersPage() {
             role: payload.role,
           }),
         });
-        say(`${form.user.email} update ho gaya`);
+        say(`${form.user.email} updated`);
       }
 
       setForm(null);
@@ -140,7 +140,7 @@ export default function UsersPage() {
         method: "POST",
         body: JSON.stringify({ password }),
       });
-      say(`${pwFor.email} ka password badal diya`);
+      say(`Password changed for ${pwFor.email}`);
       setPwFor(null);
     } catch (err) {
       setProblem(err.message || "Could not reset the password.");
@@ -162,7 +162,7 @@ export default function UsersPage() {
       setBusy(user.user_id);
       setProblem("");
       await adminFetch(`${BASE}/${user.user_id}`, { method: "DELETE" });
-      say(`${user.email} hata diya`);
+      say(`${user.email} deleted`);
       reload();
     } catch (err) {
       setProblem(err.message || "Could not delete.");

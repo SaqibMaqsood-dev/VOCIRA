@@ -27,7 +27,7 @@ from backend.microservices.livekit_Rag_services.services.text_speech.piper_servi
     tts_converter,
 )
 
-# ahmed@test.com - guardian EDU-GRD-2026-00002
+# muhmmadahmed763@edu.com - guardian EDU-GRD-2026-00002
 USER_ID = None          # neeche DB se uthate hain
 
 TURNS = [
@@ -81,10 +81,10 @@ async def main():
     from backend.microservices.auth_services.models.user_model import Users as User
     async with SessionLocal() as db:
         user = (await db.execute(
-            select(User).where(User.email == "ahmed@test.com")
+            select(User).where(User.email == "muhmmadahmed763@edu.com")
         )).scalar_one_or_none()
         if user is None:
-            print("!! ahmed@test.com nahi mila"); sys.exit(1)
+            print("!! muhmmadahmed763@edu.com nahi mila"); sys.exit(1)
         uid = user.user_id
 
         sess = Session(id=uuid.uuid4(), user_id=uid,

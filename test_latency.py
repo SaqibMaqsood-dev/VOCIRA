@@ -70,7 +70,7 @@ async def main():
     from sqlalchemy import select
     async with SessionLocal() as db:
         uid = (await db.execute(
-            select(Users).where(Users.email == "ahmed@test.com")
+            select(Users).where(Users.email == "muhmmadahmed763@edu.com")
         )).scalar_one().user_id
 
     print("\n--- ERP waala raasta ---")

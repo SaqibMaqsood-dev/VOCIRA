@@ -148,7 +148,7 @@ CONTEXT:
             return clean_for_tts(response.choices[0].message.content)
 
         except asyncio.TimeoutError:
-            log.warning(f"{model_name} time out ho gaya ({attempt + 1}/{len(chain)}).")
+            log.warning(f"{model_name} timed out ({attempt + 1}/{len(chain)}).")
             continue
 
         except Exception as e:

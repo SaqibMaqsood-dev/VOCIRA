@@ -16,7 +16,7 @@ GATEWAY = "http://localhost:9000"
 BASE = f"{GATEWAY}/auth/admin/users"
 
 ADMIN = ("admin@vocira.com", "Admin@1234")
-PARENT = ("ahmed@test.com", "Test@1234")
+PARENT = ("muhmmadahmed763@edu.com", "Test@1234")
 
 NEW_EMAIL = "test.parent@vocira-test.com"
 NEW_PASS = "Parent@1234"
@@ -84,9 +84,9 @@ def main():
             print(f"          {u['email']:<26} {u['role'] or '-':<10} {u['parent_id'] or '-'}")
 
         chk("ahmed list mein",
-            any(u["email"] == "ahmed@test.com" for u in body["users"]))
+            any(u["email"] == "muhmmadahmed763@edu.com" for u in body["users"]))
 
-        ahmed = next(u for u in body["users"] if u["email"] == "ahmed@test.com")
+        ahmed = next(u for u in body["users"] if u["email"] == "muhmmadahmed763@edu.com")
         chk("parent_id sahi", ahmed["parent_id"] == "EDU-GRD-2026-00002",
             str(ahmed["parent_id"]))
 
@@ -186,7 +186,7 @@ def main():
 
     # kisi aur ke account ki email par le jana
     r = httpx.patch(f"{BASE}/{uid}", headers=auth, timeout=40,
-                    json={"email": "ahmed@test.com"})
+                    json={"email": "muhmmadahmed763@edu.com"})
     chk("doosre ki email par 409", r.status_code == 409,
         f"HTTP {r.status_code}")
 
