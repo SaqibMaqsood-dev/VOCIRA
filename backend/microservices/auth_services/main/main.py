@@ -7,6 +7,7 @@ from backend.microservices.auth_services.router import (
     auth_router,
     refresh_token_router,
     user_router,
+    admin_users_router,
 )
 
 from backend.microservices.auth_services.models import (
@@ -62,5 +63,9 @@ app = FastAPI(
 # ============================================================
 
 app.include_router(user_router.router)
+# Admin panel ka Users page - parents ke accounts sambhalne ke liye.
+# Ye auth service mein hai kyunke password hashing (argon2) sirf
+# yahan ke venv mein mojood hai.
+app.include_router(admin_users_router.router)
 app.include_router(refresh_token_router.route)
 app.include_router(auth_router.router)

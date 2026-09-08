@@ -26,6 +26,7 @@ import {
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
+  Users,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ const items = [
   { href: "/admin/queries", label: "Queries", icon: MessageCircle },
   { href: "/admin/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/admin/escalations", label: "Escalations", icon: AlertTriangle },
+  { href: "/admin/users", label: "Parents", icon: Users },
 ];
 
 export default function Sidebar({
