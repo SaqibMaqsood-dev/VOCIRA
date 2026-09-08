@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline · Vocira</title>
+    <link rel="icon" href="/icons/icon-192.png" />
+    <style>
+      /*
+        Ye safha service worker se aata hai jab network na ho, is liye
+        sab kuch isi file mein hai - koi bahar ki CSS ya font load
+        nahi ho sakti, wo bhi to network se aati hai.
+      */
+      :root {
+        color-scheme: dark;
+        --bg: #05041c;
+        --card: rgba(255, 255, 255, 0.04);
+        --line: rgba(255, 255, 255, 0.1);
+        --ink: #f4f6ff;
+        --muted: rgba(244, 246, 255, 0.62);
+        --accent: #6c63ff;
+        --accent-2: #8be9fd;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* Halka sa glow - background bilkul sapaat na lage */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -30%;
+        background:
+          radial-gradient(40% 40% at 30% 25%, rgba(108, 99, 255, 0.18), transparent 70%),
+          radial-gradient(35% 35% at 72% 70%, rgba(139, 233, 253, 0.10), transparent 70%);
+        pointer-events: none;
+      }
+
+      .card {
+        position: relative;
+        width: 100%;
+        max-width: 420px;
+        padding: 32px 28px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--card);
+        backdrop-filter: blur(20px);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        text-align: center;
+      }
+
+      .logo {
+        width: 60px;
+        height: 60px;
+        margin: 0 auto 20px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, var(--accent-2), var(--accent));
+        display: grid;
+        place-items: center;
+      }
+
+      .logo svg { width: 30px; height: 30px; }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+
+      .hint {
+        margin-top: 20px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: var(--muted);
+        text-align: left;
+      }
+
+      button {
+        margin-top: 20px;
+        width: 100%;
+        padding: 12px 18px;
+        border: 0;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--accent), #4f45d1);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 650;
+        font-family: inherit;
+        cursor: pointer;
+        transition: transform 0.15s ease, opacity 0.15s ease;
+      }
+
+      button:hover { transform: translateY(-1px); opacity: 0.94; }
+      button:active { transform: translateY(0); }
+
+      .dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 7px;
+        border-radius: 50%;
+        background: #d95926;
+        animation: pulse 1.8s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .dot { animation: none; }
+        button { transition: none; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="card">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#05041c"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="11" rx="3" />
+          <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
+          <path d="M12 19v3" />
+        </svg>
+      </div>
+
+      <h1><span class="dot"></span>You are offline</h1>
+
+      <p>
+        Vocira needs an internet connection — your child's attendance,
+        results and fees come from the school system in real time.
+      </p>
+
+      <div class="hint">
+        We do not show saved copies of school records on purpose. Old
+        marks or a stale fee balance could be worse than no answer at
+        all.
+      </div>
+
+      <button onclick="location.reload()">Try again</button>
+    </div>
+
+    <script>
+      // Network wapis aate hi khud koshish karein - user ko baar baar
+      // button dabana na pare
+      window.addEventListener("online", () => location.reload());
+    </script>
+  </body>
+</html>

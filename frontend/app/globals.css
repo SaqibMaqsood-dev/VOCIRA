@@ -301,3 +301,24 @@ input::-ms-clear {
   0%, 100% { opacity: 0.35; }
   50%      { opacity: 0.9; }
 }
+
+/*
+ * Install wala card neeche se aata hai.
+ *
+ * Ye yahan hai, component ke andar styled-jsx mein nahi: wahan
+ * Tailwind ke arbitrary animation ka class-name escape karna parta
+ * hai, aur prefers-reduced-motion ka override us par nazuk ho jata
+ * hai. Ek saada class zyada bharosay ke qabil hai.
+ */
+@keyframes install-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-install-in {
+  animation: install-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-install-in { animation: none; }
+}
