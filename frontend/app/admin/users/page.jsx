@@ -47,7 +47,14 @@ export default function UsersPage() {
   const [pwFor, setPwFor] = useState(null); // password reset ke liye
 
   const users = data.users || [];
-  const unlinked = users.filter((u) => u.role === "guardian" && !u.parent_id);
+
+  // Admin aur parent do bilkul alag cheezein hain - ek panel
+  // chalata hai, doosra apne bachche ka data poochta hai. Ek hi
+  // list mein dono rakhna dono ko ulajha deta tha.
+  const admins = users.filter((u) => u.role === "admin");
+  const parents = users.filter((u) => u.role !== "admin");
+
+  const unlinked = parents.filter((u) => u.role === "guardian" && !u.parent_id);
 
   const say = (message) => {
     setProblem("");
@@ -182,9 +189,9 @@ export default function UsersPage() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
-          <CardHeader title="Accounts" />
+          <CardHeader title="Parents" />
           <p className="text-2xl font-semibold text-white">
-            {loading ? "…" : data.total}
+            {loading ? "…" : parents.length}
           </p>
         </Card>
         <Card>
@@ -192,11 +199,16 @@ export default function UsersPage() {
           <p className="text-2xl font-semibold text-white">
             {loading ? "…" : data.linked}
           </p>
+          {!loading && unlinked.length > 0 && (
+            <p className="mt-1 text-[11px] text-amber-200">
+              {unlinked.length} not linked
+            </p>
+          )}
         </Card>
         <Card>
-          <CardHeader title="Not linked" />
+          <CardHeader title="Administrators" />
           <p className="text-2xl font-semibold text-white">
-            {loading ? "…" : unlinked.length}
+            {loading ? "…" : admins.length}
           </p>
         </Card>
       </div>
@@ -323,53 +335,112 @@ export default function UsersPage() {
         </Card>
       )}
 
-      {/* ---- list ---- */}
-      <Card>
-        <CardHeader
-          title="Accounts"
-          description="Vocira logins — not the same as ERPNext users"
-        />
+      {/* ---- do alag list: admins aur parents ----
 
-        <Table>
-          <THead>
+          Pehle dono ek hi table mein mile hue thay. Ye do bilkul
+          alag cheezein hain: admin panel chalata hai, parent apne
+          bachche ka data poochta hai. Aur admin ke liye "Guardian
+          ID" ka column bemani hai - us ke bachche hote hi nahi. */}
+
+      <AccountTable
+        title="Administrators"
+        description="These accounts can open this panel"
+        rows={admins}
+        loading={loading}
+        showGuardian={false}
+        emptyText="No administrators."
+        busy={busy}
+        onEdit={(u) => { setPwFor(null); setForm({ mode: "edit", user: u }); }}
+        onPassword={(u) => { setForm(null); setPwFor(u); }}
+        onDelete={remove}
+      />
+
+      <AccountTable
+        title="Parents"
+        description="Vocira logins — not the same as ERPNext users"
+        rows={parents}
+        loading={loading}
+        showGuardian
+        emptyText="No parent accounts yet."
+        busy={busy}
+        onEdit={(u) => { setPwFor(null); setForm({ mode: "edit", user: u }); }}
+        onPassword={(u) => { setForm(null); setPwFor(u); }}
+        onDelete={remove}
+      />
+    </div>
+  );
+}
+
+/**
+ * Accounts ki ek list.
+ *
+ * Admins aur parents ka dhaancha ek hi hai, sirf "Guardian ID" ka
+ * column farq karta hai - admin ke bachche hote hi nahi, is liye
+ * us ke liye wo column bemani hai.
+ */
+function AccountTable({
+  title,
+  description,
+  rows,
+  loading,
+  showGuardian,
+  emptyText,
+  busy,
+  onEdit,
+  onPassword,
+  onDelete,
+}) {
+  const columns = showGuardian ? 6 : 5;
+
+  return (
+    <Card>
+      <CardHeader
+        title={`${title}${loading ? "" : ` (${rows.length})`}`}
+        description={description}
+      />
+
+      <Table>
+        <THead>
+          <TR>
+            <TH>Name</TH>
+            <TH>Email</TH>
+            <TH>Role</TH>
+            {showGuardian && <TH>Guardian ID</TH>}
+            <TH>Created</TH>
+            <TH className="text-right">Actions</TH>
+          </TR>
+        </THead>
+        <TBody>
+          {loading && (
             <TR>
-              <TH>Name</TH>
-              <TH>Email</TH>
-              <TH>Role</TH>
-              <TH>Guardian ID</TH>
-              <TH>Created</TH>
-              <TH className="text-right">Actions</TH>
+              <TD colSpan={columns} className="py-6 text-center text-xs text-text-secondary">
+                Loading…
+              </TD>
             </TR>
-          </THead>
-          <TBody>
-            {loading && (
-              <TR>
-                <TD colSpan={6} className="py-6 text-center text-xs text-text-secondary">
-                  Loading…
-                </TD>
-              </TR>
-            )}
+          )}
 
-            {!loading && users.length === 0 && (
-              <TR>
-                <TD colSpan={6} className="py-6 text-center text-xs text-text-secondary">
-                  No accounts yet.
-                </TD>
-              </TR>
-            )}
+          {!loading && rows.length === 0 && (
+            <TR>
+              <TD colSpan={columns} className="py-6 text-center text-xs text-text-secondary">
+                {emptyText}
+              </TD>
+            </TR>
+          )}
 
-            {users.map((u) => (
-              <TR key={u.user_id}>
-                <TD className="text-xs font-medium text-white">{u.name}</TD>
-                <TD className="whitespace-nowrap text-[11px] text-text-secondary">
-                  {u.email}
-                </TD>
-                <TD>
-                  <Badge
-                    label={u.role || "—"}
-                    variant={u.role === "admin" ? "success" : "neutral"}
-                  />
-                </TD>
+          {rows.map((u) => (
+            <TR key={u.user_id}>
+              <TD className="text-xs font-medium text-white">{u.name}</TD>
+              <TD className="whitespace-nowrap text-[11px] text-text-secondary">
+                {u.email}
+              </TD>
+              <TD>
+                <Badge
+                  label={u.role || "—"}
+                  variant={u.role === "admin" ? "success" : "neutral"}
+                />
+              </TD>
+
+              {showGuardian && (
                 <TD className="whitespace-nowrap font-mono text-[11px]">
                   {u.parent_id ? (
                     <span className="text-text-secondary">{u.parent_id}</span>
@@ -379,45 +450,34 @@ export default function UsersPage() {
                     <span className="text-text-secondary">—</span>
                   )}
                 </TD>
-                <TD className="whitespace-nowrap text-[11px] text-text-secondary">
-                  {u.created_at ? formatTime(u.created_at) : "—"}
-                </TD>
-                <TD className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <IconButton
-                      title="Edit"
-                      onClick={() => {
-                        setPwFor(null);
-                        setForm({ mode: "edit", user: u });
-                      }}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </IconButton>
-                    <IconButton
-                      title="Reset password"
-                      onClick={() => {
-                        setForm(null);
-                        setPwFor(u);
-                      }}
-                    >
-                      <KeyRound className="h-3.5 w-3.5" />
-                    </IconButton>
-                    <IconButton
-                      title="Delete"
-                      danger
-                      disabled={busy === u.user_id}
-                      onClick={() => remove(u)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </IconButton>
-                  </div>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      </Card>
-    </div>
+              )}
+
+              <TD className="whitespace-nowrap text-[11px] text-text-secondary">
+                {u.created_at ? formatTime(u.created_at) : "—"}
+              </TD>
+              <TD className="text-right">
+                <div className="flex justify-end gap-1">
+                  <IconButton title="Edit" onClick={() => onEdit(u)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </IconButton>
+                  <IconButton title="Reset password" onClick={() => onPassword(u)}>
+                    <KeyRound className="h-3.5 w-3.5" />
+                  </IconButton>
+                  <IconButton
+                    title="Delete"
+                    danger
+                    disabled={busy === u.user_id}
+                    onClick={() => onDelete(u)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </IconButton>
+                </div>
+              </TD>
+            </TR>
+          ))}
+        </TBody>
+      </Table>
+    </Card>
   );
 }
 
