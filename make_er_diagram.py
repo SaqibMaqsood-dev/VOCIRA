@@ -22,17 +22,37 @@ PNG = os.path.join(OUT_DIR, "vocira-er-diagram.png")
 
 W, H = 1780, 1080
 
-# Group ke rang - header fill; sab par safaid text parhne laayak hai
-C_RBAC = "#6d28d9"
-C_ID = "#1d4ed8"
-C_CONV = "#0f766e"
-C_EXT = "#c2410c"
+# ============================================================
+# RANG - app ke apne theme se (frontend/app/globals.css)
+#
+#     --bg-primary       #100944
+#     --accent-primary   #6c63ff
+#     --accent-secondary #8be9fd
+#     --text-secondary   #b8b8d1
+#
+# Gehre background par header ko thos rang se bharna theek nahi:
+# #6c63ff par safaid text ka contrast mushkil se 4:1 hota hai, aur
+# teal par to 2.3 - parhne mein takleef hoti hai. Is liye header
+# ka bharav rang ka HALKA sa hai aur naam usi rang ke roshan
+# variant mein likha jata hai. Gehre theme par yehi tareeqa saaf
+# parha jata hai.
+# ============================================================
 
-INK = "#0f172a"
-MUTED = "#64748b"
-LINE = "#94a3b8"
-SURFACE = "#ffffff"
-BG = "#f1f5f9"
+BG = "#05041c"            # canvas
+SURFACE = "#0e0c33"       # table card
+STRIPE = "#ffffff0a"      # ek line chhor kar halki patti
+BORDER = "#ffffff1f"      # card ka kinara
+
+INK = "#eef1ff"           # column ke naam
+MUTED = "#9aa3c7"         # types aur sharah
+LINE = "#7b86b8"          # solid FK lakeer
+SOFT = "#f0932b"          # dashed - nafiz na hone wale rishtay
+
+# har group: (header ka bharav, roshan text/kinara)
+C_RBAC = ("#6c63ff2e", "#a89fff")
+C_ID = ("#8be9fd26", "#8be9fd")
+C_CONV = ("#2dd4bf26", "#5eead4")
+C_EXT = ("#f0932b2e", "#f7b267")
 
 ROW_H = 24
 HEAD_H = 38
@@ -62,20 +82,30 @@ class Table:
 
     def svg(self):
         p = []
+        fill_c, bright = self.color
+
         p.append(
             f'<rect x="{self.x}" y="{self.y}" width="{self.w}" height="{self.h}" '
-            f'rx="10" fill="{SURFACE}" stroke="#cbd5e1" stroke-width="1.5" '
-            f'filter="url(#shadow)"/>'
+            f'rx="10" fill="{SURFACE}" stroke="{bright}" stroke-opacity="0.32" '
+            f'stroke-width="1.5" filter="url(#shadow)"/>'
         )
-        # header
+        # Header thos rang se nahi bharte: gehre background par
+        # #6c63ff par safaid text ka contrast mushkil se 4:1 hota hai
+        # aur teal par 2.3. Halka bharav + roshan text saaf parha
+        # jata hai.
         p.append(
             f'<path d="M {self.x} {self.y + 10} a 10 10 0 0 1 10 -10 '
             f'h {self.w - 20} a 10 10 0 0 1 10 10 v {HEAD_H - 10} '
-            f'h -{self.w} z" fill="{self.color}"/>'
+            f'h -{self.w} z" fill="{fill_c}"/>'
+        )
+        p.append(
+            f'<line x1="{self.x}" y1="{self.y + HEAD_H}" '
+            f'x2="{self.x + self.w}" y2="{self.y + HEAD_H}" '
+            f'stroke="{bright}" stroke-opacity="0.4"/>'
         )
         p.append(
             f'<text x="{self.x + 14}" y="{self.y + 25}" font-size="15" '
-            f'font-weight="700" fill="#ffffff" '
+            f'font-weight="700" fill="{bright}" '
             f'font-family="Consolas,Menlo,monospace">{esc(self.name)}</text>'
         )
 
@@ -84,16 +114,16 @@ class Table:
             if i % 2 == 1:
                 p.append(
                     f'<rect x="{self.x + 1}" y="{ry - 16}" width="{self.w - 2}" '
-                    f'height="{ROW_H}" fill="#f8fafc"/>'
+                    f'height="{ROW_H}" fill="{STRIPE}"/>'
                 )
 
             badge, bold, fill = "", "400", INK
             if kind == "pk":
                 badge, bold, fill = "PK", "700", INK
             elif kind == "fk":
-                badge, fill = "FK", "#1d4ed8"
+                badge, fill = "FK", "#8be9fd"
             elif kind == "soft":
-                badge, fill = "→", "#b45309"
+                badge, fill = "→", SOFT
 
             if badge:
                 p.append(
@@ -212,7 +242,7 @@ def link(a, af, b, bf, *, solid=True, label="", mid=None,
     y2 = b.row_y(bf)
 
     dash = "" if solid else ' stroke-dasharray="7 5"'
-    color = "#475569" if solid else "#b45309"
+    color = LINE if solid else SOFT
     marker = "url(#arrow)" if solid else "url(#arrow-soft)"
 
     parts = [
@@ -225,7 +255,7 @@ def link(a, af, b, bf, *, solid=True, label="", mid=None,
         wdt = len(label) * 6.4 + 12
         parts.append(
             f'<rect x="{lx - wdt/2}" y="{ly - 9}" width="{wdt}" height="18" '
-            f'rx="9" fill="{BG}" stroke="#e2e8f0"/>'
+            f'rx="9" fill="{BG}" stroke="{LINE}" stroke-opacity="0.4"/>'
         )
         parts.append(
             f'<text x="{lx}" y="{ly + 4}" font-size="10.5" text-anchor="middle" '
@@ -235,12 +265,13 @@ def link(a, af, b, bf, *, solid=True, label="", mid=None,
 
 
 def group(x, y, w, h, title, color):
+    bright = color[1]
     return (
         f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="16" '
-        f'fill="{color}" fill-opacity="0.045" stroke="{color}" '
-        f'stroke-opacity="0.22" stroke-width="1.5" stroke-dasharray="4 4"/>'
+        f'fill="{bright}" fill-opacity="0.035" stroke="{bright}" '
+        f'stroke-opacity="0.2" stroke-width="1.5" stroke-dasharray="4 4"/>'
         f'<text x="{x + 18}" y="{y + 26}" font-size="12" font-weight="700" '
-        f'letter-spacing="1.6" fill="{color}" fill-opacity="0.75" '
+        f'letter-spacing="1.6" fill="{bright}" fill-opacity="0.9" '
         f'font-family="system-ui,sans-serif">{esc(title)}</text>'
     )
 
@@ -251,14 +282,14 @@ def build():
         f'viewBox="0 0 {W} {H}" font-family="system-ui,sans-serif">',
         '<defs>',
         '<filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">'
-        '<feDropShadow dx="0" dy="2" stdDeviation="4" '
-        'flood-color="#0f172a" flood-opacity="0.10"/></filter>',
-        '<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        '<path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/></marker>',
-        '<marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        '<path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/></marker>',
+        '<feDropShadow dx="0" dy="3" stdDeviation="6" '
+        'flood-color="#000000" flood-opacity="0.5"/></filter>',
+        f'<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" '
+        f'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+        f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{LINE}"/></marker>',
+        f'<marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" '
+        f'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+        f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{SOFT}"/></marker>',
         '</defs>',
         f'<rect width="{W}" height="{H}" fill="{BG}"/>',
     ]
@@ -314,22 +345,23 @@ def build():
     ly = 950
     p.append(
         f'<rect x="36" y="{ly - 26}" width="1400" height="86" rx="14" '
-        f'fill="{SURFACE}" stroke="#e2e8f0"/>'
+        f'fill="{SURFACE}" stroke="{LINE}" stroke-opacity="0.3"/>'
     )
     p.append(
         f'<text x="60" y="{ly - 4}" font-size="11.5" font-weight="700" '
         f'letter-spacing="1.4" fill="{MUTED}">LEGEND</text>'
     )
 
-    p.append(f'<path d="M 62 {ly + 22} h 46" stroke="#475569" stroke-width="1.8" '
+    p.append(f'<path d="M 62 {ly + 22} h 46" stroke="{LINE}" stroke-width="1.8" '
              f'marker-end="url(#arrow)"/>')
     p.append(f'<text x="120" y="{ly + 26}" font-size="12.5" fill="{INK}">'
              'Foreign key — enforced by the database</text>')
 
-    p.append(f'<path d="M 470 {ly + 22} h 46" stroke="#b45309" stroke-width="1.8" '
+    p.append(f'<path d="M 470 {ly + 22} h 46" stroke="{SOFT}" stroke-width="1.8" '
              f'stroke-dasharray="7 5" marker-end="url(#arrow-soft)"/>')
     p.append(f'<text x="528" y="{ly + 26}" font-size="12.5" fill="{INK}">'
-             'Logical link only — <tspan font-weight="700">no FK constraint</tspan>; '
+             f'Logical link only — <tspan font-weight="700" fill="{SOFT}">'
+             'no FK constraint</tspan>; '
              'the code relies on it, the database does not enforce it</text>')
 
     p.append(
