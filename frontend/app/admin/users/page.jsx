@@ -14,7 +14,17 @@
  */
 
 import { useState } from "react";
-import { KeyRound, Link2Off, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  KeyRound,
+  Link2Off,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import Badge from "@/app/admin/_components/ui/Badge";
 import Button from "@/app/admin/_components/ui/Button";
@@ -234,10 +244,9 @@ export default function UsersPage() {
             />
 
             {form.mode === "create" && (
-              <Field
+              <PasswordField
                 label="Password"
                 name="password"
-                type="password"
                 required
                 minLength={8}
                 placeholder="At least 8 characters"
@@ -294,10 +303,9 @@ export default function UsersPage() {
           />
           <form onSubmit={resetPassword} className="flex flex-wrap items-end gap-3">
             <div className="min-w-[240px] flex-1">
-              <Field
+              <PasswordField
                 label="New password"
                 name="password"
-                type="password"
                 required
                 minLength={8}
                 placeholder="At least 8 characters"
@@ -428,6 +436,49 @@ function Field({ label, hint, ...props }) {
           {hint}
         </span>
       )}
+    </label>
+  );
+}
+
+/**
+ * Password ka field, dekhne ke button ke sath.
+ *
+ * Admin doosre ke liye password type kar raha hota hai, is liye
+ * use dekhna zaroori hai - warna typo ka pata tab chalta hai jab
+ * parent login na kar sake.
+ *
+ * Login page par yahi tareeqa pehle se hai.
+ */
+function PasswordField({ label, ...props }) {
+  const [shown, setShown] = useState(false);
+
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+        {label}
+      </span>
+
+      <div className="relative">
+        <input
+          {...props}
+          type={shown ? "text" : "password"}
+          className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-3 pr-11 text-sm text-white placeholder:text-text-secondary/60 outline-none transition-colors focus:border-accent-primary/50 focus:ring-2 focus:ring-accent-primary/30"
+        />
+
+        <button
+          type="button"
+          onClick={() => setShown((on) => !on)}
+          title={shown ? "Hide password" : "Show password"}
+          aria-label={shown ? "Hide password" : "Show password"}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/40"
+        >
+          {shown ? (
+            <EyeOff className="h-[18px] w-[18px]" />
+          ) : (
+            <Eye className="h-[18px] w-[18px]" />
+          )}
+        </button>
+      </div>
     </label>
   );
 }
