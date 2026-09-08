@@ -148,10 +148,16 @@ export default function DashboardPage() {
       } catch (err) {
         console.error("Dashboard error:", err);
 
+        // fetch() network nakami par TypeError phenkta hai aur
+        // us ka paighaam "Failed to fetch" hota hai - jo user
+        // ko kuch nahi batata. Aam wajah yehi hoti hai ke
+        // backend chal hi nahi raha.
         setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load dashboard."
+          err instanceof TypeError
+            ? "Could not reach the server. Please make sure the API Gateway is running."
+            : err instanceof Error
+              ? err.message
+              : "Failed to load dashboard."
         );
 
         // Keep dashboard usable
