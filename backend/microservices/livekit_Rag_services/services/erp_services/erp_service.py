@@ -222,11 +222,33 @@ class ERPService:
 
                 if not resolved_student_ids:
 
-                    raise ValueError(
-                        f"Student '{student_name}' "
-                        "was not found among the "
-                        "authenticated guardian's students"
+                    # Is naam ka koi bachcha is parent ke record mein
+                    # nahi. Do wajahein ho sakti hain: naam waqai un ka
+                    # nahi, ya STT ne bola hua naam ghalat suna.
+                    #
+                    # Pehle yahan ValueError uthta tha aur parent ko
+                    # "school records tak pahunch nahi saki" sunai deta -
+                    # halanke records bilkul theek chal rahe hote, aur
+                    # "dobara koshish karein" kehna bekaar tha kyunke
+                    # nateeja hamesha wahi rehta.
+                    #
+                    # Dono sooraton ka jawab ek hi rakha hai, is liye
+                    # is se ye bhi zahir nahi hota ke bachcha mojood
+                    # hai magar kisi aur ka hai.
+                    print(
+                        f"⚠️ [ERP] '{student_name}' is parent ke "
+                        "bachon mein nahi mila"
                     )
+
+                    return {
+                        "data": [],
+                        "_about": resource_config.get("description") or "",
+                        "_note": (
+                            f"No child named '{student_name}' was found "
+                            "for this parent. The name may have been "
+                            "misheard - ask them to say it again."
+                        ),
+                    }
 
                 # --------------------------------------------------
                 # Remove ALL student_name filters from LLM.
@@ -350,11 +372,33 @@ class ERPService:
 
                 if not resolved_student_ids:
 
-                    raise ValueError(
-                        f"Student '{student_name}' "
-                        "was not found among the "
-                        "authenticated guardian's students"
+                    # Is naam ka koi bachcha is parent ke record mein
+                    # nahi. Do wajahein ho sakti hain: naam waqai un ka
+                    # nahi, ya STT ne bola hua naam ghalat suna.
+                    #
+                    # Pehle yahan ValueError uthta tha aur parent ko
+                    # "school records tak pahunch nahi saki" sunai deta -
+                    # halanke records bilkul theek chal rahe hote, aur
+                    # "dobara koshish karein" kehna bekaar tha kyunke
+                    # nateeja hamesha wahi rehta.
+                    #
+                    # Dono sooraton ka jawab ek hi rakha hai, is liye
+                    # is se ye bhi zahir nahi hota ke bachcha mojood
+                    # hai magar kisi aur ka hai.
+                    print(
+                        f"⚠️ [ERP] '{student_name}' is parent ke "
+                        "bachon mein nahi mila"
                     )
+
+                    return {
+                        "data": [],
+                        "_about": resource_config.get("description") or "",
+                        "_note": (
+                            f"No child named '{student_name}' was found "
+                            "for this parent. The name may have been "
+                            "misheard - ask them to say it again."
+                        ),
+                    }
 
                 filters = [
                     filter_item
@@ -378,9 +422,33 @@ class ERPService:
 
             if not student_groups:
 
-                raise ValueError(
-                    "No class found for this guardian's students"
+                # Bachcha kisi class (Student Group) mein daala hi
+                # nahi gaya - ye school ke record ka adhoorapan hai,
+                # koi ghalti nahi.
+                #
+                # Pehle yahan ValueError uthta tha, jo call ko todh
+                # deta: parent ko "kuch gadbad ho gayi" milta, halanke
+                # sahi jawab ye hai ke "abhi class set nahi hui".
+                #
+                # Khali data usi shakl mein lauta dete hain jaisi baqi
+                # khali natijon ki hoti hai, taake aage ka amal use
+                # aam khali jawab ki tarah sambhal le.
+                print(
+                    f"⚠️ [ERP] {student_name or 'student'} kisi class "
+                    "mein nahi hai - schedule khali lauta rahe hain"
                 )
+
+                return {
+                    "data": [],
+                    "_about": (
+                        resource_config.get("description")
+                        or "Class schedule"
+                    ),
+                    "_note": (
+                        "This student has not been assigned to a class "
+                        "yet, so there is no timetable to show."
+                    ),
+                }
 
             group_filter_field = (
                 resource_config.get(
