@@ -49,7 +49,12 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     container_name: vocira-livekit
-    command: --dev --bind 0.0.0.0
+    # --node-ip zaroori hai: is ke baghair LiveKit container ka
+    # androoni IP (172.19.x.x) advertise karta hai, aur browser
+    # wahan pahunch hi nahi sakta - ICE fail ho kar "could not
+    # establish pc connection" aata hai. Signalling phir bhi chalti
+    # hai (wo 7880 par hai), is liye masla dhoondna mushkil lagta.
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
     ports:
       - "7880:7880"
       - "7881:7881"

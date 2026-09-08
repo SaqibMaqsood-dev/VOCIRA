@@ -144,7 +144,7 @@ export default function Navbar() {
         </nav>
 
         {/* Right side */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
 
           {/* Desktop Auth */}
           <div className="hidden items-center gap-2 sm:flex">
@@ -165,16 +165,20 @@ export default function Navbar() {
                 {/* Kaun login hai - pehle iska koi nishaan hi
                     nahi tha, sirf "Logout" para rehta tha aur
                     ye pata nahi chalta ke kis ka session hai. */}
-                <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.06] py-1.5 pl-1.5 pr-3.5 shadow-card backdrop-blur-xl">
+                {/* Chip jagah ke hisab se simat jata hai: chhoti
+                    screen par sirf avatar, phir naam, aur email
+                    sirf bari screen par. Warna nav bar se bahar
+                    nikal jata tha aur Logout hi nazar na aata. */}
+                <div className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] p-1.5 shadow-card backdrop-blur-xl lg:gap-2.5 lg:pr-3">
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent-primary to-accent-secondary text-xs font-bold text-[#05041c]">
                     {initialsOf(who)}
                   </span>
-                  <span className="flex flex-col leading-tight">
-                    <span className="max-w-[150px] truncate text-sm font-semibold text-text-primary">
+                  <span className="hidden min-w-0 flex-col leading-tight lg:flex">
+                    <span className="max-w-[130px] truncate text-sm font-semibold text-text-primary">
                       {who?.name || who?.email || "Signed in"}
                     </span>
                     {who?.name && who?.email && (
-                      <span className="max-w-[150px] truncate text-[11px] text-text-secondary">
+                      <span className="max-w-[130px] truncate text-[11px] text-text-secondary">
                         {who.email}
                       </span>
                     )}
@@ -185,10 +189,10 @@ export default function Navbar() {
                   type="button"
                   onClick={handleLogout}
                   title="Log out"
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-200"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-200 lg:px-3.5"
                 >
                   <LogOut className="h-4 w-4" />
-                  Logout
+                  <span className="hidden lg:inline">Logout</span>
                 </button>
               </>
             )}
