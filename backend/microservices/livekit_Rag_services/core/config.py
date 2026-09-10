@@ -85,7 +85,7 @@ class Settings(BaseSettings):
 
     @property
     def LIVEKIT_AGENT_URL(self) -> str:
-        """Agent isi par judta hai."""
+        """The agent connects here."""
         return self.LIVEKIT_INTERNAL_URL or self.LIVEKIT_URL
 
     # --------------------------------------------------------
