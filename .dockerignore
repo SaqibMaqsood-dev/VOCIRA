@@ -1,0 +1,73 @@
+# =============================================================
+# Docker build ko kya NAHI bhejna
+#
+# Build context poora repo root hai. Is file ke baghair Docker
+# har build par kai GB (venvs, node_modules, ERPNext ke backup,
+# .git) daemon ko bhejta hai - build shuru hone se pehle hi
+# minton lag jate hain.
+# =============================================================
+
+# Python ke environments - image apna khud banata hai
+.venv/
+**/.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+**/node_modules/
+frontend/.next/
+
+# Frontend Vercel par jata hai, image mein us ki zaroorat nahi
+frontend/
+
+# ERPNext apni alag compose file se chalta hai, aur is folder
+# mein database ke bare backup bhi pade hain
+frappe_test/
+
+# Git
+.git/
+.gitignore
+
+# Secrets - image ke andar kabhi nahi
+.env
+.env.*
+**/.env
+**/.env.*
+deploy/.env.prod
+
+# Database dumps
+*.sql
+*.sql.gz
+*.dump
+*.tar
+
+# Model files - Dockerfile khud download karta hai
+*.onnx
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# Local ke tests, scripts aur diagrams
+test_*.py
+make_*.py
+seed_*.py
+*.excalidraw
+*.svg
+*.png
+*.pdf
+start-vocira.ps1
+
+# Logs / temp
+*.log
+tmp/
+temp/
+
+# Editor
+.vscode/
+.idea/
+.claude/

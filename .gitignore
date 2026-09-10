@@ -1,33 +1,315 @@
-# Virtual environments
-backend/.venv/
+# =========================================================
+# VOCIRA - Root Git Ignore
+# =========================================================
+
+
+# =========================================================
+# Python Virtual Environments
+# =========================================================
+
+.venv/
+venv/
 env/
+ENV/
 
-# Generated and build artifacts
-backend/.next/
+# Virtual environments inside any microservice
+**/.venv/
+**/venv/
+**/env/
+
+
+# =========================================================
+# Python Cache / Compiled Files
+# =========================================================
+
+__pycache__/
+**/__pycache__/
+
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+
+# =========================================================
+# Python Build / Package Artifacts
+# =========================================================
+
+*.egg
+*.egg-info/
+**/*.egg-info/
+
+build/
+dist/
+**/build/
+**/dist/
+
+pip-wheel-metadata/
+
+.pytest_cache/
+**/.pytest_cache/
+
+.mypy_cache/
+**/.mypy_cache/
+
+.ruff_cache/
+**/.ruff_cache/
+
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+.tox/
+.nox/
+
+
+# =========================================================
+# Environment / Secrets
+# =========================================================
+
+# Ignore environment files
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Keep example environment files
+!.env.example
+!.env.sample
+!**/.env.example
+!**/.env.sample
+
+
+# =========================================================
+# IDE / Editor
+# =========================================================
+
+.vscode/
+**/.vscode/
+
+.idea/
+**/.idea/
+
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+
+
+# =========================================================
+# Operating System Files
+# =========================================================
+
+.DS_Store
+**/.DS_Store
+
+Thumbs.db
+
+
+# =========================================================
+# Node.js / Frontend Dependencies
+# =========================================================
+
+node_modules/
+**/node_modules/
+
+.npm/
+.yarn/
+.pnpm-debug.log*
+
+# Next.js
+.next/
+**/.next/
+
+# Nuxt
+.nuxt/
+**/.nuxt/
+
+
+# =========================================================
+# LiveKit Meet Frontend
+# =========================================================
+
+# Completely ignore the LiveKit Meet frontend
 backend/meet/
-backend/meet/.next/
-backend/meet/node_modules/
-backend/audio/
-backend/audio_models/
+backend/microservices/livekit_Rag_services/meet/
 
-# Audio files
-backend/services/text_speech/audio/*.wav
-backend/services/text_speech/audio_files/
+
+# =========================================================
+# Audio Files
+# =========================================================
+
 *.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+*.aac
 
-# Python
+backend/audio/
+backend/services/text_speech/audio/
+backend/services/text_speech/audio_files/
+
+# Audio generated inside any microservice
+**/audio/
+**/audio_files/
+
+
+# =========================================================
+# AI / Voice Models
+# =========================================================
+
+# Audio model directories
+backend/audio_models/
+**/audio_models/
+
+# Large AI model files
+*.onnx
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+
+# =========================================================
+# Logs / Temporary / Generated Files
+# =========================================================
+
+*.log
+**/*.log
+
+*.tmp
+*.temp
+
+tmp/
+temp/
+**/tmp/
+**/temp/
+
+*.bak
+*.old
+*.orig
+
+
+# =========================================================
+# Local Databases
+# =========================================================
+
+*.sqlite
+*.sqlite3
+*.db
+
+# Database dumps
+*.sql
+*.dump
+*.backup
+
+
+# =========================================================
+# Alembic
+# =========================================================
+
+# IMPORTANT:
+# Do NOT ignore alembic directories or migration files.
+# Alembic migration files should be committed.
+
+# Only ignore Python cache inside Alembic
+**/alembic/__pycache__/
+**/alembic/versions/__pycache__/
+
+
+# =========================================================
+# Docker
+# =========================================================
+
+# Local Docker override
+docker-compose.override.yml
+
+# Docker generated data
+docker-data/
+docker-volumes/
+
+# Local Docker environment files
+docker-compose.local.yml
+
+
+# =========================================================
+# UV
+# =========================================================
+
+# uv virtual environments
+.venv/
+**/.venv/
+
+# Keep uv.lock committed.
+# DO NOT add uv.lock to .gitignore.
+
+
+# =========================================================
+# Secrets / Credentials
+# =========================================================
+
+*.pem
+*.key
+*.crt
+
+credentials.json
+**/credentials.json
+
+service-account.json
+**/service-account.json
+
+secrets/
+**/secrets/
+
+
+# =========================================================
+# Local Development Files
+# =========================================================
+
+*.pid
+*.pid.lock
+
+*.cache
+**/.cache/
+
+
+# =========================================================
+# Test / Debug Files
+# =========================================================
+
+.pytest_cache/
+**/.pytest_cache/
+
+test-results/
+**/test-results/
+
+*.prof
+
+
+# =========================================================
+# OS / Miscellaneous
+# =========================================================
+
+*.swp
+*.swo
+*.bak
+*.old
+*.orig
+
+# --- safety additions ---
+.venv/
+**/.venv/
+node_modules/
 __pycache__/
 *.pyc
-*.pyo
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-
-# Environment
 .env
-.env.local
-
-# IDE
-.vscode/
-.idea/
-*.sublime-project
+.env.*
+!.env.example
+frappe_test/
+*.zip
+*.sql.gz
+.sync_state.json

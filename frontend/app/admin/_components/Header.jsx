@@ -1,0 +1,199 @@
+"use client";
+
+/**
+ * The admin panel's header.
+ *
+ * Four things here used to be pure decoration:
+ *
+ *   "AD" / "Admin"   hardcoded - whoever was logged in
+ *   search box       did nothing
+ *   bell             did nothing
+ *   profile button   never opened - meaning there was no way to log
+ *                    out of the admin panel at all
+ *
+ * All four are now real: the name comes from the token, the bell
+ * carries the pending escalation count, search goes to the queries
+ * page, and the profile menu holds logout.
+ */
+
+import { Bell, ChevronDown, LogOut, PanelLeftOpen, Search } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { adminFetch } from "@/app/admin/useAdminApi";
+import { clearSession } from "@/lib/session";
+
+export default function Header({ onMenuClick }) {
+  const router = useRouter();
+
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [pending, setPending] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [term, setTerm] = useState("");
+
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    // The token now carries the name as well (added at login).
+    // Only the email was available before, so it had to show
+    // "admin@vocira.com" in place of "Vocira Admin".
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      setEmail(readClaim(token, "sub") || "");
+      setName(readClaim(token, "name") || "");
+    }
+
+    // Bell par pending escalations - jhoota badge rakhne ka koi
+    // faida nahi.
+    adminFetch("/livekit/admin/escalations?limit=100")
+      .then((rows) =>
+        setPending(
+          Array.isArray(rows)
+            ? rows.filter((r) => r.status === "pending").length
+            : 0
+        )
+      )
+      .catch(() => {
+        /* header ki wajah se page na ruke */
+      });
+  }, []);
+
+  // Bahar click karne par menu band
+  useEffect(() => {
+    const onClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const logout = () => {
+    clearSession();
+    window.dispatchEvent(new Event("auth-change"));
+    window.location.href = "/login";
+  };
+
+  const submitSearch = (e) => {
+    e.preventDefault();
+    const q = term.trim();
+    router.push(q ? `/admin/queries?q=${encodeURIComponent(q)}` : "/admin/queries");
+  };
+
+  return (
+    <header className="sticky top-4 z-30 rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_8px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+      <div className="flex h-16 items-center justify-between gap-3 px-4">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-text-secondary transition-colors hover:bg-white/[0.12] hover:text-white md:hidden"
+            onClick={onMenuClick}
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+
+          <form
+            onSubmit={submitSearch}
+            className="relative hidden w-72 items-center md:flex"
+          >
+            <span className="pointer-events-none absolute left-3 text-text-secondary">
+              <Search className="h-4 w-4" />
+            </span>
+            <input
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              placeholder="Search queries…"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.06] py-2.5 pl-9 pr-3 text-xs text-white placeholder:text-text-secondary/70 outline-none transition-colors focus:border-accent-primary/50 focus:bg-white/[0.09] focus:ring-2 focus:ring-accent-primary/40"
+            />
+          </form>
+        </div>
+
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push("/admin/escalations")}
+            title={
+              pending
+                ? `${pending} escalation${pending === 1 ? "" : "s"} waiting`
+                : "No pending escalations"
+            }
+            className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-text-secondary transition-colors hover:bg-white/[0.12] hover:text-white"
+          >
+            <Bell className="h-4 w-4" />
+            {pending > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-[#05041c]">
+                {pending > 9 ? "9+" : pending}
+              </span>
+            )}
+          </button>
+
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-white/[0.12] hover:text-white"
+            >
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-accent-primary to-accent-secondary text-[11px] font-semibold text-[#05041c]">
+                {initialsFrom(email, name)}
+              </span>
+              <span className="hidden max-w-[160px] truncate sm:inline">
+                {name || email || "Admin"}
+              </span>
+              <ChevronDown className="h-3 w-3" />
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 z-50 mt-2 w-60 overflow-hidden rounded-2xl border border-white/10 bg-[#0b0a2a]/95 shadow-2xl backdrop-blur-xl">
+                <div className="border-b border-white/10 px-4 py-3">
+                  <p className="truncate text-xs font-semibold text-white">
+                    {name || email || "Admin"}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] text-text-secondary">
+                    {name && email ? email : "Administrator"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-xs text-text-secondary hover:bg-white/5 hover:text-white"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/** "Vocira Admin" -> "VA" · warna "admin@vocira.com" -> "AV" */
+function initialsFrom(email, name) {
+  if (name) {
+    const parts = name.trim().split(/\s+/);
+    const a = parts[0]?.[0] || "";
+    const b = parts.length > 1 ? parts[parts.length - 1][0] : "";
+    return (a + b).toUpperCase() || "AD";
+  }
+  if (!email) return "AD";
+  const [local, domain] = email.split("@");
+  const a = (local || "")[0] || "";
+  const b = (domain || "")[0] || "";
+  return (a + b).toUpperCase() || "AD";
+}
+
+/** JWT se ek claim - base64url ko base64 mein badal kar. */
+function readClaim(token, key) {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(atob(padded))?.[key] || null;
+  } catch {
+    return null;
+  }
+}
