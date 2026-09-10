@@ -1,0 +1,34 @@
+# =============================================================
+# A small override that joins ERPNext to Caddy
+#
+# ERPNext runs from its own frappe_test/pwd.yml. That is a separate
+# compose project, so Caddy cannot find it by name - the two need a
+# network in common.
+#
+# That is what this file does: it puts the frontend container onto
+# the `vocira-edge` network as well and gives it the name `erpnext`
+# (the name the Caddyfile looks for). "frontend" is far too common a
+# name, hence the deliberate alias.
+#
+# How to run it (from inside frappe_test/):
+#
+#     docker compose -f pwd.yml -f ../deploy/erpnext-edge.override.yml up -d
+#
+# The host port 8081 is also removed - the only route to ERPNext is
+# now https://erp.<domain>. Without this it would also stay open on
+# http://<public-ip>:8081, with no HTTPS at all.
+# =============================================================
+
+services:
+  frontend:
+    ports: !override []
+    networks:
+      default:
+      vocira-edge:
+        aliases:
+          - erpnext
+
+networks:
+  vocira-edge:
+    external: true
+    name: vocira-edge
