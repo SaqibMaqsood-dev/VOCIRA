@@ -21,15 +21,25 @@ export const metadata = {
   description:
     "Vocira AI assistant helps students and parents get school information instantly.",
 
-  // Next manifest.js se /manifest.webmanifest khud banata hai
+  // Next builds /manifest.webmanifest from manifest.js itself
   manifest: "/manifest.webmanifest",
 
   appleWebApp: {
     capable: true,
     title: "Vocira",
-    // "default" par iOS safaid patti daal deta hai jo gehre theme par
-    // bhaddi lagti hai
+    // With "default", iOS adds a white bar that looks wrong against
+    // the dark theme
     statusBarStyle: "black-translucent",
+  },
+
+  other: {
+    // `capable: true` above emits the standardised
+    // "mobile-web-app-capable". Safari only started honouring that
+    // name in iOS 15.4; before then it read the apple- prefixed one,
+    // and without it an older iPhone opens the installed app in a
+    // Safari chrome instead of standalone. Next does not emit the
+    // deprecated name itself, so it is declared here.
+    "apple-mobile-web-app-capable": "yes",
   },
 
   icons: {
@@ -41,12 +51,12 @@ export const metadata = {
   },
 };
 
-// Next 15+ mein themeColor metadata se nikal kar viewport mein aa gaya
+// In Next 15+ themeColor moved out of metadata and into viewport
 export const viewport = {
   themeColor: "#05041c",
   width: "device-width",
   initialScale: 1,
-  // Install ki hui app mein notch ke neeche tak background jaye
+  // In the installed app, let the background run under the notch
   viewportFit: "cover",
 };
 

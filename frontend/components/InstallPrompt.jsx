@@ -1,24 +1,24 @@
 "use client";
 
 /**
- * "App install karein" wala card.
+ * The "install the app" card.
  *
- * Browser khud ek chhota sa banner dikhata hai jo aksar nazar hi
- * nahi aata. beforeinstallprompt ko rok kar hum apna card dikhate
- * hain, aur user ke haan kehne par browser wala asli dialog kholte
- * hain.
+ * The browser shows a small banner of its own that usually goes
+ * unnoticed. We intercept beforeinstallprompt to show our own card,
+ * and open the browser's real dialog when the user says yes.
  *
- * TAMEEZ KE USOOL - ye is component ka asal kaam hain:
+ * RULES OF GOOD MANNERS - these are the point of this component:
  *
- *   - foran nahi. 12 second ka intezaar, taake banda pehle safha
- *     dekh le. Kholte hi popup phenkna sab se bura tareeqa hai.
- *   - "Not now" dabaya to 14 din tak dobara nahi.
- *   - install ho gaya to phir kabhi nahi.
- *   - jo pehle se standalone mein chal raha hai use kabhi nahi.
+ *   - not immediately. A 12 second wait, so the person can look at
+ *     the page first. Throwing a popup up on open is the worst way
+ *     to do this.
+ *   - if "Not now" is pressed, do not ask again for 14 days.
+ *   - once installed, never again.
+ *   - never for someone already running it standalone.
  *
- * iOS ka apna maamla hai: Safari beforeinstallprompt support hi
- * nahi karta, wahan "Share -> Add to Home Screen" hi raasta hai.
- * Is liye iPhone par card wo tareeqa batata hai, button nahi dikhata.
+ * iOS is its own case: Safari does not support beforeinstallprompt
+ * at all, and "Share -> Add to Home Screen" is the only route there.
+ * So on iPhone the card explains that instead of showing a button.
  */
 
 import { useEffect, useState } from "react";
@@ -34,8 +34,20 @@ export default function InstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // The admin panel's incoming call card also sits in the bottom
+  // right corner. Both landed in the same place and printed over
+  // each other - and next to a ringing call, a suggestion to install
+  // is worth nothing. So this hides itself during a call.
+  const [callOnScreen, setCallOnScreen] = useState(false);
+
   useEffect(() => {
-    // Pehle se install ho kar chal raha hai
+    const onCall = (event) => setCallOnScreen(Boolean(event.detail));
+    window.addEventListener("vocira-call", onCall);
+    return () => window.removeEventListener("vocira-call", onCall);
+  }, []);
+
+  useEffect(() => {
+    // Already installed and running
     const standalone =
       window.matchMedia?.("(display-mode: standalone)").matches ||
       window.navigator.standalone === true;
@@ -51,8 +63,8 @@ export default function InstallPrompt() {
     setIsIOS(ios);
 
     // ---- iOS ----
-    // Safari beforeinstallprompt nahi bhejta, is liye wahan sirf
-    // waqt ka intezaar kar ke hidayat dikha dete hain.
+    // Safari never fires beforeinstallprompt, so there we just wait
+    // out the delay and show the instructions.
     if (ios) {
       const timer = setTimeout(() => setVisible(true), DELAY_MS);
       return () => clearTimeout(timer);
@@ -71,7 +83,7 @@ export default function InstallPrompt() {
     const onInstalled = () => {
       setVisible(false);
       setDeferred(null);
-      // Phir kabhi na poochein
+      // Never ask again
       remember(365);
     };
 
@@ -85,7 +97,7 @@ export default function InstallPrompt() {
     };
   }, []);
 
-  if (!visible) return null;
+  if (!visible || callOnScreen) return null;
 
   const install = async () => {
     if (!deferred) return;
@@ -95,8 +107,8 @@ export default function InstallPrompt() {
       await deferred.prompt();
       const { outcome } = await deferred.userChoice;
 
-      // Mana kar diya to thora arsa khamosh rahein - agli baar
-      // poochne ka koi faida nahi jab abhi mana kiya hai.
+      // Once declined, stay quiet for a while - there is no point
+      // asking again right after being turned down.
       if (outcome === "dismissed") remember(SNOOZE_DAYS);
 
       setVisible(false);
@@ -121,15 +133,15 @@ export default function InstallPrompt() {
     >
       <div className="pointer-events-auto w-full max-w-sm animate-install-in">
         {/*
-            Border pehle white/12 tha - gehre card par wo ek saaf
-            safaid lakeer ban kar kinare ko kaat raha tha.
+            The border was white/12 - on a dark card that became a
+            hard white line cutting across the edge.
 
-            Ab teen halki parton se kinara banta hai:
-              border   bohat halka, sirf shakl batane ko
-              inset    andar ki taraf ek baal barabar roshni - shishe
-                       ka kinara aisa hi lagta hai
-              shadow   gehri aur phaili hui, yehi card ko background
-                       se alag karti hai (border nahi)
+            The edge is now built from three faint layers:
+              border   very light, just enough to give it shape
+              inset    a hairline of light on the inside - this is
+                       what the edge of glass looks like
+              shadow   deep and spread out; this is what separates
+                       the card from the background, not the border
         */}
         <div
           className="relative overflow-hidden rounded-2xl bg-[#0b0a2a]/94 p-4 backdrop-blur-2xl"
@@ -217,14 +229,14 @@ export default function InstallPrompt() {
   );
 }
 
-/** Kya abhi khamoshi ka waqt hai */
+/** Whether we are currently in the quiet period */
 function snoozed() {
   try {
     const until = Number(localStorage.getItem(SNOOZE_KEY) || 0);
     return until > Date.now();
   } catch {
-    // Private mode mein localStorage phenk sakta hai. Aise mein
-    // poochna behtar hai - card band karna aasan hai.
+    // localStorage can throw in private mode. Asking is the better
+    // failure there - the card is easy to dismiss.
     return false;
   }
 }
@@ -236,6 +248,6 @@ function remember(days) {
       String(Date.now() + days * 24 * 60 * 60 * 1000)
     );
   } catch {
-    /* yaad na rahe to bhi chalega */
+    /* it works fine even if this is not remembered */
   }
 }

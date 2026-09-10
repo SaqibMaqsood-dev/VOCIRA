@@ -28,16 +28,16 @@ class SessionResponse(BaseModel):
 
     status: SessionStatus
 
-    # Dashboard ki Duration aur Handler columns pehle hamesha
-    # "-" dikhati thin kyunke ye do cheezein API deti hi nahi thi.
+    # The dashboard's Duration and Handler columns always showed
+    # "-" because the API never returned these two things.
     #
-    # duration_seconds: sirf band ho chuki calls ke liye. Chalti
-    # hui call ki koi "duration" nahi hoti - wo abhi barh rahi hai.
+    # duration_seconds: only for calls that have ended. A call in
+    # progress has no "duration" - it is still growing.
     #
-    # handler: "Human" agar us call mein kabhi escalation hui,
-    # warna "AI". Escalation message se juRi hai aur message
-    # session se, is liye ye jorh kar nikalta hai - koi naya
-    # column banane ki zaroorat nahi padi.
+    # handler: "Human" if the call was ever escalated, otherwise
+    # "AI". An escalation links to a message and a message to a
+    # session, so this comes out of a join - no new column was
+    # needed.
     duration_seconds: Optional[int] = None
     handler: Optional[str] = None
 

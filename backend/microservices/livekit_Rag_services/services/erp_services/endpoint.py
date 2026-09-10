@@ -1,28 +1,28 @@
 """
 ERP resource whitelist.
 
-Har entry batati hai:
+Each entry states:
 
-    endpoint                : Frappe REST path (sirf /api/ allowed hai)
-    authorization           : filter lagane ka tareeqa -
-                              "guardian"      -> guardian ke apne record
-                              "student"       -> guardian ke students par
-                              "student_group" -> un students ki classes par
-    student_filter_field    : student ID kis field mein hai
-    student_filter_doctype  : (optional) agar student link child table mein
-                              ho to us child doctype ka naam
-    group_filter_field      : (student_group ke liye) class field ka naam
-    fields                  : ERP se kaun se fields mangwane hain
-    description             : LLM ko batane ke liye
+    endpoint                : Frappe REST path (only /api/ is allowed)
+    authorization           : how the filter is applied -
+                              "guardian"      -> the guardian's own record
+                              "student"       -> the guardian's students
+                              "student_group" -> those students' classes
+    student_filter_field    : which field holds the student ID
+    student_filter_doctype  : (optional) the child doctype name, if the
+                              student link lives in a child table
+    group_filter_field      : (for student_group) the class field name
+    fields                  : which fields to request from ERP
+    description             : what to tell the LLM
 
-IMPORTANT - "fields" yahan kyun likhe hain:
+IMPORTANT - why "fields" are listed here:
 
-    LLM resource to sahi chunta hai, magar field ke naam ghar se bana
-    leta hai ("attendance_date", "subject", "score"), jis par Frappe
-    HTTP 417 "Field not permitted in query" deta hai.
+    The LLM picks the right resource, but it invents field names
+    ("attendance_date", "subject", "score"), and Frappe answers those
+    with HTTP 417 "Field not permitted in query".
 
-    Is liye LLM ki field list nazarandaz ki jati hai aur yahi authoritative
-    list bheji jati hai. Ye naam asal ERP schema se liye gaye hain.
+    So the LLM's field list is ignored and this authoritative list is
+    sent instead. These names come from the real ERP schema.
 """
 
 ERP_RESOURCES = {
@@ -93,13 +93,13 @@ ERP_RESOURCES = {
             "enrollment_date",
         ],
         "description": (
-            "Student kaun kaun se subjects/courses parh raha hai."
+            "Which subjects/courses the student is enrolled in."
         ),
     },
 
     "class": {
-        # Student Group mein student ka link child table mein hota hai,
-        # is liye seedha ["student","in",...] HTTP 417 deta hai.
+        # In Student Group the link to the student lives in a child
+        # table, so a plain ["student","in",...] returns HTTP 417.
         "endpoint": "/api/resource/Student Group",
         "authorization": "student",
         "student_filter_doctype": "Student Group Student",
@@ -110,7 +110,7 @@ ERP_RESOURCES = {
             "program",
             "academic_year",
         ],
-        "description": "Student kis class / student group mein hai.",
+        "description": "Which class / student group the student is in.",
     },
 
     # =====================================================
@@ -156,11 +156,11 @@ ERP_RESOURCES = {
     },
 
     "exam": {
-        # Assessment Plan class ke saath juda hota hai, student ke saath nahi.
+        # Assessment Plan is attached to the class, not to the student.
         "endpoint": "/api/resource/Assessment Plan",
         "authorization": "student_group",
         "group_filter_field": "student_group",
-        # "room" shamil nahi - schedule ki tarah yahan bhi sirf ID hoti hai.
+        # "room" is left out - as with the schedule, it is only an ID here.
         "fields": [
             "name",
             "assessment_name",
@@ -172,8 +172,8 @@ ERP_RESOURCES = {
             "maximum_assessment_score",
         ],
         "description": (
-            "Aane wale exams / assessments: naam, subject, tareekh, "
-            "waqt, room aur maximum score."
+            "Upcoming exams / assessments: name, subject, date, "
+            "time, room and maximum score."
         ),
     },
 
@@ -182,15 +182,15 @@ ERP_RESOURCES = {
     # =====================================================
 
     "schedule": {
-        # Event khali hai; asli timetable Course Schedule mein hai,
-        # aur wo class ke saath juda hota hai.
+        # Event is empty; the real timetable is in Course Schedule,
+        # which is attached to the class.
         "endpoint": "/api/resource/Course Schedule",
         "authorization": "student_group",
         "group_filter_field": "student_group",
-        # NOTE: "room" jaan bujh kar shamil nahi hai. Course Schedule
-        # sirf room ka ID rakhta hai (HTL-ROOM-2026-00002), naam nahi,
-        # aur TTS us ID ko har haraf alag bolta hai. Room ka naam
-        # chahiye ho to Room doctype se alag fetch karna paregi.
+        # NOTE: "room" is deliberately left out. Course Schedule only
+        # holds the room's ID (HTL-ROOM-2026-00002), not its name, and
+        # TTS reads that ID out one character at a time. Getting the
+        # room name would need a separate fetch from the Room doctype.
         "fields": [
             "name",
             "student_group",
@@ -201,7 +201,7 @@ ERP_RESOURCES = {
             "to_time",
         ],
         "description": (
-            "Class timetable: subject, teacher, tareekh aur waqt."
+            "Class timetable: subject, teacher, date and time."
         ),
     },
 
@@ -210,9 +210,10 @@ ERP_RESOURCES = {
     # =====================================================
 
     "fee": {
-        # Education ka "Fees" doctype is setup mein khali hai.
-        # Asli fee bills Sales Invoice mein hain, jahan student field bhi hai.
-        # NOTE: Sales Invoice par "student_name" nahi hota - "customer" hota hai.
+        # Education's "Fees" doctype is empty in this setup.
+        # The real fee bills are in Sales Invoice, which also has a
+        # student field.
+        # NOTE: Sales Invoice has no "student_name" - it has "customer".
         "endpoint": "/api/resource/Sales Invoice",
         "authorization": "student",
         "student_filter_field": "student",
@@ -233,8 +234,9 @@ ERP_RESOURCES = {
     },
 
     "payment": {
-        # Payment Entry mein student field nahi hota (HTTP 417).
-        # Sales Invoice ka status/outstanding hi payment ka jawab deta hai.
+        # Payment Entry has no student field (HTTP 417).
+        # A Sales Invoice's status/outstanding answers the payment
+        # question on its own.
         "endpoint": "/api/resource/Sales Invoice",
         "authorization": "student",
         "student_filter_field": "student",
@@ -248,8 +250,8 @@ ERP_RESOURCES = {
             "status",
         ],
         "description": (
-            "Payment ki soorat-e-haal: fee jama hui ya nahi, "
-            "kitni baqi hai."
+            "Payment status: whether the fee has been paid, "
+            "and how much is outstanding."
         ),
     },
 }

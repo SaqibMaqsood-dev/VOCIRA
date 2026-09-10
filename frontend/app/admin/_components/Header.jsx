@@ -1,25 +1,26 @@
 "use client";
 
 /**
- * Admin panel ka header.
+ * The admin panel's header.
  *
- * Pehle yahan chaar cheezein sirf dikhawa thin:
+ * Four things here used to be pure decoration:
  *
- *   "AD" / "Admin"   hardcoded - chahe koi bhi login ho
- *   search box       kuch nahi karta tha
- *   bell             kuch nahi karta tha
- *   profile button   khulta hi nahi tha - yaani admin panel se
- *                    logout ka koi raasta hi nahi tha
+ *   "AD" / "Admin"   hardcoded - whoever was logged in
+ *   search box       did nothing
+ *   bell             did nothing
+ *   profile button   never opened - meaning there was no way to log
+ *                    out of the admin panel at all
  *
- * Ab chaaron asli hain: naam token se, bell par pending escalations
- * ki ginti, search queries page par le jata hai, aur profile mein
- * logout hai.
+ * All four are now real: the name comes from the token, the bell
+ * carries the pending escalation count, search goes to the queries
+ * page, and the profile menu holds logout.
  */
 
 import { Bell, ChevronDown, LogOut, PanelLeftOpen, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { adminFetch } from "@/app/admin/useAdminApi";
+import { clearSession } from "@/lib/session";
 
 export default function Header({ onMenuClick }) {
   const router = useRouter();
@@ -33,9 +34,9 @@ export default function Header({ onMenuClick }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
-    // Token ab naam bhi rakhta hai (login ke waqt daala jata hai).
-    // Pehle sirf email thi, is liye "Vocira Admin" ki jagah
-    // "admin@vocira.com" dikhana parta tha.
+    // The token now carries the name as well (added at login).
+    // Only the email was available before, so it had to show
+    // "admin@vocira.com" in place of "Vocira Admin".
     const token = localStorage.getItem("access_token");
     if (token) {
       setEmail(readClaim(token, "sub") || "");
@@ -69,15 +70,7 @@ export default function Header({ onMenuClick }) {
   }, []);
 
   const logout = () => {
-    for (const k of [
-      "access_token",
-      "refresh_token",
-      "token_type",
-      "auth_response",
-      "role",
-    ]) {
-      localStorage.removeItem(k);
-    }
+    clearSession();
     window.dispatchEvent(new Event("auth-change"));
     window.location.href = "/login";
   };

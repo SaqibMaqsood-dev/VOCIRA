@@ -1,16 +1,16 @@
 """
 Agent worker.
 
-RabbitMQ se "session.created" sunta hai aur har call ke liye AI agent
-ko LiveKit room mein bhejta hai.
+Listens for "session.created" on RabbitMQ and sends the AI agent
+into a LiveKit room for each call.
 
-Pehle yahan EK LivekitRoomServices banaya jata tha aur wahi sab calls
-ke liye use hota tha. Us object par per-call state hoti hai - room,
-_speech_generation, _is_agent_speaking, agent_source - is liye do
-calls sath chalne par ek doosre ki state kharab kar deti.
+ONE LivekitRoomServices used to be built here and used for every
+call. That object holds per-call state - room, _speech_generation,
+_is_agent_speaking, agent_source - so two concurrent calls corrupted
+each other's state.
 
-Ab har call ke liye naya instance banta hai (factory ke zariye), aur
-har call apne asyncio task mein chalti hai.
+A fresh instance is now built for each call (through a factory), and
+each call runs in its own asyncio task.
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from backend.microservices.livekit_Rag_services.services.livekit.livekit_service
 
 
 def make_worker() -> LivekitRoomServices:
-    """Har call ke liye taza instance."""
+    """A fresh instance for every call."""
     return LivekitRoomServices(
         user_id=None,
         user_role="worker",
@@ -35,7 +35,7 @@ def make_worker() -> LivekitRoomServices:
 
 async def main() -> None:
     print("=" * 60)
-    print("🎧 VOCIRA agent worker")
+    print("VOCIRA agent worker")
     print(f"   concurrent calls  : {MAX_CONCURRENT_CALLS}")
     print(f"   call ki max lambai : {MAX_CALL_SECONDS}s")
     print("=" * 60)

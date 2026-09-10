@@ -3,19 +3,19 @@
 /**
  * Admin dashboard.
  *
- * Pehle yahan chaar chhote cards thay, aur do "chart" jo asal mein
- * divs thay: bars ke liye height wali div, aur ratio ke liye progress
- * bar. Na axis, na grid, na hover - kis din kitne sawal aaye, ye
- * sirf title attribute se pata chalta tha.
+ * There were four small cards here, and two "charts" that were
+ * really divs: a height-driven div for the bars, and a progress bar
+ * for the ratio. No axes, no grid, no hover - how many questions
+ * came on a given day could only be read from a title attribute.
  *
- * Ab:
- *   KPI row        stat tiles - number bara, icon, aur jahan waqt
- *                  ka data hai wahan sparkline
- *   Trend          asli area chart - axis, grid, hover crosshair
- *   Part-to-whole  stacked bar (do slices ka pie ghalat hota hai)
+ * Now:
+ *   KPI row        stat tiles - a large number, an icon, and a
+ *                  sparkline wherever there is data over time
+ *   Trend          a real area chart - axes, grid, hover crosshair
+ *   Part-to-whole  a stacked bar (a two-slice pie is the wrong form)
  *
- * Rang dataviz validator se jaanche gaye hain - tafseel StackedBar
- * mein likhi hai.
+ * The colours are validated with the dataviz validator - the details
+ * are written up in StackedBar.
  */
 
 import {

@@ -1,18 +1,18 @@
 """
 Speech-to-text.
 
-Pehle ye local faster-whisper "small.en" CPU par chalata tha. Us ki
-accuracy kam thi - "have the fees been paid" ko "have the face being
-paired" sun leta tha, jis se poora intent ghalat chala jata tha.
+This used to run a local faster-whisper "small.en" on CPU. Its
+accuracy was poor - it heard "have the fees been paid" as "have the
+face being paired", which sent the whole intent the wrong way.
 
-Ab Groq ka Whisper API use hota hai: kaafi behtar accuracy, aur CPU
-par local inference se tez bhi. Groq ki key project mein pehle se hai.
+It now uses Groq's Whisper API: much better accuracy, and faster than
+local inference on CPU. The project already has a Groq key.
 
-Interface wahi hai - transcribe_bytes(audio_bytes) -> str - is liye
-voice_pipeline ko koi farq nahi parta.
+The interface is unchanged - transcribe_bytes(audio_bytes) -> str -
+so nothing changes for voice_pipeline.
 
-Agar Groq kisi waqt jawab na de to local whisper fallback ke taur par
-chal jata hai (model sirf zaroorat par load hota hai).
+If Groq ever fails to answer, the local whisper runs as a fallback
+(the model is only loaded when it is actually needed).
 """
 
 import io
@@ -26,20 +26,20 @@ from groq import Groq
 from backend.microservices.livekit_Rag_services.core.config import settings
 
 
-# LiveKit 48 kHz par audio deta hai; Whisper 16 kHz chahta hai.
+# LiveKit delivers audio at 48 kHz; Whisper wants 16 kHz.
 TARGET_SAMPLE_RATE = 16000
 
-# Is se chhota audio bhejne ka faida nahi - Whisper us par bakwaas
-# bana deta hai. 0.35 second (48 kHz, mono, int16).
+# Sending audio shorter than this is pointless - Whisper invents
+# nonsense for it. 0.35 seconds (48 kHz, mono, int16).
 MIN_AUDIO_BYTES = int(0.35 * 48000 * 2)
 
-# Khamoshi ka gate. int16 ki range 32768 hai; kamre ka aam shor
-# 100 se neeche rehta hai, boli hui awaaz kahin zyada.
+# The silence gate. int16 ranges to 32768; ordinary room noise stays
+# below 100, while speech is far louder.
 MIN_RMS = 260.0
 
-# Whisper khamoshi/shor par ye jumle bana deta hai. Ye asli baat nahi
-# hoti - is ki wajah se agent apni hi awaaz ka jawab dene lagta tha
-# aur "Thank you / You're welcome" ka loop ban jata tha.
+# Whisper produces these phrases for silence and noise. They are not
+# real speech - they made the agent answer its own voice and fall into
+# a "Thank you / You're welcome" loop.
 _HALLUCINATIONS = {
     "thank you", "thanks", "thank you.", "thanks for watching",
     "thank you for watching", "thanks for watching!", "bye", "bye.",
@@ -58,15 +58,15 @@ def _is_noise(text: str) -> bool:
     if not cleaned:
         return True
 
-    # sirf ek ya do harf - matlab kuch bola hi nahi
+    # only one or two characters - nothing was really said
     if len(cleaned.replace(" ", "")) < 3:
         return True
 
     return cleaned in _HALLUCINATIONS
 
-# whisper-large-v3-turbo tez bhi hai aur multilingual bhi - Urdu/English
-# mix bolne walon ke liye munasib. Sirf English chahiye to
-# "distil-whisper-large-v3-en" is se bhi tez hai.
+# whisper-large-v3-turbo is both fast and multilingual, which suits
+# speakers who mix Urdu and English. For English only,
+# "distil-whisper-large-v3-en" is faster still.
 GROQ_STT_MODEL = os.getenv(
     "GROQ_STT_MODEL",
     "whisper-large-v3-turbo",
@@ -83,7 +83,7 @@ class STTWhisper:
             api_key=settings.returning_groq_api
         )
 
-        # Fallback model sirf zaroorat par load hoga
+        # The fallback model is loaded only when it is needed
         self._local_model = None
 
     # ------------------------------------------------------------------
@@ -142,7 +142,7 @@ class STTWhisper:
         if self._local_model is None:
 
             print(
-                "⬇️ [STT] Local whisper fallback load ho raha hai..."
+                "[STT] Loading the local whisper fallback..."
             )
 
             from faster_whisper import WhisperModel
@@ -197,10 +197,10 @@ class STTWhisper:
             return ""
 
         # ------------------------------------------------------
-        # Bohat chhota ya bohat khamosh audio API tak bhejna hi
-        # nahi chahiye. Whisper us par jhooti baat bana deta hai
-        # ("Thank you.", "E ai") jise system asli sawal samajh
-        # kar jawab dene lagta hai.
+        # Audio this short or this quiet should never reach the
+        # API at all. Whisper invents speech for it ("Thank you.",
+        # "E ai") which the system then treats as a real question
+        # and answers.
         # ------------------------------------------------------
 
         if len(audio_bytes) < MIN_AUDIO_BYTES:
@@ -215,7 +215,7 @@ class STTWhisper:
 
         if rms < MIN_RMS:
             print(
-                f"🔇 [STT] khamoshi chhori (rms={rms:.0f} < {MIN_RMS:.0f})"
+                f"[STT] khamoshi chhori (rms={rms:.0f} < {MIN_RMS:.0f})"
             )
             return ""
 
@@ -234,13 +234,13 @@ class STTWhisper:
                 model=GROQ_STT_MODEL,
                 response_format="text",
                 temperature=0.0,
-                # Bina iske Whisper zaban khud "andaza" lagata hai aur
-                # shor par Portuguese/Spanish bana deta tha.
+                # Without this Whisper guesses the language itself,
+                # and turned noise into Portuguese/Spanish.
                 language=STT_LANGUAGE,
             )
 
-            # response_format="text" par SDK seedha string deta hai,
-            # magar kuch versions object lautate hain.
+            # With response_format="text" the SDK returns a plain
+            # string, but some versions return an object.
             text = (
                 result
                 if isinstance(result, str)
@@ -250,7 +250,7 @@ class STTWhisper:
             text = (text or "").strip()
 
             if _is_noise(text):
-                print(f"🔇 [STT] hallucination chhori: {text!r}")
+                print(f"[STT] hallucination chhori: {text!r}")
                 return ""
 
             return text
@@ -258,8 +258,8 @@ class STTWhisper:
         except Exception as error:
 
             print(
-                f"⚠️ [STT] Groq fail hua ({error}). "
-                "Local whisper par ja rahe hain."
+                f"[STT] Groq failed ({error}). "
+                "Falling back to local whisper."
             )
 
             try:
@@ -271,7 +271,7 @@ class STTWhisper:
             except Exception as fallback_error:
 
                 print(
-                    f"❌ [STT] Local fallback bhi fail: "
+                    f"[STT] Local fallback bhi fail: "
                     f"{fallback_error}"
                 )
 

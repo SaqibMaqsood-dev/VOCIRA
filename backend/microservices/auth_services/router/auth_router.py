@@ -30,12 +30,16 @@ from backend.microservices.auth_services.models.refresh_tokken import (
 
 from backend.microservices.auth_services.schema.token_schema import Token
 
+from backend.microservices.auth_services.core.config import settings
+
+from backend.microservices.auth_services.services.token_claims import (
+    access_claims,
+    refresh_claims,
+    role_of,
+)
+
 
 router = APIRouter(tags=["Authentication"])
-
-
-# Define default expiration duration (e.g., 7 days)
-REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 @router.post("/login", response_model=Token)
@@ -66,7 +70,7 @@ async def login(
     print("USER FOUND:", user is not None)
 
     if not user:
-        print("❌ USER NOT FOUND")
+        print("USER NOT FOUND")
         print("========================================")
 
         raise HTTPException(
@@ -77,7 +81,7 @@ async def login(
             },
         )
 
-    print("✅ USER FOUND")
+    print("USER FOUND")
     print("VOCIRA USER ID:", user.user_id)
 
     # =========================================================
@@ -93,7 +97,7 @@ async def login(
     print("PASSWORD VALID:", password_valid)
 
     if not password_valid:
-        print("❌ PASSWORD VERIFICATION FAILED")
+        print("PASSWORD VERIFICATION FAILED")
         print("========================================")
 
         raise HTTPException(
@@ -104,7 +108,7 @@ async def login(
             },
         )
 
-    print("✅ PASSWORD VERIFIED")
+    print("PASSWORD VERIFIED")
 
     # =========================================================
     # 3. Get VOCIRA User ID
@@ -112,61 +116,41 @@ async def login(
 
     user_id = user.user_id
 
-    print(f"🔐 VOCIRA User ID : {user_id}")
+    print(f"VOCIRA User ID : {user_id}")
 
     # =========================================================
     # 4. Get role
     # =========================================================
 
-    # user.role ek Role model object hai, enum nahi. Pehle yahan
-    # sirf "value" check tha, jo Role par maujood hi nahi - is liye
-    # str(user.role) chal jata tha aur JWT mein role ki jagah
-    # "<...Role object at 0x...>" chala jata tha.
-    if user.role is None:
-        role = None
-    elif getattr(user.role, "name", None):
-        role = user.role.name
-    elif hasattr(user.role, "value"):
-        role = user.role.value
-    else:
-        role = str(user.role)
+    role = role_of(user)
 
-    print(f"👤 Role : {role}")
+    print(f"Role : {role}")
 
     # =========================================================
     # 5. Create Access Token
     # =========================================================
 
-    access_token = create_access_token(
-        {
-            "sub": user.email,
-            "user_id": str(user_id),
-            "role": role,
-            # Naam bhi - warna UI ke paas sirf email hoti hai aur
-            # "Muhammad Ahmed" ki jagah "muhmmadahmed763@edu.com" dikhana
-            # parta hai. Ye DB mein pehle se mojood hai, is ke
-            # liye alag endpoint banana faltu tha.
-            "name": user.name,
-        }
-    )
+    # The claims are built in token_claims so that /login and /refresh
+    # cannot drift apart - they already had, and every token /refresh
+    # produced was unusable as a result.
+    access_token = create_access_token(access_claims(user))
 
-    print("✅ ACCESS TOKEN CREATED")
+    print("ACCESS TOKEN CREATED")
 
     # =========================================================
     # 6. Create Refresh Token & Calculate Expiration
     # =========================================================
 
-    refresh_token = create_refresh_tokken(
-        {
-            "sub": user.email,
-            "user_id": str(user_id),
-        }
+    refresh_token = create_refresh_tokken(refresh_claims(user))
+
+    # The database row and the JWT's own exp have to agree. This was a
+    # local constant of 7 days while create_refresh_tokken() minted a
+    # 1-day JWT, so the row outlived the token it described.
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        days=settings.REFRESH_TOKEN_EXPIRE_DAYS
     )
 
-    # Calculate expiration datetime (UTC)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-
-    print("✅ REFRESH TOKEN CREATED")
+    print("REFRESH TOKEN CREATED")
 
     # =========================================================
     # 7. Hash Refresh Token
@@ -191,7 +175,7 @@ async def login(
 
     await db.commit()
 
-    print("✅ REFRESH TOKEN STORED")
+    print("REFRESH TOKEN STORED")
     print("========================================")
 
     # =========================================================
@@ -201,4 +185,8 @@ async def login(
     return Token(
         access_token=access_token,
         token_type="bearer",
+        # Without this the client never received the refresh token,
+        # so /refresh was unreachable and the session died with the
+        # access token.
+        refresh_token=refresh_token,
     )

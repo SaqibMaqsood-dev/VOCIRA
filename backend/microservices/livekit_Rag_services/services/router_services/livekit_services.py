@@ -1,7 +1,7 @@
 import json
 
 from fastapi import HTTPException, status, Request
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from livekit.api import AccessToken, VideoGrants
 
@@ -39,8 +39,12 @@ class LivekitServices:
 
     def __init__(self):
 
+        # From settings.AUTH_SERVICE_URL - 127.0.0.1 was hardcoded
+        # here, even though the config already carried this value. On
+        # Docker/the server, 127.0.0.1 points at this container
+        # itself, not at the auth service.
         self.api_integrate = APIServices(
-            endpoint="http://127.0.0.1:8000/users"
+            endpoint=f"{settings.AUTH_SERVICE_URL.rstrip('/')}/users"
         )
 
         self.ss_service = SessionService()
@@ -68,7 +72,10 @@ class LivekitServices:
 
         user_record = await self.api_integrate.Fetching_data(
             request=request,
-            endpoint=f"http://127.0.0.1:8000/users/{user_id}",
+            endpoint=(
+                f"{settings.AUTH_SERVICE_URL.rstrip('/')}"
+                f"/users/{user_id}"
+            ),
         )
 
         if not user_record:
@@ -234,11 +241,11 @@ class LivekitServices:
                 )
             )
 
-            # "room" hi asal field hai - LiveKitTokenResponse schema
-            # aur frontend dono yahi parhte hain. Pehle yahan sirf
-            # "room_name" tha, is liye guest call par frontend
-            # "Backend did not return a valid 'room'" deta tha.
-            # "room_name" purane consumers ke liye rakha hua hai.
+            # "room" is the real field - both the
+            # LiveKitTokenResponse schema and the frontend read it.
+            # Only "room_name" was set here before, so a guest call
+            # made the frontend report "Backend did not return a
+            # valid 'room'". "room_name" is kept for older consumers.
             return {
                 "session_id": session_id,
                 "room": room_name,
@@ -407,12 +414,28 @@ class LivekitServices:
         }
 
         # ========================================================
-        # 10. CHANGE ESCALATION STATUS
+        # 10. CLAIM THE ESCALATION - ATOMICALLY
+        #
+        # Two admins can press "Join" at the same moment. The status
+        # check above passes for both, because it only reads. So the
+        # real claim happens in a single UPDATE carrying its own
+        # condition: the status must still be 'pending'.
+        #
+        # Postgres locks that row, so only ONE of the two updates
+        # gets a rowcount of 1 - the other gets 0 and a clean 409.
+        # This cannot be left to the frontend.
         # ========================================================
 
-        escalation.status = EscalationStatus.open
-
         try:
+
+            claim = await db.execute(
+                update(Escalation)
+                .where(
+                    Escalation.id == escalation_id,
+                    Escalation.status == EscalationStatus.pending,
+                )
+                .values(status=EscalationStatus.open)
+            )
 
             await db.commit()
 
@@ -421,12 +444,53 @@ class LivekitServices:
             await db.rollback()
 
             print(
-                f"❌ Failed to accept escalation: {error}"
+                f"Failed to accept escalation: {error}"
             )
 
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to accept escalation.",
+            )
+
+        if claim.rowcount != 1:
+
+            print(
+                f"[Escalation] {escalation_id} pehle hi "
+                f"kisi aur admin ne le li."
+            )
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Another admin has already joined this call.",
+            )
+
+        print(
+            f"[Escalation] {escalation_id} claimed by "
+            f"admin {current_user.user_id}"
+        )
+
+        # Stops the other admins' ringing - otherwise a call that
+        # is already gone keeps ringing on their screens.
+        try:
+
+            from backend.microservices.livekit_Rag_services.services.websokets.websocket_manager import (
+                notification_manager,
+            )
+
+            await notification_manager.broadcast(
+                {
+                    "event": "escalation.claimed",
+                    "escalation_id": str(escalation_id),
+                    "session_id": session_id,
+                    "admin_id": str(current_user.user_id),
+                }
+            )
+
+        except Exception as error:
+
+            # Only a notification - the claim is done, do not fail the call
+            print(
+                f"[Escalation] claimed-broadcast fail: {error}"
             )
 
         # ========================================================
@@ -470,8 +534,8 @@ class LivekitServices:
                 escalation.id
             ),
             "session_id": session_id,
-            # guest endpoint ki tarah yahan bhi "room" chahiye,
-            # warna admin panel LiveKit se connect nahi kar payega.
+            # As with the guest endpoint, "room" is required here,
+            # or the admin panel cannot connect to LiveKit.
             "room": room_name,
             "room_name": room_name,
             "token": token.to_jwt(),

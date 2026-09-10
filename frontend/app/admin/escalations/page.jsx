@@ -7,7 +7,7 @@ import Badge from "@/app/admin/_components/ui/Badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
 import { useAdminData, adminFetch, formatTime } from "@/app/admin/useAdminApi";
 
-// Backend ka EscalationStatus enum - wahi values yahan bhi
+// The backend's EscalationStatus enum - the same values here
 const STATUS_VARIANT = {
   pending: "neutral",
   open: "warning",
@@ -109,9 +109,9 @@ export default function EscalationsPage() {
                 {formatTime(e.time)}
               </TD>
               <TD className="whitespace-nowrap text-right">
-                {/* Pehle yahan "Assign" / "Reply" / "Resolve" ke button
-                    thay jo kuch karte hi nahi thay. Ab sirf wo rakhe
-                    hain jin ka backend mojood hai. */}
+                {/* There used to be "Assign" / "Reply" / "Resolve"
+                    buttons here that did nothing. Only the ones with
+                    a backend behind them are kept. */}
                 <div className="flex justify-end gap-1">
                   {e.status !== "open" && e.status !== "resolved" && (
                     <Button

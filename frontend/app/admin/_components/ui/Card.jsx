@@ -3,16 +3,16 @@ import { cn } from "@/lib/utils";
 /**
  * Card.
  *
- * Pehle border "border-white/8" tha - aur wo class Tailwind BANATI
- * HI NAHI. Default opacity scale 5 ke multiples par hai (5, 10, 15,
- * 20...), is liye /8 ka koi CSS nahi banta tha. `border` class phir
- * bhi 1px solid lagati hai, magar rang preflight ke default par gir
- * jata tha: #e5e7eb - halka gray. Gehre theme par wahi bhadda safaid
- * kinara nazar aa raha tha.
+ * The border used to be "border-white/8" - and Tailwind does NOT
+ * generate that class. The default opacity scale runs in multiples
+ * of 5 (5, 10, 15, 20...), so no CSS was produced for /8. The
+ * `border` class still applies 1px solid, but the colour fell back
+ * to preflight's default: #e5e7eb - a light gray. That was the ugly
+ * white edge showing on the dark theme.
  *
- * Ab /10 hai (banti hai), aur radius bhi baqi shell jaisa - sidebar,
- * header aur stat tiles sab rounded-2xl hain, sirf ye do rounded-xl
- * reh gaye thay.
+ * It is now /10 (which does generate), and the radius matches the
+ * rest of the shell - the sidebar, header and stat tiles are all
+ * rounded-2xl, and only these two were left at rounded-xl.
  */
 export function Card({ className, children }) {
   return (
@@ -24,8 +24,8 @@ export function Card({ className, children }) {
         className
       )}
     >
-      {/* upar ek baal barabar roshni - shishe ka ehsaas deti hai,
-          aur card ko background se alag karti hai */}
+      {/* a hairline of light along the top - it reads as glass, and
+          separates the card from the background */}
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"

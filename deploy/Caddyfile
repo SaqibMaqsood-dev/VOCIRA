@@ -1,0 +1,94 @@
+# =============================================================
+# VOCIRA - reverse proxy and HTTPS
+#
+# Caddy obtains its certificate from Let's Encrypt and renews it
+# itself - no certbot to wrestle with. The only requirements are that
+# these four subdomains point at this VM's public IP in DNS, and that
+# ports 80 and 443 are open from outside.
+#
+# Why HTTPS is mandatory (this is not a matter of taste):
+#
+#   - browsers grant mic access (getUserMedia) only on HTTPS or
+#     localhost. A voice call will not start at all over HTTP.
+#   - the frontend is https on Vercel; calling an http:// API from
+#     there is "mixed content" and gets blocked.
+#   - LiveKit signalling from an https page has to be wss://.
+#
+# {$DOMAIN} and {$ACME_EMAIL} come from .env.
+# =============================================================
+{
+	# Let's Encrypt sends notice here before the certificate
+	# expires
+	email {$ACME_EMAIL}
+}
+
+# -------------------------------------------------------------
+# API - frontend ka NEXT_PUBLIC_API_URL
+# -------------------------------------------------------------
+api.{$DOMAIN} {
+	reverse_proxy gateway:9000
+
+	encode gzip
+
+	log {
+		output file /var/log/caddy/api.log
+		format console
+	}
+}
+
+# -------------------------------------------------------------
+# Realtime - the WebSocket behind the admin's incoming-call ring
+#
+# The gateway forwards HTTP only, not WebSockets - so this goes
+# straight to the livekit_Rag service. This is the frontend's
+# NEXT_PUBLIC_REALTIME_URL.
+#
+# Caddy recognises a WebSocket upgrade by itself; no separate setting
+# is needed.
+# -------------------------------------------------------------
+rt.{$DOMAIN} {
+	reverse_proxy livekit_rag:8001
+
+	log {
+		output file /var/log/caddy/realtime.log
+		format console
+	}
+}
+
+# -------------------------------------------------------------
+# LiveKit signalling
+#
+# ONLY signalling passes through here. The audio itself (RTP) goes
+# DIRECTLY to the VM's public IP on UDP 7882 - not through Caddy. So
+# that port has to be opened separately; this proxy alone is not
+# enough.
+# -------------------------------------------------------------
+lk.{$DOMAIN} {
+	reverse_proxy livekit:7880
+
+	log {
+		output file /var/log/caddy/livekit.log
+		format console
+	}
+}
+
+# -------------------------------------------------------------
+# ERPNext
+#
+# This runs from a separate compose file (frappe_test/pwd.yml). The
+# two have to share an external network - deploy/README.md describes
+# the override file that arranges it.
+# -------------------------------------------------------------
+erp.{$DOMAIN} {
+	reverse_proxy erpnext:8080
+
+	# ERPNext sends large files (backups, print formats)
+	request_body {
+		max_size 100MB
+	}
+
+	log {
+		output file /var/log/caddy/erp.log
+		format console
+	}
+}

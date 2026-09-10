@@ -1,26 +1,26 @@
 "use client";
 
 /**
- * Admin pages ka aana-jaana.
+ * How admin pages come and go.
  *
- * Pehle animation sirf dashboard par thi (duration 0.4, y 10) aur
- * baqi teen pages par bilkul nahi. Is liye ek page narmi se aata
- * tha aur doosra jhatke se - aur dashboard par wapis aate hi wo
- * fade phir se chalta tha, jo jhilmilahat lagti thi.
+ * The animation used to exist only on the dashboard (duration 0.4,
+ * y 10) and not at all on the other three pages. So one page arrived
+ * gently and the next snapped in - and returning to the dashboard
+ * replayed that fade, which read as a flicker.
  *
- * Ab ek hi jagah, sab ke liye:
+ * Now it lives in one place, for all of them:
  *
- *   - exit animation NAHI. Purana page fade out ho kar jaye to
- *     beech mein khali screen ka lamha aata hai - wahi "fade in
- *     aur out" wala jhatka tha. Naya page bas narmi se aa jata hai.
+ *   - NO exit animation. Fading the old page out leaves a moment of
+ *     empty screen in between - that was the "fade in and out"
+ *     jolt. The new page simply arrives gently.
  *
- *   - y sirf 6px (pehle 10) - halki si harkat, uchhal nahi.
+ *   - y of only 6px (it was 10) - a slight movement, not a jump.
  *
- *   - duration 0.45s aur ease-out curve, taake shuru tez ho aur
- *     aakhir mein theher kar ruke. Linear ya easeOut se zyada narm
- *     mehsoos hota hai.
+ *   - duration 0.45s with an ease-out curve, so it starts quickly
+ *     and settles at the end. That feels softer than linear or
+ *     easeOut.
  *
- * key={pathname} se har page apni entry khud chalata hai.
+ * key={pathname} lets each page run its own entry.
  */
 
 import { motion } from "framer-motion";
@@ -36,7 +36,7 @@ export default function PageTransition({ children }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{
         duration: 0.45,
-        // easeOutQuint - shuru mein raftaar, aakhir mein narmi
+        // easeOutQuint - speed at the start, softness at the end
         ease: [0.22, 1, 0.36, 1],
       }}
     >

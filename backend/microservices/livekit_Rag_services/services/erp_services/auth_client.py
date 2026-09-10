@@ -8,8 +8,8 @@ class AuthClient:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
-        # Auth service ka /users/internal/ ab shared secret maangta hai.
-        # Dono services ki .env mein ye ek jaisi honi chahiye.
+        # The auth service's /users/internal/ now requires the shared
+        # secret. It must match in both services' .env files.
         self.internal_key = os.getenv(
             "INTERNAL_SERVICE_KEY",
             "vocira-internal-dev-key-change-me",
@@ -26,7 +26,7 @@ class AuthClient:
         )
 
         print("=" * 70)
-        print("🔐 [AUTH CLIENT]")
+        print("[AUTH CLIENT]")
         print(f"Auth URL        : {url}")
         print(f"VOCIRA User ID  : {vocira_user_id}")
         print("=" * 70)
@@ -44,12 +44,12 @@ class AuthClient:
                 )
 
                 print(
-                    f"🔐 [AUTH STATUS] : "
+                    f"[AUTH STATUS] : "
                     f"{response.status_code}"
                 )
 
                 print(
-                    f"🔐 [AUTH BODY]   : "
+                    f"[AUTH BODY]   : "
                     f"{response.text}"
                 )
 
@@ -102,17 +102,17 @@ class AuthClient:
             )
 
         print(
-            f"👤 [USER ID]   : "
+            f"[USER ID]   : "
             f"{data.get('user_id')}"
         )
 
         print(
-            f"👨‍👩‍👧 [PARENT ID] : "
+            f"[PARENT ID] : "
             f"{data.get('parent_id')}"
         )
 
         print(
-            f"🔐 [ROLE]      : "
+            f"[ROLE]      : "
             f"{data.get('role')}"
         )
 

@@ -16,9 +16,9 @@ def verify_jwt(token, credentials_exception):
         user_id = payload.get("user_id")
         parent_id = payload.get("parent_id")
 
-        # login ke waqt JWT mein role bhi jata hai; pehle yahan
-        # se nikala nahi jata tha, is liye koi endpoint ye tay
-        # nahi kar sakta tha ke caller admin hai ya nahi.
+        # The JWT carries the role from login; it was not read out
+        # here, so no endpoint could tell whether the caller was an
+        # admin.
         role = payload.get("role")
 
         if isinstance(role, dict):

@@ -1,19 +1,19 @@
 "use client";
 
 /**
- * Admin sidebar.
+ * The admin sidebar.
  *
- * Pehle ye viewport ke kinare se chipka hua chapta rectangle tha -
- * koi radius nahi, aur neeche chalta GradFlow gradient us ke peeche
- * dab jata tha. Ab ye ek floating glass panel hai: chaaron taraf
- * thori jagah, rounded, aur background us ke aas paas nazar aata hai.
+ * This used to be a flat rectangle stuck to the edge of the viewport
+ * - no radius, with the GradFlow gradient running underneath buried
+ * behind it. It is now a floating glass panel: a little space on
+ * every side, rounded, with the background visible around it.
  *
- * Nav ka rendering ek hi jagah (NavList) - pehle desktop aur mobile
- * ke liye wahi code do baar likha hua tha.
+ * The nav is rendered in one place (NavList) - the same code used to
+ * be written twice, once for desktop and once for mobile.
  *
- * Escalations wale item par pending ki asli ginti aati hai. Jhoota
- * badge lagane ka koi faida nahi tha, is liye pehle koi tha hi nahi -
- * magar yehi wo cheez hai jo admin ko foran nazar aani chahiye.
+ * The Escalations item carries the real pending count. A fake badge
+ * would have been worthless, which is why there was none - but this
+ * is exactly the thing an admin should see at a glance.
  */
 
 import Link from "next/link";
@@ -38,7 +38,7 @@ const items = [
   { href: "/admin/queries", label: "Queries", icon: MessageCircle },
   { href: "/admin/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/admin/escalations", label: "Escalations", icon: AlertTriangle },
-  { href: "/admin/users", label: "Parents", icon: Users },
+  { href: "/admin/users", label: "Accounts", icon: Users },
 ];
 
 export default function Sidebar({
@@ -162,8 +162,8 @@ function Brand({ collapsed, onToggle, onNavigate }) {
   );
 }
 
-/** Collapsed halat mein toggle apni row mein - warna wo pehle nav
- *  item par chadh jata tha. */
+/** When collapsed, the toggle gets its own row - otherwise it rode
+ *  up over the first nav item. */
 function ExpandButton({ onToggle }) {
   return (
     <div className="flex justify-center border-b border-white/10 py-2">
@@ -205,7 +205,7 @@ function NavList({ items, pathname, collapsed, pending, onNavigate }) {
                 : "text-text-secondary hover:bg-white/[0.06] hover:text-white"
             )}
           >
-            {/* chalti hui cheez ka nishaan - bayein taraf patli patti */}
+            {/* marks the active item - a thin bar on the left */}
             {active && (
               <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent-secondary" />
             )}

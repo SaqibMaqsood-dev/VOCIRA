@@ -3,17 +3,19 @@
 /**
  * Support page.
  *
- * Pehle ye ek murda form tha - type="button", koi onClick nahi, koi
- * fetch nahi. Likhein, Submit dabayein, kuch nahi hota tha.
+ * This used to be a dead form - type="button", no onClick, no
+ * fetch. Type something, press Submit, nothing happened.
  *
- * Ab ticket ERPNext ke Issue doctype mein banta hai. School ka banda
- * usay apne Support module mein dekhta hai (localhost:8081/app/issue)
- * - hamein koi admin screen banane ki zaroorat nahi.
+ * The ticket is now created in ERPNext's Issue doctype. Someone at
+ * the school sees it in their own Support module
+ * (localhost:8081/app/issue) - we do not have to build an admin
+ * screen at all.
  */
 
 import { motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Loader2, Ticket } from "lucide-react";
 import { useEffect, useState } from "react";
+import { authFetch, getAccessToken } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -29,14 +31,14 @@ export default function SupportPage() {
   const [tickets, setTickets] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
 
-  // Token ko state mein rakhna zaroori hai: server par localStorage
-  // nahi hota, to pehle render par null hi milega. Seedha padhne se
-  // React ka hydration mismatch aa jata hai.
+  // The token has to be held in state: there is no localStorage on
+  // the server, so the first render only ever sees null. Reading it
+  // directly causes a React hydration mismatch.
   const [token, setToken] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    setToken(localStorage.getItem("access_token"));
+    setToken(getAccessToken());
     setAuthChecked(true);
   }, []);
 
@@ -50,16 +52,16 @@ export default function SupportPage() {
     }
 
     try {
-      const res = await fetch(`${API_URL}/livekit/support/tickets`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // authFetch renews an expired access token and retries, so a
+      // parent who left the tab open still sees their tickets.
+      const res = await authFetch("/livekit/support/tickets");
 
       if (res.ok) {
         const rows = await res.json();
         setTickets(Array.isArray(rows) ? rows : []);
       }
     } catch {
-      // list na aaye to form phir bhi chalna chahiye
+      // if the list fails to load, the form must still work
     } finally {
       setLoadingList(false);
     }
@@ -95,18 +97,24 @@ export default function SupportPage() {
     setSending(true);
 
     try {
-      const res = await fetch(`${API_URL}/livekit/support/tickets`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Login ho to token, warna kuch nahi - backend dono
-          // sooraton mein chalta hai.
-          ...(loggedIn ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(
-          loggedIn ? { subject, message } : { subject, message, email }
-        ),
-      });
+      // A logged-in parent goes through authFetch, which attaches
+      // the token and renews it if it has expired. A guest has no
+      // token at all, and the endpoint accepts that - so plain fetch
+      // is right there.
+      const body = JSON.stringify(
+        loggedIn ? { subject, message } : { subject, message, email }
+      );
+
+      const res = loggedIn
+        ? await authFetch("/livekit/support/tickets", {
+            method: "POST",
+            body,
+          })
+        : await fetch(`${API_URL}/livekit/support/tickets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+          });
 
       if (res.status === 401) {
         setError("Your session has expired. Please log in again.");
@@ -114,7 +122,7 @@ export default function SupportPage() {
       }
 
       if (!res.ok) {
-        // Backend ki asli wajah dikhayein, apni banai hui nahi
+        // Show the backend's real reason, not one of our own making
         let detail = `Could not create the ticket (HTTP ${res.status}).`;
         try {
           const body = await res.json();
@@ -206,11 +214,11 @@ export default function SupportPage() {
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
             {/*
-              Email sirf tab poocha jata hai jab login na ho. Logged-in
-              parent ka email account se aata hai - us se dobara poochna
-              faltu hai, aur backend request ka email nazarandaz bhi
-              kar deta hai (warna koi doosre ke naam par ticket khol
-              sakta).
+              The email is asked for only when not logged in. A
+              logged-in parent's email comes from their account -
+              asking again is redundant, and the backend ignores the
+              email in the request anyway (otherwise anyone could
+              open a ticket in someone else's name).
             */}
             {authChecked && !loggedIn && (
               <label className="block">

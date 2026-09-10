@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * Admin panel ka data backend se.
+ * The admin panel's data, from the backend.
  *
- * Pehle ye poora hissa data.js ke hardcoded numbers par chalta tha -
- * 122 lines jhoota data, koi backend call nahi. Backend ke endpoints
- * mojood thay, bas wire nahi thay.
+ * This whole section used to run on hardcoded numbers in data.js -
+ * 122 lines of fake data and no backend call. The backend endpoints
+ * existed, they were simply never wired up.
  *
- * Saare admin endpoints require_admin ke peeche hain, is liye 403 ka
- * matlab hai "ye account admin nahi" - us ke liye alag paighaam hai,
- * warna user samajhta hai kuch toot gaya.
+ * Every admin endpoint sits behind require_admin, so a 403 means
+ * "this account is not an admin" - that gets its own message, or the
+ * user assumes something is broken.
  */
 
 import { useCallback, useEffect, useState } from "react";
+
+import { authFetch, getAccessToken } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -21,25 +23,16 @@ export async function adminFetch(path, options = {}) {
     throw new Error("API URL is not configured (NEXT_PUBLIC_API_URL).");
   }
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("access_token")
-      : null;
-
-  if (!token) {
+  if (!getAccessToken()) {
     const error = new Error("Please log in.");
     error.code = "NO_TOKEN";
     throw error;
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  // authFetch renews the access token once on a 401 and retries, so a
+  // 401 arriving here means the refresh token is gone too - the
+  // session really is over.
+  const response = await authFetch(path, options);
 
   if (response.status === 401) {
     const error = new Error("Your session has expired. Please log in again.");
@@ -57,18 +50,39 @@ export async function adminFetch(path, options = {}) {
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(
-      `Server returned HTTP ${response.status}${body ? `: ${body.slice(0, 120)}` : ""}`
+
+    // On responses like 409 the caller needs the real reason, not
+    // just "something broke" - something like "Another admin has
+    // already joined this call." So both the status and the detail
+    // are attached to the error.
+    let detail = "";
+    try {
+      const parsed = JSON.parse(body);
+      detail =
+        typeof parsed?.detail === "string" ? parsed.detail : "";
+    } catch {
+      /* the response was not JSON */
+    }
+
+    const error = new Error(
+      detail ||
+        `Server returned HTTP ${response.status}${
+          body ? `: ${body.slice(0, 120)}` : ""
+        }`
     );
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
   }
 
   return response.json();
 }
 
 /**
- * Ek endpoint se data, loading aur error ke sath.
+ * Data from one endpoint, with loading and error state.
  *
- * Har page mein wahi useEffect dobara likhne ke bajaye ek jagah.
+ * One place, rather than rewriting the same useEffect on every
+ * page.
  */
 export function useAdminData(path, fallback) {
   const [data, setData] = useState(fallback);
@@ -115,22 +129,17 @@ export function formatTime(value) {
 /**
  * File upload.
  *
- * adminFetch hamesha "Content-Type: application/json" lagata hai -
- * multipart us se toot jata hai. Browser ko khud Content-Type
- * banane dena parta hai, kyunke us mein boundary bhi hoti hai jo
- * hum nahi jaante.
+ * The Content-Type has to be left to the browser here, because a
+ * multipart body carries a boundary we do not know. authFetch skips
+ * its JSON default when the body is FormData, so this goes through
+ * the same renew-on-401 path as every other call.
  */
 export async function adminUpload(path, file) {
   if (!API_URL) {
     throw new Error("API URL is not configured (NEXT_PUBLIC_API_URL).");
   }
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("access_token")
-      : null;
-
-  if (!token) {
+  if (!getAccessToken()) {
     const error = new Error("Please log in.");
     error.code = "NO_TOKEN";
     throw error;
@@ -139,11 +148,7 @@ export async function adminUpload(path, file) {
   const body = new FormData();
   body.append("file", file);
 
-  const response = await fetch(`${API_URL}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body,
-  });
+  const response = await authFetch(path, { method: "POST", body });
 
   if (!response.ok) {
     let detail = `Upload failed (HTTP ${response.status}).`;
@@ -156,7 +161,7 @@ export async function adminUpload(path, file) {
             : JSON.stringify(parsed.detail);
       }
     } catch {
-      /* body JSON nahi thi */
+      /* the body was not JSON */
     }
     throw new Error(detail);
   }

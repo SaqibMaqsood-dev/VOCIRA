@@ -1,20 +1,21 @@
 "use client";
 
 /**
- * Part-to-whole - ek ufqi stacked bar.
+ * Part-to-whole - a horizontal stacked bar.
  *
- * Do hisson ka pie nahi banaya: aankh do slices ka zaawiya theek se
- * nahi naap sakti, aur ye to do hi hisse hain. Ek bar mein poora
- * kul saaf nazar aata hai.
+ * A two-slice pie was avoided: the eye cannot judge the angle of two
+ * slices well, and there are only two parts here. A single bar shows
+ * the whole total clearly.
  *
- * Rang jaanche hue hain (dataviz validator, dark surface #05041c):
+ * The colours are validated (dataviz validator, dark surface
+ * #05041c):
  *
  *   #6c63ff  violet   AI Resolved
  *   #d95926  orange   Escalated
- *   CVD separation ΔE 31.4 (protan) · normal 34.6 · dono >= 3:1
+ *   CVD separation ΔE 31.4 (protan) · normal 34.6 · both >= 3:1
  *
- * Har hisse par seedha label bhi hai - pehchan sirf rang par nahi
- * chhori, aur legend bhi mojood hai.
+ * Each segment is labelled directly as well - identification does
+ * not rest on colour alone, and there is a legend too.
  */
 
 import { motion, useReducedMotion } from "framer-motion";
@@ -55,11 +56,11 @@ export default function StackedBar({ data = [], height = 14 }) {
                 delay: 0.15 + i * 0.1,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              // width sirf animate mein - style mein bhi rakhne se
-              // dono takrate hain
+              // width goes in animate only - keeping it in style as
+              // well makes the two fight each other
               style={{
                 background: COLORS[i % COLORS.length],
-                // 2px surface gap - hisse aapas mein chipke na lagein
+                // a 2px surface gap so the segments do not touch
                 marginRight:
                   i < data.length - 1 ? 2 : 0,
                 boxShadow: `inset 0 0 0 0 ${SURFACE}`,
@@ -69,8 +70,8 @@ export default function StackedBar({ data = [], height = 14 }) {
         })}
       </div>
 
-      {/* Legend + seedhe labels. Text apne token pehnta hai; rang
-          sirf us ke bagal wale nishaan mein hai. */}
+      {/* Legend plus direct labels. The text wears its own token;
+          the colour lives only in the swatch beside it. */}
       <div className="mt-4 space-y-2.5">
         {data.map((d, i) => (
           <div

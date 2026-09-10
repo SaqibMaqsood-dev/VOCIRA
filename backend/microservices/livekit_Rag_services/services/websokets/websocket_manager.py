@@ -1,4 +1,16 @@
-from typing import Dict
+"""
+Admin panel ke khule hue realtime channels.
+
+One admin can have several tabs open - the panel on a laptop, with
+another tab beside it. Only ONE socket per admin was kept here
+before: opening a second tab dropped the first out of the dictionary.
+That socket was not closed, it simply stopped receiving anything - so
+an open tab went quietly deaf, and never rang.
+
+Each admin therefore now carries a set of all their sockets.
+"""
+
+from typing import Dict, Optional, Set
 
 from fastapi import WebSocket
 
@@ -6,7 +18,7 @@ from fastapi import WebSocket
 class NotificationManager:
 
     def __init__(self):
-        self.connections: Dict[str, WebSocket] = {}
+        self.connections: Dict[str, Set[WebSocket]] = {}
 
     # =========================================================
     # CONNECT ADMIN
@@ -19,10 +31,14 @@ class NotificationManager:
     ):
         await websocket.accept()
 
-        self.connections[admin_id] = websocket
+        self.connections.setdefault(
+            admin_id,
+            set(),
+        ).add(websocket)
 
         print(
-            f"🔌 [WebSocket] Admin connected: {admin_id}"
+            f"[WebSocket] Admin connected: {admin_id} "
+            f"({len(self.connections[admin_id])} open)"
         )
 
     # =========================================================
@@ -32,53 +48,32 @@ class NotificationManager:
     def disconnect(
         self,
         admin_id: str,
+        websocket: Optional[WebSocket] = None,
     ):
-        self.connections.pop(
-            admin_id,
-            None,
-        )
+        """
+        Given a websocket, only that socket is removed - the admin's
+        other tabs stay open. Given none, all of the admin's go.
+        """
 
-        print(
-            f"🔌 [WebSocket] Admin disconnected: {admin_id}"
-        )
+        sockets = self.connections.get(admin_id)
 
-    # =========================================================
-    # SEND TO SPECIFIC ADMIN
-    # =========================================================
-
-    async def send_to_admin(
-        self,
-        admin_id: str,
-        message: dict,
-    ):
-        websocket = self.connections.get(
-            admin_id
-        )
-
-        if not websocket:
-            print(
-                f"⚠️ [WebSocket] Admin "
-                f"{admin_id} is not connected."
-            )
-
+        if not sockets:
             return
 
-        try:
+        if websocket is None:
+            sockets.clear()
+        else:
+            sockets.discard(websocket)
 
-            await websocket.send_json(
-                message
+        if not sockets:
+            self.connections.pop(
+                admin_id,
+                None,
             )
 
-        except Exception as error:
-
-            print(
-                f"❌ [WebSocket] Error sending "
-                f"to admin {admin_id}: {error}"
-            )
-
-            self.disconnect(
-                admin_id
-            )
+        print(
+            f"[WebSocket] Admin disconnected: {admin_id}"
+        )
 
     # =========================================================
     # BROADCAST TO ALL ADMINS
@@ -95,44 +90,47 @@ class NotificationManager:
         if not self.connections:
 
             print(
-                "⚠️ [WebSocket] "
+                "[WebSocket] "
                 "No admins currently connected."
             )
 
             return
 
-        disconnected = []
+        dead = []
 
-        for admin_id, websocket in list(
+        for admin_id, sockets in list(
             self.connections.items()
         ):
 
-            try:
+            for websocket in list(sockets):
 
-                await websocket.send_json(
-                    message
-                )
+                try:
 
-                print(
-                    f"📨 [WebSocket] Notification "
-                    f"sent to admin: {admin_id}"
-                )
+                    await websocket.send_json(
+                        message
+                    )
 
-            except Exception as error:
+                    print(
+                        f"[WebSocket] Notification "
+                        f"sent to admin: {admin_id}"
+                    )
 
-                print(
-                    f"❌ [WebSocket] Failed to notify "
-                    f"admin {admin_id}: {error}"
-                )
+                except Exception as error:
 
-                disconnected.append(
-                    admin_id
-                )
+                    print(
+                        f"[WebSocket] Failed to notify "
+                        f"admin {admin_id}: {error}"
+                    )
 
-        for admin_id in disconnected:
+                    dead.append(
+                        (admin_id, websocket)
+                    )
+
+        for admin_id, websocket in dead:
 
             self.disconnect(
-                admin_id
+                admin_id,
+                websocket,
             )
 
 

@@ -1,16 +1,16 @@
 """
 Pinecone vector store.
 
-NOTE — purana "safe swap" hata diya gaya hai.
+NOTE — the old "safe swap" has been removed.
 
-Pehle build_vector_store() TEMP index banati thi, us mein upload karti
-thi, verify karti thi... aur TEMP ka naam laut kar khatam ho jati thi.
-Temp se production mein swap ka code kahin tha hi nahi, jabke retriever
-production index padhta hai. Yaani wo raasta chal bhi jata to knowledge
-base kabhi update na hota.
+build_vector_store() used to create a TEMP index, upload into it,
+verify it... and then finish by returning the TEMP name. The code to
+swap temp into production did not exist anywhere, while the retriever
+reads the production index. So even when that path ran, the knowledge
+base was never updated.
 
-Ab seedha tareeqa: namespace khali karo, naye chunks daalo. Chhoti
-knowledge base ke liye ye chand second ka kaam hai.
+The direct approach now: clear the namespace, insert the new chunks.
+For a small knowledge base that is a few seconds' work.
 """
 
 import asyncio
@@ -44,7 +44,7 @@ _embeddings_instance = None
 
 
 def get_embeddings():
-    """Config ke mutabiq embeddings (local ya Gemini). Ek hi baar banta hai."""
+    """Embeddings per the config (local or Gemini). Built once."""
     global _embeddings_instance
     if _embeddings_instance is None:
         _embeddings_instance = build_embeddings(
@@ -68,7 +68,7 @@ def wait_for_index(pc: Pinecone, index_name: str, timeout: int = 120):
         if pc.describe_index(index_name).status["ready"]:
             return
         time.sleep(1)
-    raise RuntimeError(f"Index '{index_name}' {timeout}s mein ready nahi hui")
+    raise RuntimeError(f"Index '{index_name}' was not ready within {timeout}s")
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -82,7 +82,7 @@ def upload_to_pinecone(chunks, embeddings, index_name: str):
 
 
 def _rebuild_sync(chunks) -> dict:
-    """Poori tarah synchronous — sirf asyncio.to_thread se bulayein."""
+    """Fully synchronous — call it only through asyncio.to_thread."""
     pc = _client()
     existing = pc.list_indexes().names()
 
@@ -97,14 +97,14 @@ def _rebuild_sync(chunks) -> dict:
         )
         wait_for_index(pc, INDEX_NAME)
     else:
-        # dimension mismatch pakrein - Gemini/OpenAI embeddings par
-        # jate waqt yahi sab se aam ghalti hoti hai
+        # Catch a dimension mismatch - the most common mistake when
+        # moving to Gemini/OpenAI embeddings
         dim = pc.describe_index(INDEX_NAME).dimension
         if dim != EMBEDDING_DIM:
             raise RuntimeError(
-                f"Index '{INDEX_NAME}' ki dimension {dim} hai magar "
-                f"embedding model {EMBEDDING_DIM} deta hai. Nayi index "
-                f"banayein ya purani delete karein."
+                f"Index '{INDEX_NAME}' has dimension {dim} but the "
+                f"embedding model produces {EMBEDDING_DIM}. Create a new "
+                f"index or delete the old one."
             )
 
     index = pc.Index(INDEX_NAME)
@@ -123,14 +123,14 @@ def _rebuild_sync(chunks) -> dict:
             index.delete(delete_all=True, namespace=PINECONE_NAMESPACE)
             time.sleep(2)
         except Exception as exc:
-            # namespace na ho to Pinecone 404 deta hai - koi masla nahi
+            # Pinecone returns 404 if the namespace is absent - harmless
             log.warning("Namespace delete: %s", exc)
 
     # ---- naye chunks ----
     log.info("Uploading %s chunks...", len(chunks))
     upload_to_pinecone(chunks, get_embeddings(), INDEX_NAME)
 
-    # Pinecone ka index thori der baad consistent hota hai
+    # A Pinecone index becomes consistent after a short delay
     after = 0
     for _ in range(15):
         time.sleep(2)
@@ -154,12 +154,8 @@ def _rebuild_sync(chunks) -> dict:
 
 
 async def rebuild_vector_store(chunks) -> dict:
-    """Namespace khali karke naye chunks daalein. Result ka summary."""
+    """Clear the namespace and insert the new chunks. Returns a summary."""
     return await asyncio.to_thread(_rebuild_sync, chunks)
-
-
-# purana naam bhi chalta rahe
-build_vector_store = rebuild_vector_store
 
 
 def _stats_sync() -> dict:

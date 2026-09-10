@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * Stat tile - ek number, jo dashboard ki jaan hai.
+ * Stat tile - a single number, which is what a dashboard is for.
  *
- * dataviz ka usool: ek maujooda value ke liye chart nahi banate, tile
- * banate hain. Pehle ye chaar cards sirf chhota label + number thay;
- * ab number bara hai (padhne wali cheez wahi hai), sath ek icon aur -
- * jahan waqt ke sath data mojood ho - ek sparkline.
+ * The dataviz rule: do not build a chart for one current value,
+ * build a tile. These four cards used to be a small label and a
+ * number; the number is now large (it is the thing being read), with
+ * an icon and - wherever there is data over time - a sparkline.
  *
- * Contract: label (sentence case) - value (bara) - optional icon,
- * sparkline, aur ek chhoti sharah.
+ * The contract: label (sentence case) - value (large) - optional
+ * icon, sparkline, and a short note.
  */
 
 import { motion, useReducedMotion } from "framer-motion";
@@ -27,7 +27,7 @@ export default function StatTile({
 }) {
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-card backdrop-blur-xl transition-colors hover:border-white/20">
-      {/* halka sa glow - sirf sajawat, data nahi */}
+      {/* a soft glow - decoration only, not data */}
       <div
         className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-25 blur-2xl transition-opacity group-hover:opacity-40"
         style={{ background: accent }}
@@ -69,7 +69,7 @@ export default function StatTile({
   );
 }
 
-/** Chhoti si line - sirf shakl batati hai, ginti nahi. */
+/** A small line - it shows the shape, not the numbers. */
 function Sparkline({ values, color }) {
   const still = useReducedMotion();
   const W = 200;

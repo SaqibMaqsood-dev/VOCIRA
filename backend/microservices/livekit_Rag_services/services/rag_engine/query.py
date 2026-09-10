@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
     GROQ_MODEL, MAX_CONTEXT_CHARS, PINECONE_NAMESPACE
 )
-# Wahi client jo baqi system use karta hai - taake provider ek jagah
-# se badle. Pehle yahan apna alag Groq client tha, is liye jab
-# gpt-oss-20b ka quota khatam hua to ERP chalta raha magar RAG ne
-# har baar "assistant is currently busy" kaha.
+# The same client the rest of the system uses, so the provider is
+# switched from one place. There was a separate Groq client here
+# before, so when gpt-oss-20b ran out of quota, ERP kept working
+# while RAG answered "assistant is currently busy" every time.
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
     client as llm_client,
     _is_rate_limited,
@@ -103,16 +103,16 @@ RULES:
 CONTEXT:
 {context}"""
 
-    # Groq par har model ka apna rozana budget hai. Ek khatam ho jaye
-    # to baqi ke paas bacha hota hai - pehle yahan sirf wahi ek model
-    # try hota tha, is liye us ka budget khatam hote hi RAG ke saare
-    # sawal "assistant is currently busy" dene lagte the.
+    # On Groq every model has its own daily budget. When one runs
+    # out the others still have theirs - only that single model was
+    # tried here before, so the moment its budget was gone every RAG
+    # question answered "assistant is currently busy".
     chain = _model_chain(GROQ_MODEL)
 
     for attempt, model_name in enumerate(chain):
 
-        # gpt-oss reasoning models hain - bina is flag ke ye jawab se
-        # kai guna zyada tokens sirf "sochne" par kharch karte hain.
+        # The gpt-oss models are reasoning models - without this flag
+        # they spend many times the answer's tokens just "thinking".
         extra = {}
         if "gpt-oss" in model_name:
             extra["reasoning_effort"] = "low"
@@ -127,17 +127,17 @@ CONTEXT:
                             {"role": "system", "content": system_prompt},
                             {"role": "user",   "content": user_query}
                         ],
-                        # max_tokens sirf hadd nahi - provider itne
-                        # tokens RESERVE kar leta hai aur wo minute ke
-                        # budget se kat jate hain. Yahan 1000 tha
-                        # jabke asli bole gaye jawab 29-182 tokens ke
-                        # the. Ek sawal ~2400 tokens kha jata tha, to
-                        # Groq ki 8000/min hadd mein sirf ~2.6 sawal
-                        # aate the - us ke baad har call throttle hoti
-                        # thi, 15s ka timeout lagta tha, aur user ko
-                        # "assistant is currently busy" milta tha.
-                        # 320 sab se lambe naape gaye jawab se do guna
-                        # hai.
+                        # max_tokens is not just a cap - the provider
+                        # RESERVES that many tokens and they come out
+                        # of the per-minute budget. This was 1000,
+                        # while the answers actually spoken were
+                        # 29-182 tokens. One question consumed ~2400
+                        # tokens, so only ~2.6 questions fit into
+                        # Groq's 8000/min limit - after that every
+                        # call was throttled, hit the 15s timeout,
+                        # and the user got "assistant is currently
+                        # busy". 320 is twice the longest answer
+                        # measured.
                         max_tokens=320,
                         temperature=0.1,
                         **extra
@@ -154,7 +154,7 @@ CONTEXT:
         except Exception as e:
             if _is_rate_limited(e):
                 log.warning(
-                    f"{model_name} ka budget khatam - agla model try kar rahe hain"
+                    f"{model_name} is out of budget - trying the next model"
                 )
                 continue
             log.error(f"Groq error ({model_name}): {e}")

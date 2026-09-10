@@ -33,13 +33,13 @@ async def current_user(
 # =========================================================
 # OPTIONAL AUTH
 #
-# Kuch endpoints dono tarah chalte hain: login ho to account se
-# kaam lein, na ho to guest ki tarah. Support tickets aise hi hain -
-# parent login kar sakta hai, magar jis ka account na ho wo bhi
-# madad maang sake.
+# Some endpoints work both ways: use the account when logged in,
+# behave as a guest otherwise. Support tickets are like that - a
+# parent can log in, but someone without an account must still be
+# able to ask for help.
 #
-# current_user token na hone par 401 phenk deta hai, is liye us se
-# ye kaam nahi hota. Ye wala None lauta deta hai.
+# current_user raises a 401 when there is no token, so it cannot do
+# this job. This one returns None instead.
 # =========================================================
 
 optional_oauth2_scheme = OAuth2PasswordBearer(
@@ -51,7 +51,7 @@ optional_oauth2_scheme = OAuth2PasswordBearer(
 async def optional_current_user(
     token: Annotated[str | None, Depends(optional_oauth2_scheme)]
 ):
-    """Token ho aur sahi ho to user, warna None."""
+    """The user when the token is present and valid, otherwise None."""
 
     if not token:
         return None
@@ -66,8 +66,7 @@ async def optional_current_user(
         )
 
     except HTTPException:
-        # Purana ya kharab token - guest ki tarah aage barhein.
-        # Yahan 401 phenkna theek nahi hoga: guest ke liye ye
-        # endpoint khula hai, aur ek bekaar token us ka raasta
-        # nahi rok sakta.
+        # An expired or malformed token - carry on as a guest.
+        # Raising a 401 here would be wrong: this endpoint is open to
+        # guests, and a useless token must not block that path.
         return None

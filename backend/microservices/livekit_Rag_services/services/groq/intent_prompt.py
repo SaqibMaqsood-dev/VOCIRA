@@ -1,19 +1,19 @@
 """
 Combined router prompt.
 
-Pehle do alag LLM calls hoti thin:
+There used to be two separate LLM calls:
 
     call 1  intent_prompt      (254 lines)  -> ERP_QUERY / RAG_QUERY / ADMIN_HANDOFF
     call 2  erp_services/prompt (810 lines) -> {resource, filters, fields, limit}
 
-Doosri call ka 810-line prompt asal mein sirf DO cheezon ke liye tha:
-resource ka naam, aur (kabhi kabhi) student ka naam. Kyunke:
+The second call's 810-line prompt really only produced TWO things:
+the resource name and (sometimes) the student name. Because:
 
-    fields   -> app poori tarah ignore karta hai (endpoint.py se aate hain)
-    filters  -> sirf student_name nikala jata hai, baqi phenk diya jata hai
+    fields   -> the app ignores them entirely (they come from endpoint.py)
+    filters  -> only student_name is read out, the rest is thrown away
     limit    -> constant
 
-Is liye dono kaam ek hi chhote prompt mein mila diye gaye hain.
+So both jobs were merged into a single small prompt.
 Ek LLM call kam, aur ~5,000 tokens ke bajaye ~400.
 """
 
@@ -90,32 +90,32 @@ User question:
 JSON:"""
 
 
-# Purana naam bhi rakha hua hai taake koi purana import na toote.
+# The old name is kept as well so no existing import breaks.
 INTENT_ROUTER_PROMPT = ROUTER_PROMPT
 
 
 # =========================================================
-# BINA LLM KE ROUTING
+# ROUTING WITHOUT THE LLM
 #
-# ROUTER_PROMPT har sawal par ~812 prompt tokens kharch karta hai.
-# Groq ki hadd tokens-per-MINUTE par hai (free tier 8000), is liye
-# ye seedha ye tay karta hai ke ek minute mein kitne sawal ho sakte
-# hain. Aam sawal saaf pehchane ja sakte hain - un par LLM bulane
-# ki zaroorat nahi.
+# ROUTER_PROMPT spends ~812 prompt tokens on every question. Groq's
+# limit is on tokens-per-MINUTE (8000 on the free tier), so this
+# directly sets how many questions fit into a minute. Common
+# questions can be recognised outright - there is no need to call
+# the LLM for them.
 #
-# Usool: SIRF tab jawab dein jab bilkul yaqeen ho. Zara sa bhi shak
-# ho to None laut ta hai aur LLM faisla karta hai. Ghalat routing
-# ki qeemat (parent ko doosre bache ka data, ya "pata nahi") in
-# tokens se kahin zyada hai.
+# The rule: answer ONLY when it is certain. On the slightest doubt
+# it returns None and the LLM decides. The cost of routing wrongly
+# (another child's data reaching a parent, or an "I don't know") is
+# far higher than these tokens.
 # =========================================================
 
-# "mera/mere bache ka" - is ke baghair sawal aam maloomat ka hai.
-# Lafz poore milte hain, andar se nahi: "our" ko "your" ke andar
-# match nahi hona chahiye.
+# "my / my child's" - without this the question is a general one.
+# Words are matched whole, not inside other words: "our" must not
+# match inside "your".
 _MINE = ("my", "our", "mine", "our's")
 
-# Ye lafz hamesha zaati record ka pata dete hain - "attendance"
-# school ki policy ka sawal nahi hota.
+# These words always point at a personal record - "attendance" is
+# never a question about school policy.
 _ALWAYS_ERP = {
     "attendance": "attendance",
     "marks": "assessment",
@@ -125,8 +125,8 @@ _ALWAYS_ERP = {
     "results": "assessment",
 }
 
-# Ye lafz dono taraf ja sakte hain - "fee structure" (aam) banaam
-# "my fees" (zaati). Sirf "mera/mere" ke sath ERP mante hain.
+# These words can go either way - "fee structure" (general) versus
+# "my fees" (personal). They count as ERP only alongside "my".
 _ERP_IF_MINE = {
     "fee": "fee",
     "fees": "fee",
@@ -145,7 +145,7 @@ _ERP_IF_MINE = {
     "kids": "student",
 }
 
-# Ye hamesha aam maloomat hain - kabhi kisi ek bache ka record nahi
+# These are always general information - never one child's record
 _ALWAYS_RAG = (
     "admission", "policy", "uniform", "fee structure", "syllabus",
     "school timing", "school timings", "school hour", "school hours", "what time does the school",
@@ -153,8 +153,8 @@ _ALWAYS_RAG = (
     "your name", "who are you",
 )
 
-# Sawal ke shuru mein aane wale aam lafz - bara harf hone par bhi
-# ye kisi bache ka naam nahi hote.
+# Ordinary words that open a question - even capitalised, these
+# are not a child's name.
 _NOT_NAMES = {
     "what", "when", "where", "which", "who", "whose", "why", "how",
     "is", "are", "was", "were", "do", "does", "did", "can", "could",
@@ -165,17 +165,17 @@ _NOT_NAMES = {
 
 
 def _has(text: str, phrase: str) -> bool:
-    """Poora lafz mile, kisi lafz ke andar nahi."""
+    """Match a whole word, not a fragment inside another word."""
     return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
 
 
 def _mentions_a_name(user_query: str) -> bool:
     """
-    Kisi bache ka naam liya gaya hai? ("What marks did Alisha get?")
+    Was a child named? ("What marks did Alisha get?")
 
-    Aise sawal LLM ko dene chahiye - wo naam nikaal kar sirf USI
-    bache ka record mangta hai. quick_route sab bachon ka data
-    le aata, jo jawab ko kharab kar deta.
+    Questions like these should go to the LLM - it pulls the name out
+    and asks for THAT child's record only. quick_route would fetch
+    every child's data, which spoils the answer.
     """
     words = user_query.split()
 
@@ -185,7 +185,7 @@ def _mentions_a_name(user_query: str) -> bool:
         if not clean or not clean[0].isupper():
             continue
 
-        # Pehla lafz bara harf hone se naam nahi ban jata
+        # A capitalised first word does not make it a name
         if i == 0:
             continue
 
@@ -201,8 +201,8 @@ def quick_route(user_query: str) -> dict | None:
     """
     Aam sawal bina LLM ke pehchanein.
 
-    Returns router jaisa dict, ya None agar zara sa bhi shak ho -
-    us surat mein caller ROUTER_PROMPT wali LLM call kare.
+    Returns a router-shaped dict, or None on the slightest doubt -
+    in which case the caller should make the ROUTER_PROMPT LLM call.
     """
 
     if not user_query:
@@ -210,7 +210,7 @@ def quick_route(user_query: str) -> dict | None:
 
     text = user_query.lower().strip()
 
-    # Admin handoff nadir aur ahem hai - hamesha LLM decide kare
+    # Admin handoff is rare and consequential - always let the LLM decide
     for word in ("admin", "human", "real person", "staff", "someone",
                  "emergency", "urgent"):
         if _has(text, word):
@@ -222,7 +222,7 @@ def quick_route(user_query: str) -> dict | None:
 
     mine = any(_has(text, m) for m in _MINE)
 
-    # Aam maloomat, magar sirf tab jab "mera" na ho
+    # General information, but only when there is no "my"
     if not mine:
         for phrase in _ALWAYS_RAG:
             if _has(text, phrase):
@@ -233,7 +233,7 @@ def quick_route(user_query: str) -> dict | None:
         if _has(text, phrase):
             return {"intent": "ERP", "resource": resource, "student": ""}
 
-    # Dono taraf ja sakte hain - sirf "mera" ke sath
+    # Can go either way - only counts alongside "my"
     if mine:
         for phrase, resource in _ERP_IF_MINE.items():
             if _has(text, phrase):

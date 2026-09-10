@@ -109,11 +109,11 @@ async def lifespan(app: FastAPI):
     )
 
     print(
-        "🔔 Admin notification consumer started"
+        "Admin notification consumer started"
     )
 
     print(
-        "✅ Application started successfully"
+        "Application started successfully"
     )
 
     try:
@@ -145,7 +145,7 @@ async def lifespan(app: FastAPI):
             await rabbitmq._connection.close()
 
         logging.critical(
-            "🛑 Application shutting down"
+            "Application shutting down"
         )
 
 
@@ -189,7 +189,7 @@ app.include_router(
     prefix="/livekit",
 )
 
-# Admin panel ka apna hissa - har endpoint require_admin ke peeche.
+# The admin panel's own section - every endpoint behind require_admin.
 app.include_router(
     admin_route.router,
     prefix="/livekit",
@@ -200,15 +200,15 @@ app.include_router(
     prefix="/livekit",
 )
 
-# Knowledge base ka intezaam. Pehle ye endpoints thay hi nahi -
-# ingestion ka code sirf dead main.py se bulaya jata tha.
+# Knowledge base management. These endpoints did not exist before -
+# the ingestion code was only called from the dead main.py.
 app.include_router(
     rag_route.router,
     prefix="/livekit",
 )
 
-# Support tickets - ERPNext ke Issue doctype mein jate hain.
-# Support page pehle murda form tha (koi fetch hi nahi tha).
+# Support tickets - these go into ERPNext's Issue doctype.
+# The Support page used to be a dead form (there was no fetch at all).
 app.include_router(
     support_route.router,
     prefix="/livekit",

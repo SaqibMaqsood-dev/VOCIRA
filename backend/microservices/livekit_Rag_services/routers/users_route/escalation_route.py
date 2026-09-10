@@ -62,9 +62,10 @@ async def get_all_escalations(
     limit: int = 10,
     skip: int = 0,
     db: AsyncSession = Depends(get_db),
-    # Pehle yahan sirf `current_user` tha - yaani KOI BHI logged-in
-    # parent saari escalations dekh sakta tha, doosre khandaan ke
-    # sawal bhi. Ye poori list hai, is liye admin-only honi chahiye.
+    # This carried only `current_user` before - meaning ANY
+    # logged-in parent could see every escalation, other families'
+    # questions included. This is the full list, so it has to be
+    # admin-only.
     admin=Depends(require_admin),
 ):
     return await escalation_service.get_all_escalations(

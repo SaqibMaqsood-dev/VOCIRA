@@ -150,7 +150,7 @@ def extract_participant_identity(participant):
 
     except (json.JSONDecodeError, TypeError):
         print(
-            f"⚠️ Invalid metadata from participant "
+            f"Invalid metadata from participant "
             f"{participant.identity}: "
             f"{participant.metadata}"
         )
@@ -180,7 +180,7 @@ def extract_participant_identity(participant):
             except (ValueError, TypeError):
 
                 print(
-                    f"⚠️ Invalid VOCIRA user_id: "
+                    f"Invalid VOCIRA user_id: "
                     f"{raw_user_id}"
                 )
 
@@ -190,15 +190,15 @@ def extract_participant_identity(participant):
 
 
 # =========================================================
-# AGENT KI HAALAT FRONTEND TAK
+# AGENT STATE -> FRONTEND
 #
-# LiveKit ke apne UI components (useVoiceAssistant / BarVisualizer)
-# agent ki haalat "lk.agent.state" attribute se parhte hain. Hum ye
-# haalat pehle se andar track karte thay (_is_agent_speaking) magar
-# kabhi bheji nahi, is liye browser mein visualizer ko pata hi nahi
-# chalta tha ke agent sun raha hai, soch raha hai ya bol raha hai.
+# LiveKit's own UI components (useVoiceAssistant / BarVisualizer)
+# read the agent state from the "lk.agent.state" attribute. We were
+# already tracking that state internally (_is_agent_speaking) but
+# never publishing it, so the visualizer in the browser had no way
+# to tell whether the agent was listening, thinking or speaking.
 #
-# Ye values LiveKit Agents SDK wali hi hain.
+# These are the same values the LiveKit Agents SDK uses.
 # =========================================================
 
 AGENT_STATE_ATTRIBUTE = "lk.agent.state"
@@ -206,10 +206,10 @@ AGENT_STATE_ATTRIBUTE = "lk.agent.state"
 
 async def publish_agent_state(service_handle, state: str) -> None:
     """
-    Agent ki maujooda haalat batayein: listening / thinking / speaking.
+    Publish the agent's current state: listening / thinking / speaking.
 
-    Ye khabar dena hai, kaam nahi - is liye koi bhi nakami sirf
-    likhi jati hai, call rukti nahi.
+    This is a notification, not real work, so any failure is only
+    logged and never interrupts the call.
     """
 
     room = getattr(service_handle, "room", None)
@@ -227,7 +227,7 @@ async def publish_agent_state(service_handle, state: str) -> None:
         service_handle._agent_state = state
 
     except Exception as error:
-        print(f"⚠️ [Agent State] '{state}' could not send: {error}")
+        print(f"[Agent State] '{state}' could not send: {error}")
 
 
 # =========================================================
@@ -236,10 +236,10 @@ async def publish_agent_state(service_handle, state: str) -> None:
 
 async def speak_text(service_handle, audio_source, text: str) -> bool:
     """
-    Agent se koi jumla bulwayein (greeting waghera).
+    Have the agent speak a line of text (a greeting, for example).
 
-    Wahi sentence-streaming aur locking use karta hai jo asli jawab
-    ke liye hoti hai, taake do awaazein aapas mein na takrayein.
+    Uses the same sentence streaming and locking as a real answer,
+    so two voices can never overlap.
     """
 
     sentences = split_sentences(text)
@@ -254,7 +254,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
             timeout=10,
         )
     except asyncio.TimeoutError:
-        print("⚠️ [Speak] Agent track is not ready.")
+        print("[Speak] Agent track is not ready.")
         return False
 
     async with service_handle._tts_lock:
@@ -264,7 +264,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
             and service_handle.room
             and service_handle.room.isconnected()
         ):
-            print("⚠️ [Speak] No room or audio source.")
+            print("[Speak] No room or audio source.")
             return False
 
         sample_rate = 22050
@@ -311,7 +311,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
                             )
                         )
                     except Exception as frame_error:
-                        print(f"⚠️ [Speak] Frame fail: {frame_error}")
+                        print(f"[Speak] Frame fail: {frame_error}")
                         return False
 
         finally:
@@ -319,7 +319,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
             service_handle._agent_speech_ended_at = time.monotonic()
             await publish_agent_state(service_handle, "listening")
 
-    print(f"✅ [Speak] bol diya: {text[:60]}")
+    print(f"[Speak] bol diya: {text[:60]}")
     return True
 
 
@@ -376,32 +376,32 @@ async def consume_audio(
     print("=" * 70)
 
     print(
-        f"👤 Participant Identity : "
+        f"Participant Identity : "
         f"{participant.identity}"
     )
 
     print(
-        f"👤 VOCIRA User ID       : "
+        f"VOCIRA User ID       : "
         f"{user_id}"
     )
 
     print(
-        f"👤 Metadata Role        : "
+        f"Metadata Role        : "
         f"{metadata_role}"
     )
 
     print(
-        f"👤 Metadata Type        : "
+        f"Metadata Type        : "
         f"{metadata_type}"
     )
 
     print(
-        f"📦 Metadata             : "
+        f"Metadata             : "
         f"{metadata}"
     )
 
     print(
-        "🔐 Auth Source          : "
+        "Auth Source          : "
         "Auth Service"
     )
 
@@ -414,7 +414,7 @@ async def consume_audio(
     if not track:
 
         print(
-            "⚠️ No audio track received."
+            "No audio track received."
         )
 
         return
@@ -426,7 +426,7 @@ async def consume_audio(
     except Exception as error:
 
         print(
-            f"❌ Failed to create AudioStream: "
+            f"Failed to create AudioStream: "
             f"{error}"
         )
 
@@ -436,10 +436,10 @@ async def consume_audio(
     # 4. VAD
     # =====================================================
 
-    # Aggressiveness 0-3. 2 par background shor bhi "speech" gina ja
-    # raha tha, jis se har waqt nayi generation banti rehti thi aur
-    # tayyar jawab "stale" ho kar phenk diya jata tha. 3 sab se sakht
-    # filter hai - non-speech ko zyada rad karta hai.
+    # Aggressiveness 0-3. At 2, background noise was being counted
+    # as "speech" too, which kept starting new generations and left
+    # finished answers to go stale and be thrown away. 3 is the
+    # strictest filter - it rejects more non-speech.
     vad = webrtcvad.Vad(3)
 
     audio_buffer = bytearray()
@@ -450,13 +450,14 @@ async def consume_audio(
 
     silence_frames = 0
 
-    # 17 frames x 30ms = ~510ms khamoshi ke baad jumla khatam mana
-    # jata hai. Pehle 25 (750ms) tha - har sawal par chauthai second
-    # khali intezaar hota tha.
+    # 17 frames x 30ms = ~510ms of silence marks the end of an
+    # utterance. This was 25 (750ms) before, which added a quarter
+    # second of dead waiting to every question.
     SILENCE_LIMIT = 17
 
-    # Agent ke bolna khatam karne ke baad itni der aur na sunein -
-    # speaker se nikalti awaaz ki dum warna agla "sawal" ban jati hai.
+    # Keep ignoring the mic for this long after the agent stops
+    # speaking - otherwise the tail of its own audio, coming back
+    # through the speaker, becomes the next "question".
     AGENT_COOLDOWN_SECONDS = 0.6
 
     consecutive_speech_frames = 0
@@ -490,7 +491,7 @@ async def consume_audio(
             ):
 
                 print(
-                    "📞 [Admin Handoff] "
+                    "[Admin Handoff] "
                     "AI audio processing stopped."
                 )
 
@@ -499,16 +500,16 @@ async def consume_audio(
             frame = event.frame
 
             # -------------------------------------------------
-            # AGENT BOL RAHA HAI -> BILKUL NA SUNEIN
+            # AGENT IS SPEAKING -> IGNORE THE MIC ENTIRELY
             #
-            # Jab tak agent apni baat poori na kar le, user ka
-            # audio process hi nahi hota. Pehle barge-in ki
-            # koshish hoti thi, magar mic agent ki apni awaaz
-            # (aur shor) utha kar use beech jumle mein chup kara
-            # deta tha - "kuch bolti phir chup ho jati".
+            # While the agent is still talking, user audio is not
+            # processed at all. Barge-in was tried before, but the
+            # mic picked up the agent's own voice (and noise) and
+            # cut it off mid-sentence - it would say a few words
+            # and then fall silent.
             #
-            # Bolne ke baad thora sa cooldown bhi, taake echo ki
-            # dum agla sawal na ban jaye.
+            # A short cooldown after speaking too, so the tail of
+            # the echo does not become the next question.
             # -------------------------------------------------
 
             if (
@@ -549,7 +550,7 @@ async def consume_audio(
                 )
 
                 print(
-                    f"🎵 Audio initialized: "
+                    f"Audio initialized: "
                     f"sample_rate={sample_rate}, "
                     f"channels={frame.num_channels}"
                 )
@@ -571,7 +572,7 @@ async def consume_audio(
                 ):
 
                     print(
-                        "📞 [Admin Handoff] "
+                        "[Admin Handoff] "
                         "Stopping VAD processing."
                     )
 
@@ -614,18 +615,18 @@ async def consume_audio(
                         is_speaking = True
 
                         print(
-                            f"🎤 [Speech Started] "
+                            f"[Speech Started] "
                             f"{participant.identity}"
                         )
 
-                    # NOTE: Yahan pehle barge-in tha (user agent ko
-                    # tok de to agent chup ho jaye). Wo hata diya
-                    # gaya hai kyunke mic agent ki apni awaaz utha
-                    # kar use beech jumle mein chup kara deta tha.
+                    # NOTE: barge-in used to live here (the agent
+                    # went quiet when the user interrupted). It was
+                    # removed because the mic picked up the agent's
+                    # own voice and cut it off mid-sentence.
                     #
-                    # Ab agent ke bolne ke dauran audio upar hi
-                    # chhor diya jata hai, is liye yahan tak
-                    # pohanchne ka matlab hai agent khamosh hai.
+                    # Audio is now dropped further up while the
+                    # agent is speaking, so reaching this point
+                    # means the agent is silent.
 
                 # =================================================
                 # SILENCE
@@ -635,9 +636,9 @@ async def consume_audio(
 
                     silence_frames += 1
 
-                    # Khamoshi aate hi barge-in ka counter reset -
-                    # warna alag alag waqton ke frames jama ho kar
-                    # jhoota barge-in bana dete hain.
+                    # Reset the barge-in counter as soon as silence
+                    # arrives - otherwise frames from different
+                    # moments add up into a false barge-in.
                     consecutive_speech_frames = 0
 
                     voice_accumulation.extend(
@@ -655,7 +656,7 @@ async def consume_audio(
                         )
 
                         print(
-                            f"🛑 [Speech Finished] "
+                            f"[Speech Finished] "
                             f"Audio bytes: "
                             f"{len(captured_audio)}"
                         )
@@ -697,7 +698,7 @@ async def consume_audio(
 
                         is_speaking = False
 
-                        # Agli utterance dobara barge-in kar sakti hai
+                        # The next utterance may barge in again
                         consecutive_speech_frames = 0
 
                         barge_in_triggered = False
@@ -705,7 +706,7 @@ async def consume_audio(
     except Exception:
 
         print(
-            "❌ Audio Consumer Error:"
+            "Audio Consumer Error:"
         )
 
         traceback.print_exc()
@@ -719,7 +720,7 @@ async def consume_audio(
         except Exception as error:
 
             print(
-                f"⚠️ Failed to close audio stream: "
+                f"Failed to close audio stream: "
                 f"{error}"
             )
 
@@ -798,10 +799,10 @@ async def process_voice_intent(
         user_query = user_query.strip()
 
         print(
-            f"🗣️ [User]: {user_query}"
+            f"[User]: {user_query}"
         )
 
-        # Sawal aa gaya - jawab banne tak "thinking".
+        # A question arrived - "thinking" until the answer is ready.
         await publish_agent_state(service_handle, "thinking")
 
         # =====================================================
@@ -815,7 +816,7 @@ async def process_voice_intent(
         ):
 
             print(
-                "📞 [Admin Handoff] "
+                "[Admin Handoff] "
                 "Ignoring AI processing."
             )
 
@@ -846,7 +847,7 @@ async def process_voice_intent(
                     if attempt > 0:
 
                         print(
-                            f"✅ [Session Check] "
+                            f"[Session Check] "
                             f"Session found after retry "
                             f"{attempt}"
                         )
@@ -858,7 +859,7 @@ async def process_voice_intent(
                     if attempt < retries - 1:
 
                         print(
-                            f"⚠️ [Session Check Failed] "
+                            f"[Session Check Failed] "
                             f"{e} | Retrying..."
                         )
 
@@ -869,7 +870,7 @@ async def process_voice_intent(
                     else:
 
                         print(
-                            f"❌ [Session Check Failed] "
+                            f"[Session Check Failed] "
                             f"{e} | Aborting."
                         )
 
@@ -890,7 +891,7 @@ async def process_voice_intent(
             )
 
             print(
-                "💬 [Message Created]"
+                "[Message Created]"
             )
 
             print(
@@ -899,20 +900,20 @@ async def process_voice_intent(
             )
 
             # =================================================
-            # PEHLE SE MAALOOM JAWAB
+            # AN ANSWER WE ALREADY HAVE
             # =================================================
 
-            # Ek hi sawal dobara poochne par poora kharcha dobara
-            # lagta tha - router, ERP, aur jawab banane wali LLM
-            # call. Cache ki key mein user_id shaamil hai, is liye
-            # ek parent ka jawab kabhi doosre ko nahi milta.
+            # Asking the same question twice used to cost the full
+            # round trip again - router, ERP, and the LLM call that
+            # writes the answer. The cache key includes user_id, so
+            # one parent's answer never reaches another.
 
             cached_answer = answer_cache.get(user_id, user_query)
 
             if cached_answer:
 
                 print(
-                    "⚡ [Cache] yehi sawal abhi poocha gaya tha"
+                    "[Cache] this same question was just asked"
                 )
 
                 ai_response_text = cached_answer
@@ -921,23 +922,23 @@ async def process_voice_intent(
             # INTENT ROUTER
             # =================================================
 
-            # Pehle yahan DO LLM calls hoti thin: ek intent ke liye,
-            # phir ek aur ERP resource chunne ke liye (810-line prompt).
-            # Ab ek hi chhota call dono kaam karta hai.
+            # There used to be TWO LLM calls here: one for intent,
+            # then another to pick the ERP resource (an 810-line
+            # prompt). A single small call now does both jobs.
             #
-            # Us se bhi pehle: aam sawal bilkul saaf hote hain
-            # ("mera fees paid hai?"), un par LLM bulana faltu hai.
-            # ROUTER_PROMPT ~812 tokens ka hai aur Groq ki hadd
-            # tokens-per-MINUTE par lagti hai - yaani har bachaya
-            # hua router call seedha ek aur sawal ki gunjaish deta
-            # hai. quick_route shak hone par None deta hai, tab LLM
-            # chalti hai.
+            # And before that: common questions are unambiguous
+            # ("is my fee paid?"), so calling the LLM for them is
+            # wasted. ROUTER_PROMPT is ~812 tokens and Groq's limit
+            # is on tokens-per-MINUTE - so every router call saved
+            # is directly room for one more question. quick_route
+            # returns None when it is unsure, and the LLM runs
+            # then.
             if cached_answer:
 
-                # Jawab pehle se mojood hai - routing ki zaroorat
-                # hi nahi. Ye intent kisi branch se mel nahi khata,
-                # is liye seedha neeche RAG wali `else` par jata
-                # hai jahan cached jawab utha liya jata hai.
+                # The answer already exists - no routing needed.
+                # This intent matches no branch, so it falls
+                # straight through to the RAG `else` below, where
+                # the cached answer is picked up.
                 route = {"intent": "CACHED"}
 
             else:
@@ -947,7 +948,7 @@ async def process_voice_intent(
             if route is not None and route.get("intent") != "CACHED":
 
                 print(
-                    f"⚡ [Router] bina LLM ke: {route}"
+                    f"[Router] bina LLM ke: {route}"
                 )
 
             elif route is None:
@@ -980,11 +981,11 @@ async def process_voice_intent(
                     if not isinstance(route, dict):
                         raise ValueError("route must be an object")
                 except Exception:
-                    # JSON na bane to RAG par gir jayein - us se
-                    # user ko kam az kam koi jawab to milta hai.
+                    # If the JSON does not parse, fall back to RAG -
+                    # that way the user at least gets an answer.
                     print(
-                        f"⚠️ [Router] JSON parse fail: "
-                        f"{router_raw!r} — RAG par ja rahe hain"
+                        f"[Router] JSON parse fail: "
+                        f"{router_raw!r} — falling back to RAG"
                     )
                     route = {"intent": "RAG"}
 
@@ -996,7 +997,7 @@ async def process_voice_intent(
             erp_student = (route.get("student") or "").strip() or None
 
             print(
-                f"🧭 [Route]: intent={intent} "
+                f"[Route]: intent={intent} "
                 f"resource={erp_resource} student={erp_student}"
             )
 
@@ -1007,7 +1008,7 @@ async def process_voice_intent(
             if ADMIN_HANDOFF_INTENT in intent:
 
                 print(
-                    "📞 [Route]: ADMIN HANDOFF"
+                    "[Route]: ADMIN HANDOFF"
                 )
 
                 # -------------------------------------------------
@@ -1051,7 +1052,7 @@ async def process_voice_intent(
                 )
 
                 print(
-                    "🚨 [Escalation Created]"
+                    "[Escalation Created]"
                 )
 
                 print(
@@ -1100,14 +1101,14 @@ async def process_voice_intent(
                     )
 
                     print(
-                        "🔔 [RabbitMQ] "
+                        "[RabbitMQ] "
                         "Admin handoff published."
                     )
 
                 except Exception as notification_error:
 
                     print(
-                        "⚠️ [RabbitMQ] "
+                        "[RabbitMQ] "
                         "Failed to publish admin handoff."
                     )
 
@@ -1118,15 +1119,14 @@ async def process_voice_intent(
                     traceback.print_exc()
 
                 # -------------------------------------------------
-                # CALLER KO BATAYEIN
+                # TELL THE CALLER
                 #
-                # Ye request_admin_handoff() se PEHLE hona zaroori
-                # hai: wo _admin_handoff_requested laga deta hai,
-                # aur us ke baad TTS ke saare handoff checks
-                # (1456, 1502, 1560) bolna rok dete hain. Pehle
-                # yahan kuch bola hi nahi jata tha - caller ke liye
-                # call bilkul khamosh ho jati thi aur wo samajhta
-                # tha system kharab hai.
+                # This has to happen BEFORE request_admin_handoff():
+                # that sets _admin_handoff_requested, and after it
+                # every handoff check in the TTS path (1456, 1502,
+                # 1560) blocks speech. Nothing was said here at
+                # all before - the call simply went silent and the
+                # caller assumed the system was broken.
                 # -------------------------------------------------
 
                 handoff_text = (
@@ -1171,18 +1171,18 @@ async def process_voice_intent(
             # ERP QUERY
             # =================================================
 
-            # Router ab "ERP" deta hai (pehle "ERP_QUERY" tha).
-            # Resource na mile to ERP ka koi matlab nahi - us soorat
-            # mein RAG par chala jata hai, taake user khali haath na rahe.
+            # The router now returns "ERP" (it was "ERP_QUERY").
+            # Without a resource, ERP is meaningless - in that case
+            # it falls back to RAG so the user is not left empty-handed.
             elif intent == "ERP" and erp_resource:
 
                 print(
-                    "🏫 [Route]: ERP Pipeline"
+                    "[Route]: ERP Pipeline"
                 )
 
-                # Kaun sa hissa fail hua, ye neeche wale except ko
-                # batata hai. "erp" = records tak pahunch nahi saki,
-                # "llm" = data mil gaya tha magar jumla nahi bana.
+                # Tells the except block below which part failed.
+                # "erp" = could not reach the records, "llm" = the
+                # data arrived but no sentence could be built.
                 erp_stage = "erp"
 
                 # =================================================
@@ -1218,7 +1218,7 @@ async def process_voice_intent(
                     if not user_id:
 
                         print(
-                            "🚫 [ERP Auth] "
+                            "[ERP Auth] "
                             "No VOCIRA user_id."
                         )
 
@@ -1233,7 +1233,7 @@ async def process_voice_intent(
                         print("=" * 70)
 
                         print(
-                            "🔎 [ERP AUTHENTICATION]"
+                            "[ERP AUTHENTICATION]"
                         )
 
                         print(
@@ -1266,7 +1266,7 @@ async def process_voice_intent(
                         print("=" * 70)
 
                         print(
-                            "🔎 [AUTH SERVICE RESPONSE]"
+                            "[AUTH SERVICE RESPONSE]"
                         )
 
                         print(
@@ -1293,7 +1293,7 @@ async def process_voice_intent(
                         if not auth_user:
 
                             print(
-                                "🚫 [ERP Auth] "
+                                "[ERP Auth] "
                                 "Auth Service returned no user."
                             )
 
@@ -1308,7 +1308,7 @@ async def process_voice_intent(
                         ):
 
                             print(
-                                "🚫 [ERP Auth] "
+                                "[ERP Auth] "
                                 "Unexpected Auth Service response."
                             )
 
@@ -1330,7 +1330,7 @@ async def process_voice_intent(
                             if str(auth_user_id) != str(user_id):
 
                                 print(
-                                    "🚫 [ERP Auth] "
+                                    "[ERP Auth] "
                                     "Auth Service returned a "
                                     "different user_id."
                                 )
@@ -1361,7 +1361,7 @@ async def process_voice_intent(
                                 print("=" * 70)
 
                                 print(
-                                    "🔐 [AUTHORIZATION CHECK]"
+                                    "[AUTHORIZATION CHECK]"
                                 )
 
                                 print(
@@ -1401,7 +1401,7 @@ async def process_voice_intent(
                                 ):
 
                                     print(
-                                        "🚫 [ERP Auth] "
+                                        "[ERP Auth] "
                                         "User role is not authorized."
                                     )
 
@@ -1413,7 +1413,7 @@ async def process_voice_intent(
                                 else:
 
                                     print(
-                                        "✅ [ERP Auth] "
+                                        "[ERP Auth] "
                                         "User role authorized."
                                     )
 
@@ -1430,7 +1430,7 @@ async def process_voice_intent(
                                     if not erp_parent_id:
 
                                         print(
-                                            "🚫 [ERP Mapping] "
+                                            "[ERP Mapping] "
                                             "No parent_id found."
                                         )
 
@@ -1449,7 +1449,7 @@ async def process_voice_intent(
                                         print("=" * 70)
 
                                         print(
-                                            "🔗 [ERP ACCOUNT MAPPING]"
+                                            "[ERP ACCOUNT MAPPING]"
                                         )
 
                                         print(
@@ -1474,7 +1474,7 @@ async def process_voice_intent(
                                         # =================================================
 
                                         print(
-                                            "🏫 [ERP QUERY]"
+                                            "[ERP QUERY]"
                                         )
 
                                         print(
@@ -1487,9 +1487,9 @@ async def process_voice_intent(
                                             f"{erp_parent_id}"
                                         )
 
-                                        # Resource router ke usi call se
-                                        # mil chuka hai - yahan doosri
-                                        # LLM call ki zaroorat nahi.
+                                        # The resource already came
+                                        # from that same router call -
+                                        # no second LLM call needed.
                                         erp_data = (
                                             await erp_service.fetch(
                                                 resource=erp_resource,
@@ -1499,7 +1499,7 @@ async def process_voice_intent(
                                         )
 
                                         print(
-                                            "🏫 [ERP DATA]"
+                                            "[ERP DATA]"
                                         )
 
                                         print(
@@ -1522,12 +1522,12 @@ async def process_voice_intent(
                                         converter_response = (
                                             await dataConverter(
                                                 prompt=response_prompt,
-                                                # Default 1024 tha. Provider
-                                                # itne tokens RESERVE karta
-                                                # hai aur wo minute ke budget
-                                                # se kat-te hain - jabke naape
-                                                # gaye sab se lambe ERP jawab
-                                                # 574 tokens ke the.
+                                                # The default was 1024. The
+                                                # provider RESERVES that many
+                                                # tokens and they come out of
+                                                # the per-minute budget - while
+                                                # the longest ERP answers
+                                                # measured were 574 tokens.
                                                 max_tokens=640,
                                             )
                                         )
@@ -1541,7 +1541,7 @@ async def process_voice_intent(
                                         )
 
                                         print(
-                                            "🤖 [ERP AI RESPONSE]"
+                                            "[ERP AI RESPONSE]"
                                         )
 
                                         print(
@@ -1550,21 +1550,22 @@ async def process_voice_intent(
 
                 except Exception as erp_error:
 
-                    # Pehle yahan har fail par ek hi jumla jata tha -
-                    # "unable to retrieve your ERP information". Us se
-                    # LLM ka masla bhi ERP ke khate mein chala jata tha:
-                    # jab LLM provider ne credits khatam hone par 402
-                    # diya, caller ko yehi sunai diya, halanke ERP
-                    # bilkul theek chal raha tha aur data mil bhi gaya
-                    # tha. Ab dono halaat alag pehchane jate hain.
+                    # Every failure here used to produce the same
+                    # sentence - "unable to retrieve your ERP
+                    # information" - which blamed ERP for LLM
+                    # problems as well: when the LLM provider
+                    # returned 402 for exhausted credits, that is
+                    # what the caller heard, even though ERP was
+                    # perfectly healthy and the data had arrived.
+                    # The two cases are now told apart.
 
                     stage = erp_stage
 
                     if stage == "llm":
 
                         print(
-                            "❌ [LLM Error] ERP se data mil gaya tha, "
-                            "jawab ka jumla banate waqt fail hua"
+                            "[LLM Error] ERP se data mil gaya tha, "
+                            "failed while composing the answer"
                         )
 
                         ai_response_text = (
@@ -1576,7 +1577,7 @@ async def process_voice_intent(
                     else:
 
                         print(
-                            "❌ [ERP Error] school records tak "
+                            "[ERP Error] school records tak "
                             "pahunch nahi saki"
                         )
 
@@ -1598,12 +1599,12 @@ async def process_voice_intent(
             else:
 
                 print(
-                    "📚 [Route]: RAG Pipeline"
+                    "[Route]: RAG Pipeline"
                 )
 
-                # Cache hit yahin par pahunchta hai - us surat mein
-                # ai_response_text pehle se bhara hua hai aur RAG
-                # chalane ki zaroorat nahi.
+                # A cache hit lands here - in that case
+                # ai_response_text is already filled in and there
+                # is no need to run RAG.
                 if not cached_answer:
 
                     ai_response_text = await ask_vocira(
@@ -1628,7 +1629,7 @@ async def process_voice_intent(
             ):
 
                 print(
-                    "📞 [Admin Handoff] "
+                    "[Admin Handoff] "
                     "Stopping AI response."
                 )
 
@@ -1641,18 +1642,18 @@ async def process_voice_intent(
             if not ai_response_text:
 
                 print(
-                    "⚠️ [AI] Empty response."
+                    "[AI] Empty response."
                 )
 
                 return
 
             print(
-                f"🤖 [AI]: "
+                f"[AI]: "
                 f"{ai_response_text}"
             )
 
-            # Agli baar yehi sawal aaye to dobara kharcha na ho.
-            # put() ghalti wale jawab khud rad kar deta hai.
+            # So the same question costs nothing next time.
+            # put() rejects error answers on its own.
             if not cached_answer:
                 answer_cache.put(
                     user_id=user_id,
@@ -1683,7 +1684,7 @@ async def process_voice_intent(
         ):
 
             print(
-                "📞 [TTS] "
+                "[TTS] "
                 "Admin handoff active."
             )
 
@@ -1693,17 +1694,17 @@ async def process_voice_intent(
         # 13. TTS
         # =====================================================
 
-        # Pehle yahan POORE jawab ka audio banaya jata tha aur tab
-        # aage barha jata tha - CPU par 1.5-2 second ki khamoshi.
-        # Ab sirf jumlon mein toRte hain (ye sasta hai); audio har
-        # jumle ka alag alag, bajne se theek pehle banta hai.
+        # The audio for the WHOLE answer used to be built here
+        # before moving on - 1.5-2 seconds of silence on CPU. Now
+        # only the sentence split happens here (which is cheap);
+        # each sentence's audio is built just before it plays.
         sentences = split_sentences(ai_response_text)
 
         if not sentences:
 
             print(
-                "⚠️ [TTS] "
-                "Bolne ke liye kuch nahi mila."
+                "[TTS] "
+                "Nothing to speak."
             )
 
             return
@@ -1722,7 +1723,7 @@ async def process_voice_intent(
         except asyncio.TimeoutError:
 
             print(
-                "⚠️ [LiveKit Stream] "
+                "[LiveKit Stream] "
                 "Agent track not ready."
             )
 
@@ -1741,26 +1742,27 @@ async def process_voice_intent(
             ):
 
                 print(
-                    "📞 [TTS] "
+                    "[TTS] "
                     "Admin handoff active."
                 )
 
                 return
 
             # -------------------------------------------------
-            # PURANA JAWAB CHHORNA
+            # DROPPING A STALE ANSWER
             #
-            # Pehle yahan `generation != _speech_generation` tha.
-            # Masla: _speech_generation HAR utterance par barhta hai,
-            # chahe agent bol hi na raha ho. Agar user ne doosra
-            # jumla bola (ya mic ne shor uthaya) jab tak pehla jawab
-            # ban raha tha, to tayyar jawab phenk diya jata tha aur
-            # user ko KUCH BHI sunayi nahi deta tha.
+            # This used to be `generation != _speech_generation`.
+            # The problem: _speech_generation goes up on EVERY
+            # utterance, even when the agent is not speaking. If
+            # the user said a second sentence (or the mic picked
+            # up noise) while the first answer was still being
+            # built, the finished answer was thrown away and the
+            # user heard NOTHING at all.
             #
-            # Ab sirf wo jawab chhorte hain jo waqai purana ho -
-            # yaani us se naya jawab pehle hi bola ja chuka ho.
-            # Asli barge-in (agent bol raha ho aur user tok de)
-            # neeche playback loop mein sambhala jata hai.
+            # Now only genuinely stale answers are dropped - ones
+            # where a newer answer has already been spoken. Real
+            # barge-in (the agent speaking and the user cutting
+            # in) is handled in the playback loop below.
             # -------------------------------------------------
 
             if (
@@ -1769,8 +1771,8 @@ async def process_voice_intent(
             ):
 
                 print(
-                    "⏭️ [TTS] "
-                    "Is se naya jawab pehle hi bola ja chuka hai."
+                    "[TTS] "
+                    "A newer answer has already been spoken."
                 )
 
                 return
@@ -1782,7 +1784,7 @@ async def process_voice_intent(
             ):
 
                 print(
-                    "⚠️ [TTS] "
+                    "[TTS] "
                     "Audio source or room unavailable."
                 )
 
@@ -1811,8 +1813,8 @@ async def process_voice_intent(
             service_handle._is_agent_speaking = True
             await publish_agent_state(service_handle, "speaking")
 
-            # Ye jawab bola ja raha hai - is se purane jawab ab
-            # khud-ba-khud rad ho jayenge.
+            # This answer is now being spoken - older ones are
+            # rejected automatically from here on.
             service_handle._last_played_generation = generation
 
             # =================================================
@@ -1821,8 +1823,8 @@ async def process_voice_intent(
 
             try:
 
-                # Agla jumla pichhle ke BAJTE WAQT tayyar hota hai,
-                # is liye jumlon ke darmiyan khamoshi nahi aati.
+                # The next sentence is prepared WHILE the previous
+                # one plays, so there is no gap between sentences.
                 next_audio = asyncio.create_task(
                     asyncio.to_thread(
                         tts_converter,
@@ -1846,7 +1848,7 @@ async def process_voice_intent(
                         continue
 
                     print(
-                        f"🔊 [TTS] jumla {index + 1}/{len(sentences)}"
+                        f"[TTS] jumla {index + 1}/{len(sentences)}"
                     )
 
                     stop_playback = False
@@ -1868,7 +1870,7 @@ async def process_voice_intent(
                         ):
 
                             print(
-                                "📞 [TTS] "
+                                "[TTS] "
                                 "Admin handoff requested."
                             )
 
@@ -1880,11 +1882,11 @@ async def process_voice_intent(
                         # GENERATION
                         # -----------------------------------------
 
-                        # NOTE: Yahan pehle generation check tha jo
-                        # playback ko beech mein kaat deta tha. Ab agent
-                        # ke bolne ke dauran audio sunna hi band hai,
-                        # is liye generation barh hi nahi sakti - aur
-                        # jumla poora bola jata hai.
+                        # NOTE: a generation check here used to cut
+                        # playback off mid-sentence. Audio is no longer
+                        # listened to while the agent speaks, so the
+                        # generation cannot rise - and the sentence is
+                        # spoken in full.
 
                         # -----------------------------------------
                         # ROOM
@@ -1896,7 +1898,7 @@ async def process_voice_intent(
                         ):
 
                             print(
-                                "🛑 [TTS] "
+                                "[TTS] "
                                 "Room disconnected."
                             )
 
@@ -1952,7 +1954,7 @@ async def process_voice_intent(
                         except Exception as frame_error:
 
                             print(
-                                f"⚠️ [TTS] "
+                                f"[TTS] "
                                 f"Frame submission failed: "
                                 f"{frame_error}"
                             )
@@ -1968,8 +1970,8 @@ async def process_voice_intent(
 
                 service_handle._is_agent_speaking = False
 
-                # Cooldown yahin se shuru hota hai - echo ki dum
-                # ko agla sawal banne se rokta hai.
+                # The cooldown starts here - it stops the tail of
+                # the echo from becoming the next question.
                 service_handle._agent_speech_ended_at = (
                     time.monotonic()
                 )
@@ -1977,14 +1979,14 @@ async def process_voice_intent(
                 await publish_agent_state(service_handle, "listening")
 
             print(
-                "✅ [TTS] "
+                "[TTS] "
                 "Audio generation completed."
             )
 
     except Exception:
 
         print(
-            "❌ [Pipeline Error]:"
+            "[Pipeline Error]:"
         )
 
         traceback.print_exc()

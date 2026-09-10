@@ -10,8 +10,8 @@ import { useAdminData, formatTime } from "@/app/admin/useAdminApi";
 
 const statusOptions = ["All", "Resolved", "Escalated"];
 
-// Header ka search ?q= ke sath yahan bhejta hai. useSearchParams
-// Suspense maangta hai, is liye asal page andar hai.
+// The header's search sends here with ?q=. useSearchParams requires
+// Suspense, so the real page lives inside it.
 export default function QueriesPage() {
   return (
     <Suspense fallback={null}>
@@ -111,9 +111,10 @@ function QueriesPageInner() {
             <TH>User</TH>
             <TH>Question</TH>
             <TH>AI Response</TH>
-            {/* Pehle yahan "Confidence" tha jis ki value data.js mein
-                likhi hui thi - backend aisa koi score rakhta hi nahi.
-                Intent asli hai: router har sawal par ye tay karta hai. */}
+            {/* This used to be "Confidence", whose value was written
+                into data.js - the backend keeps no such score at
+                all. Intent is real: the router decides it for every
+                question. */}
             <TH>Route</TH>
             <TH>Status</TH>
             <TH>Timestamp</TH>
@@ -163,10 +164,11 @@ function QueriesPageInner() {
                 {formatTime(q.timestamp)}
               </TD>
               <TD className="whitespace-nowrap text-right">
-                {/* Pehle yahan "Resolve" aur "Escalate" ke button thay
-                    jo kuch karte hi nahi thay - backend mein query ka
-                    koi status badalne wala concept nahi (escalations
-                    ka apna status hai, wo us page par hai). */}
+                {/* There used to be "Resolve" and "Escalate" buttons
+                    here that did nothing - the backend has no
+                    concept of changing a query's status
+                    (escalations have their own status, on that
+                    page). */}
                 <Button
                   variant="ghost"
                   onClick={() => setOpenId(openId === q.id ? null : q.id)}

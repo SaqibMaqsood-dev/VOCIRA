@@ -1,32 +1,32 @@
 "use client";
 
 /**
- * Agent ka asli audio visualizer.
+ * The agent's real audio visualizer.
  *
- * Pehle /assistant par jo daira tha wo sirf framer-motion ka jhoota
- * pulse tha - scale 1 -> 1.08 -> 1, hamesha ek jaisa. Agent bol raha
- * ho ya chup ho, dikhne mein koi farq nahi parta tha.
+ * The circle on /assistant used to be nothing but a fake
+ * framer-motion pulse - scale 1 -> 1.08 -> 1, always identical.
+ * Whether the agent was speaking or silent, it looked the same.
  *
- * Ab LiveKit ke apne components chalte hain (@livekit/components-react):
+ * It now uses LiveKit's own components (@livekit/components-react):
  *
- *   BarVisualizer    asli audio track se lehrein banata hai, aur
- *                    state ke hisab se andaz badalta hai
+ *   BarVisualizer    builds the waveform from the real audio track,
+ *                    and changes style according to the state
  *   useRemoteParticipants / useParticipantTracks / useParticipantAttributes
- *                    agent, us ka mic track, aur us ki haalat
+ *                    the agent, its mic track, and its state
  *
- * AGENT KYUN IDENTITY SE DHOONDA JATA HAI
+ * WHY THE AGENT IS FOUND BY IDENTITY
  *
- * LiveKit ka apna useVoiceAssistant() agent ko ParticipantKind.AGENT
- * se pehchanta hai. Wo kind sirf LiveKit Agents framework ke zariye
- * milta hai - hamara worker apna hai, wo token mein agent=true hone
- * ke bawajood standard kind hi rehta hai (naapa gaya: kind 0, chahiye
- * tha 4). Is liye agent yahan apni identity "agent" se dhoonda jata
- * hai. Visualizer phir bhi LiveKit ka apna hai - sirf track chunne
- * ka tareeqa hamara hai.
+ * LiveKit's own useVoiceAssistant() identifies the agent by
+ * ParticipantKind.AGENT. That kind is only assigned through the
+ * LiveKit Agents framework - our worker is our own, and despite
+ * agent=true in the token it keeps the standard kind (measured:
+ * kind 0, where 4 was needed). So the agent is found here by its
+ * identity, "agent". The visualizer is still LiveKit's own - only
+ * the way the track is selected is ours.
  *
- * Haalat backend se aati hai: voice_pipeline har mor par
- * "lk.agent.state" attribute set karta hai - wahi key jo LiveKit
- * Agents SDK use karta hai.
+ * The state comes from the backend: voice_pipeline sets the
+ * "lk.agent.state" attribute at every turn - the same key the
+ * LiveKit Agents SDK uses.
  */
 
 import {
@@ -37,6 +37,8 @@ import {
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
 import { Mic } from "lucide-react";
+
+import { isAdminParticipant } from "@/lib/handoff";
 
 const AGENT_IDENTITY = "agent";
 const STATE_KEY = "lk.agent.state";
@@ -57,20 +59,47 @@ const STATE_COLOR = {
   failed: "text-red-400",
 };
 
-export default function AgentVisualizer() {
+/**
+ * handoff  null | "requested" | "connected" | "no_answer"
+ *
+ * When a call passes to a person, the AI leaves the room entirely.
+ * After that no participant named "agent" remains here - which is
+ * why the circle used to stay stuck on "Connecting…" forever, even
+ * though the line below it clearly said a person was on the call.
+ *
+ * During a handoff the waveform is now built from the ADMIN's audio,
+ * and the line below is written by the page itself.
+ */
+export default function AgentVisualizer({ handoff = null }) {
   const participants = useRemoteParticipants();
+
   const agent = participants.find((p) => p.identity === AGENT_IDENTITY);
+  const human = participants.find(isAdminParticipant);
+
+  // Once a person has joined, they are the one speaking
+  const speaker = human || agent;
 
   const tracks = useParticipantTracks(
     [Track.Source.Microphone],
-    agent?.identity
+    speaker?.identity
   );
 
-  const { attributes } = useParticipantAttributes({ participant: agent });
+  const { attributes } = useParticipantAttributes({ participant: speaker });
 
   const agentTrack = tracks[0];
-  const state = attributes?.[STATE_KEY] || (agent ? "connecting" : "connecting");
-  const waiting = !agent || !agentTrack;
+
+  // Only the AI publishes "lk.agent.state". For a person the bars
+  // follow their real audio, so "speaking" directly.
+  const state = human
+    ? "speaking"
+    : attributes?.[STATE_KEY] || "connecting";
+
+  const waiting = !speaker || !agentTrack;
+
+  // During a handoff the page states the status itself ("Connecting
+  // you to a human agent…" / "You are speaking with a human agent"),
+  // so do not repeat it here.
+  const label = handoff ? null : STATE_LABEL[state];
 
   return (
     <div className="flex flex-col items-center">
@@ -103,13 +132,13 @@ export default function AgentVisualizer() {
         )}
       </div>
 
-      {STATE_LABEL[state] && (
+      {label && (
         <p
           className={`mt-4 text-sm tracking-wide ${
             STATE_COLOR[state] || "text-text-secondary"
           }`}
         >
-          {STATE_LABEL[state]}
+          {label}
         </p>
       )}
     </div>

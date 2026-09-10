@@ -9,14 +9,30 @@ from livekit import api
 
 from backend.microservices.livekit_Rag_services.core.config import settings
 
-# Ek waqt mein kitni calls. Har call ka apna agent, apna Whisper/TTS
-# kaam - is liye machine ke hisaab se rakhein.
+# How many calls at once. Each call runs its own agent and its own
+# Whisper/TTS work, so size this to the machine.
 MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "3"))
 
-# Is se lambi call khud band ho jayegi. Abandoned calls (tab band kar
-# di, end call nahi dabaya) warna worker ko hamesha ke liye jaam kar
-# deti thin.
+# A call longer than this shuts itself down. Abandoned calls (tab
+# closed without pressing end call) used to jam a worker forever.
 MAX_CALL_SECONDS = int(os.getenv("MAX_CALL_SECONDS", "1800"))
+
+# The RabbitMQ address.
+#
+# This used to be hard-coded: "amqp://guest:guest@localhost/". That
+# works locally, but breaks on Docker/the server for two reasons:
+#
+#   localhost  inside a container this is the container ITSELF, not
+#              RabbitMQ - that lives in a separate container
+#   guest      RabbitMQ only accepts its default 'guest' user from
+#              localhost; a login from another container is refused
+#
+# The default is left as it was, so a local setup keeps working
+# exactly as before.
+RABBITMQ_URL = os.getenv(
+    "RABBITMQ_URL",
+    "amqp://guest:guest@localhost/",
+)
 
 
 class RabbitMQ:
@@ -55,7 +71,7 @@ class RabbitMQ:
         # New queue
         self._admin_notification_queue = None
 
-        # abhi chal rahi calls ke tasks
+        # tasks for the calls currently running
         self._active_calls = set()
 
     # =========================================================
@@ -71,15 +87,14 @@ class RabbitMQ:
         print("[RabbitMQ] Establishing connection to host...")
 
         self._connection = await aio_pika.connect_robust(
-            "amqp://guest:guest@localhost/"
+            RABBITMQ_URL
         )
 
         self._channel = await self._connection.channel()
 
-        # Pehle 1 tha, yaani ek waqt mein sirf EK call. Doosra parent
-        # call kare to qatar mein khara rehta tha. Handler ab har
-        # message ko alag task mein chalata hai, is liye ek se zyada
-        # calls sath chal sakti hain.
+        # This was 1, meaning only ONE call at a time. A second
+        # parent calling in just queued up. The handler now runs each
+        # message in its own task, so several calls can run together.
         await self._channel.set_qos(
             prefetch_count=MAX_CONCURRENT_CALLS
         )
@@ -245,25 +260,26 @@ class RabbitMQ:
         worker_factory,
     ):
         """
-        session.created messages sunein aur har ek ke liye agent bhejein.
+        Listen for session.created messages and dispatch an agent for
+        each one.
 
-        worker_factory ek callable hai jo HAR call ke liye NAYA
-        LivekitRoomServices banata hai.
+        worker_factory is a callable that builds a NEW
+        LivekitRoomServices for EVERY call.
 
-        Pehle yahan ek hi worker instance sab calls ke liye use hota
-        tha. Us object par per-call state hai (room, _speech_generation,
-        _is_agent_speaking, agent_source) - do calls sath chalti to ek
-        doosre ki state kharab kar deti.
+        A single worker instance used to serve all calls. That object
+        holds per-call state (room, _speech_generation,
+        _is_agent_speaking, agent_source) - two concurrent calls would
+        corrupt each other's state.
 
-        Aur handler seedha connect_worker ko await karta tha, jo poori
-        call tak block rehta hai. Ab har message apne task mein chalta
-        hai, is liye consumer agli call foran utha leta hai.
+        The handler also awaited connect_worker directly, which blocks
+        for the whole call. Each message now runs in its own task, so
+        the consumer picks up the next call immediately.
         """
 
         await self.connect()
 
         async def run_call(message, session_id):
-            """Ek call - apna worker, apna task."""
+            """One call - its own worker, its own task."""
             worker = worker_factory()
 
             try:
@@ -274,9 +290,9 @@ class RabbitMQ:
                     user_name="agent",
                 )
 
-                # Abandoned call (user ne tab band kar diya, end call
-                # nahi dabaya) warna worker hamesha ke liye atka rehta
-                # tha - aaj testing mein do baar hua.
+                # An abandoned call (the user closed the tab without
+                # pressing end call) used to leave a worker stuck
+                # forever - it happened twice in testing today.
                 await asyncio.wait_for(
                     worker.connect_worker(
                         token=token,
@@ -286,24 +302,24 @@ class RabbitMQ:
                 )
 
                 await message.ack()
-                print(f"🛑 Session {session_id} completed successfully.")
+                print(f"Session {session_id} completed successfully.")
 
             except asyncio.TimeoutError:
                 print(
-                    f"⏱️ Session {session_id} "
-                    f"{MAX_CALL_SECONDS}s se zyada chali - band kar rahe hain."
+                    f"Session {session_id} "
+                    f"ran longer than {MAX_CALL_SECONDS}s - shutting it down."
                 )
                 try:
                     await worker.cleanup()
                 except Exception as cleanup_error:
-                    print(f"⚠️ Cleanup: {cleanup_error}")
+                    print(f"Cleanup: {cleanup_error}")
 
-                # ack kar rahe hain: dobara koshish ka koi faida nahi,
-                # user ja chuka hai
+                # Acking on purpose: a retry is pointless, the user
+                # is already gone
                 await message.ack()
 
             except Exception as call_error:
-                print(f"❌ [Call Error] {session_id}: {call_error}")
+                print(f"[Call Error] {session_id}: {call_error}")
                 traceback.print_exc()
                 try:
                     await worker.cleanup()
@@ -329,13 +345,13 @@ class RabbitMQ:
                 )
 
                 print(
-                    f"📥 [RabbitMQ] Caught Payload! "
+                    f"[RabbitMQ] Caught Payload! "
                     f"Session ID: {session_id}  "
-                    f"(abhi chal rahi: {len(self._active_calls)})"
+                    f"(currently running: {len(self._active_calls)})"
                 )
 
-                # Alag task - handler foran laut jata hai, is liye
-                # consumer agla message utha sakta hai.
+                # A separate task - the handler returns immediately,
+                # so the consumer can pick up the next message.
                 task = asyncio.create_task(
                     run_call(message, session_id)
                 )

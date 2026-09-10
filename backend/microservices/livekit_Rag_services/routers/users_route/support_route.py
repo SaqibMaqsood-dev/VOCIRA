@@ -1,12 +1,13 @@
 """
-Support tickets - parent form bhare, ERPNext mein Issue bane.
+Support tickets - a parent fills in the form, an Issue appears in
+ERPNext.
 
-Support page pehle ek murda form tha: `type="button"`, koi onClick
-nahi, koi fetch nahi. Likhne aur Submit dabane se kuch nahi hota tha.
+The Support page used to be a dead form: `type="button"`, no onClick,
+no fetch. Typing something and pressing Submit did nothing at all.
 
-Ab ye endpoints us ke peeche hain. Ticket ERPNext ke Issue doctype
-mein banta hai - wahin jahan school ka apna Support module pehle se
-poora UI rakhta hai (localhost:8081/app/issue).
+These endpoints now sit behind it. The ticket is created in ERPNext's
+Issue doctype - where the school's own Support module already
+provides the full UI (localhost:8081/app/issue).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -40,9 +41,9 @@ class TicketRequest(BaseModel):
     subject: str = Field(min_length=3, max_length=140)
     message: str = Field(default="", max_length=5000)
 
-    # Guest ke liye lazmi, logged-in parent ke liye faltu.
-    # Kaun sa haal hai, wo endpoint tay karta hai - schema dono
-    # sooraton mein chalta hai.
+    # Required for a guest, redundant for a logged-in parent.
+    # The endpoint decides which case applies - the schema serves
+    # both.
     email: EmailStr | None = None
 
 
@@ -58,11 +59,11 @@ async def _caller_email(db: AsyncSession, user) -> tuple[str | None, str | None]
     """
     Ticket kis ke naam par bane.
 
-    Token mein username = email hota hai, magar us par akela bharosa
-    nahi karte - DB se tasdeeq karte hain ke ye user waqai mojood hai.
+    In the token username = email, but that alone is not trusted -
+    the DB confirms the user really exists.
 
-    Returns (email, naam) - naam ticket mein bhi jata hai, warna
-    school ko sirf email nazar aata hai.
+    Returns (email, name) - the name goes into the ticket too, or the
+    school sees nothing but an email address.
     """
 
     row = (
@@ -97,13 +98,13 @@ async def create_ticket(
     """
     Ticket banayein - login ke sath ya us ke baghair.
 
-    Login ho    : email account se aata hai
-    Login na ho : email form mein bharna lazmi hai
+    Logged in     : the email comes from the account
+    Not logged in : the email must be filled into the form
 
-    AHEM: logged-in surat mein request ka email JAAN BUJH KAR
-    nazarandaz hota hai. Warna koi bhi apne token ke sath doosre ka
-    email bhej kar us ke naam par ticket khol sakta - aur wo us ki
-    ticket list mein nazar aane lagta.
+    IMPORTANT: when logged in, the email in the request is ignored
+    DELIBERATELY. Otherwise anyone could send someone else's email
+    with their own token and open a ticket in that person's name -
+    and it would then show up in that person's ticket list.
     """
 
     if user is not None:
@@ -131,7 +132,7 @@ async def create_ticket(
         )
 
     except HTTPException:
-        # ERPClient ne pehle se maani-khez ghalti banai hai
+        # ERPClient has already produced a meaningful error
         raise
 
     except ValueError as error:
@@ -147,7 +148,7 @@ async def create_ticket(
         )
 
     print(
-        f"🎫 [Support] ticket bana: {result['ticket_id']}  "
+        f"[Support] ticket bana: {result['ticket_id']}  "
         f"({email}, {'login' if user else 'guest'})"
     )
 
@@ -166,8 +167,8 @@ async def my_tickets(
 ):
     email, _ = await _caller_email(db=db, user=user)
 
-    # Filter service ke andar lagti hai - parent doosre ke tickets
-    # maang hi nahi sakta.
+    # The filter is applied inside the service - a parent cannot
+    # ask for anyone else's tickets.
     return await support_service.list_tickets(
         raised_by=email,
         limit=min(limit, 50),

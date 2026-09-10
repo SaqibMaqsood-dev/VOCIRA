@@ -15,8 +15,8 @@ class RedisServices:
         port: int | None = None,
         decode_responses: bool = True,
     ):
-        # Host/port env se aate hain taake local Redis installs se
-        # takrao na ho. Default wahi purana localhost:6379.
+        # Host/port come from the env so they do not clash with a
+        # local Redis install. The default is the old localhost:6379.
         host = host or os.getenv("REDIS_HOST", "localhost")
         port = int(port or os.getenv("REDIS_PORT", 6379))
 

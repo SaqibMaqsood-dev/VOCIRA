@@ -1,11 +1,11 @@
 """
-Sirf admin ke liye endpoints.
+Endpoints restricted to admins.
 
-Kyun zaroori tha: escalations ki list par pehle sirf `current_user`
-laga hua tha, yaani KOI BHI logged-in parent saari escalations
-dekh sakta tha - doosre khandaan ke sawal bhi. Role ab JWT se
-milta hai (verify_tokken.py), is liye is check par koi DB ka
-chakkar nahi lagta.
+Why this was needed: the escalations list carried only
+`current_user`, meaning ANY logged-in parent could see every
+escalation - including other families' questions. The role now comes
+from the JWT (verify_tokken.py), so this check costs no trip to the
+database.
 """
 
 from typing import Annotated

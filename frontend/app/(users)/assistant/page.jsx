@@ -19,6 +19,67 @@ import { RoomContext } from "@livekit/components-react";
 
 import AgentVisualizer from "@/components/AgentVisualizer";
 
+import {
+  HANDOFF_ATTRIBUTE,
+  isAdminParticipant,
+} from "@/lib/handoff";
+import { getAccessToken } from "@/lib/session";
+
+// ============================================================
+// HUMAN HANDOFF
+//
+// When the user says "I want to speak to a person", the AI sets
+// this attribute on its own participant:
+//
+//     requested  -> an admin has been called and is on the way
+//     connected  -> the admin has joined, the AI is leaving
+//
+// The AI's attributes disappear the moment it leaves the room, so
+// the second - and stronger - proof of "connected" is that the
+// admin is present in the room. Both routes are checked here.
+// ============================================================
+
+const HANDOFF_TEXT = {
+  requested: {
+    text: "Connecting you to a human agent…",
+    className: "text-yellow-400",
+  },
+  connected: {
+    text: "You are speaking with a human agent",
+    className: "text-green-500",
+  },
+  agent_left: {
+    text: "The human agent has ended the call.",
+    className: "text-text-secondary",
+  },
+  no_answer: {
+    text: "No one was free to take the call. The assistant is helping you again.",
+    className: "text-yellow-400",
+  },
+};
+
+/**
+ * Remove the <audio> tags for remote audio.
+ *
+ * They are created hidden on the page (track.attach()). If they are
+ * not removed when the call ends, every call leaves another dead
+ * element behind.
+ */
+function removeAudioElements() {
+  document.querySelectorAll("audio").forEach((audio) => {
+    try {
+      audio.pause();
+      audio.srcObject = null;
+      audio.remove();
+    } catch (error) {
+      console.warn(
+        "Could not remove audio:",
+        error
+      );
+    }
+  });
+}
+
 export default function AssistantPage() {
   const [room, setRoom] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -37,6 +98,42 @@ export default function AssistantPage() {
 
   const [error, setError] = useState(null);
 
+  // null | "requested" | "connected" | "agent_left"
+  const [handoff, setHandoff] =
+    useState(null);
+
+  /*
+   * Why the call ended - this stays on screen AFTER the call has
+   * closed.
+   *
+   * When an admin hung up, the user used to be left sitting there:
+   * "Connecting..." spinning at the top, the long Room and Session
+   * ids listed, and Pause / End Call still present - even though
+   * nobody was in the room any more, neither the AI nor a person.
+   * The call now closes immediately, the screen returns to its
+   * starting state, and this says what happened.
+   */
+  const [endedNotice, setEndedNotice] =
+    useState("");
+
+  /*
+   * Never move backwards.
+   *
+   * "connected" arrives when the admin joins the room. After that
+   * the AI's older "requested" attribute can still turn up again
+   * (an attribute sync, for instance). Showing "Connecting..." at
+   * that point would be wrong - the user is already talking.
+   */
+  const markHandoff = (next) => {
+    setHandoff((current) => {
+      if (current === "agent_left") return current;
+      if (current === "connected" && next === "requested") {
+        return current;
+      }
+      return next;
+    });
+  };
+
   // ============================================================
   // START CALL
   // ============================================================
@@ -53,6 +150,9 @@ export default function AssistantPage() {
     setIsConnecting(true);
     setError(null);
 
+    // Nayi call - pichhli call ka natija ab bemani hai
+    setEndedNotice("");
+
     try {
       // ========================================================
       // 1. API BASE URL
@@ -67,7 +167,7 @@ export default function AssistantPage() {
       );
 
       console.log(
-        "🌐 API BASE URL:",
+        "API BASE URL:",
         API_BASE_URL
       );
 
@@ -75,11 +175,10 @@ export default function AssistantPage() {
       // 2. GET AUTH TOKEN
       // ========================================================
 
-      const accessToken =
-        localStorage.getItem("access_token");
+      const accessToken = getAccessToken();
 
       console.log(
-        "🔐 Access token exists:",
+        "Access token exists:",
         Boolean(accessToken)
       );
 
@@ -97,7 +196,7 @@ export default function AssistantPage() {
           `${API_BASE_URL}/livekit/live_kit/token`;
 
         console.log(
-          "👨‍👩‍👧 Using authenticated LiveKit endpoint:"
+          "Using authenticated LiveKit endpoint:"
         );
 
       } else {
@@ -105,12 +204,12 @@ export default function AssistantPage() {
           `${API_BASE_URL}/livekit/guest/live_kit/token`;
 
         console.log(
-          "👤 Using guest LiveKit endpoint:"
+          "Using guest LiveKit endpoint:"
         );
       }
 
       console.log(
-        "📡 TOKEN ENDPOINT:",
+        "TOKEN ENDPOINT:",
         tokenEndpoint
       );
 
@@ -129,7 +228,7 @@ export default function AssistantPage() {
       }
 
       console.log(
-        "📋 Request headers:",
+        "Request headers:",
         {
           Accept: headers.Accept,
           Authorization:
@@ -144,7 +243,7 @@ export default function AssistantPage() {
       // ========================================================
 
       console.log(
-        "📡 Requesting LiveKit token..."
+        "Requesting LiveKit token..."
       );
 
       const tokenResponse =
@@ -162,12 +261,12 @@ export default function AssistantPage() {
       // ========================================================
 
       console.log(
-        "📥 HTTP STATUS:",
+        "HTTP STATUS:",
         tokenResponse.status
       );
 
       console.log(
-        "📥 HTTP OK:",
+        "HTTP OK:",
         tokenResponse.ok
       );
 
@@ -183,7 +282,7 @@ export default function AssistantPage() {
       );
 
       console.log(
-        "📦 RAW BACKEND RESPONSE:"
+        "RAW BACKEND RESPONSE:"
       );
 
       console.log(
@@ -244,7 +343,7 @@ ${rawResponse}`
           JSON.parse(rawResponse);
       } catch (parseError) {
         console.error(
-          "❌ Backend did not return valid JSON."
+          "Backend did not return valid JSON."
         );
 
         throw new Error(
@@ -256,12 +355,12 @@ ${rawResponse}`
       }
 
       console.log(
-        "🎫 PARSED BACKEND RESPONSE:",
+        "PARSED BACKEND RESPONSE:",
         data
       );
 
       console.log(
-        "🎫 Response keys:",
+        "Response keys:",
         Object.keys(data || {})
       );
 
@@ -299,7 +398,7 @@ ${rawResponse}`
           : "";
 
       console.log(
-        "🔎 Extracted values:"
+        "Extracted values:"
       );
 
       console.log(
@@ -338,7 +437,7 @@ ${rawResponse}`
 
       if (!livekitToken) {
         console.error(
-          "❌ BACKEND TOKEN MISSING"
+          "BACKEND TOKEN MISSING"
         );
 
         console.error(
@@ -418,22 +517,22 @@ ${JSON.stringify(
       );
 
       console.log(
-        "🆔 SESSION ID:",
+        "SESSION ID:",
         backendSessionId
       );
 
       console.log(
-        "🏠 ROOM:",
+        "ROOM:",
         roomName
       );
 
       console.log(
-        "🔗 LIVEKIT URL:",
+        "LIVEKIT URL:",
         livekitUrl
       );
 
       console.log(
-        "👤 SESSION TYPE:",
+        "SESSION TYPE:",
         isAuthenticated
           ? "AUTHENTICATED PARENT"
           : "GUEST"
@@ -445,11 +544,11 @@ ${JSON.stringify(
 
       const livekitRoom =
         new Room({
-          // Echo cancellation lazmi hai. Iske baghair speaker se
-          // nikalti agent ki apni awaaz wapis mic mein aati hai,
-          // backend use "user bol raha hai" samajh kar barge-in
-          // kar deta hai, aur agent beech jumle mein chup ho jata
-          // hai. Noise suppression background shor rokta hai.
+          // Echo cancellation is essential. Without it the agent's
+          // own voice comes back out of the speaker and into the
+          // mic, the backend reads that as "the user is speaking"
+          // and barges in, and the agent falls silent mid-sentence.
+          // Noise suppression keeps background noise out.
           audioCaptureDefaults: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -465,9 +564,54 @@ ${JSON.stringify(
         RoomEvent.ParticipantConnected,
         (participant) => {
           console.log(
-            "👤 Participant joined:",
+            "Participant joined:",
             participant.identity
           );
+
+          // The admin joining the room is the strongest signal
+          // that a person is now on the line.
+          if (isAdminParticipant(participant)) {
+            console.log(
+              "A human agent joined the call."
+            );
+
+            markHandoff("connected");
+          }
+
+          const state =
+            participant.attributes?.[
+              HANDOFF_ATTRIBUTE
+            ];
+
+          if (state) {
+            markHandoff(state);
+          }
+        }
+      );
+
+      // ========================================================
+      // 17b. HANDOFF ATTRIBUTE
+      // ========================================================
+
+      livekitRoom.on(
+        RoomEvent.ParticipantAttributesChanged,
+        (
+          changed,
+          participant
+        ) => {
+          const state =
+            changed?.[HANDOFF_ATTRIBUTE];
+
+          if (!state) return;
+
+          console.log(
+            "Handoff state:",
+            state,
+            "from",
+            participant.identity
+          );
+
+          markHandoff(state);
         }
       );
 
@@ -479,9 +623,31 @@ ${JSON.stringify(
         RoomEvent.ParticipantDisconnected,
         (participant) => {
           console.log(
-            "🚪 Participant left:",
+            "Participant left:",
             participant.identity
           );
+
+          // The admin hung up. The AI does not come back - it left
+          // the room at handoff. So the room is now completely
+          // empty; there is no point keeping it open. Close the
+          // call at once and put the reason on screen.
+          if (isAdminParticipant(participant)) {
+            console.log(
+              "The human agent left the call."
+            );
+
+            setHandoff("agent_left");
+
+            setEndedNotice(
+              "The staff member ended the call."
+            );
+
+            livekitRoom
+              .disconnect()
+              .catch(() => {
+                /* pehle hi nikal chuke */
+              });
+          }
         }
       );
 
@@ -496,7 +662,7 @@ ${JSON.stringify(
           participant
         ) => {
           console.log(
-            "📡 Track published:",
+            "Track published:",
             publication.kind,
             publication.trackName,
             participant.identity
@@ -516,7 +682,7 @@ ${JSON.stringify(
           participant
         ) => {
           console.log(
-            "🎧 Track subscribed:",
+            "Track subscribed:",
             track.kind,
             participant.identity
           );
@@ -529,7 +695,7 @@ ${JSON.stringify(
           }
 
           console.log(
-            "🔊 Agent audio received from:",
+            "Agent audio received from:",
             participant.identity
           );
 
@@ -555,12 +721,12 @@ ${JSON.stringify(
             .play()
             .then(() => {
               console.log(
-                "🔊 Agent voice is playing."
+                "Agent voice is playing."
               );
             })
             .catch((audioError) => {
               console.error(
-                "❌ Could not play remote audio:",
+                "Could not play remote audio:",
                 audioError
               );
             });
@@ -579,7 +745,7 @@ ${JSON.stringify(
           participant
         ) => {
           console.log(
-            "🔇 Track unsubscribed:",
+            "Track unsubscribed:",
             track.kind,
             participant.identity
           );
@@ -608,13 +774,26 @@ ${JSON.stringify(
         RoomEvent.Disconnected,
         (reason) => {
           console.log(
-            "🚪 LiveKit disconnected:",
+            "LiveKit disconnected:",
             reason
           );
 
+          // The audio elements go too - otherwise dead <audio> tags
+          // pile up on the page.
+          removeAudioElements();
+
           setRoom(null);
+          setSessionId(null);
           setIsConnected(false);
           setIsPaused(false);
+          setHandoff(null);
+
+          // Whatever ended the call - server, network or admin -
+          // the user must at least know that it is over.
+          setEndedNotice(
+            (current) =>
+              current || "The call has ended."
+          );
         }
       );
 
@@ -623,16 +802,16 @@ ${JSON.stringify(
       // ========================================================
 
       console.log(
-        "🔌 Connecting to LiveKit..."
+        "Connecting to LiveKit..."
       );
 
       console.log(
-        "🔗 URL:",
+        "URL:",
         livekitUrl
       );
 
       console.log(
-        "🎫 Token length:",
+        "Token length:",
         livekitToken.length
       );
 
@@ -642,8 +821,27 @@ ${JSON.stringify(
       );
 
       console.log(
-        "✅ Connected to LiveKit room:",
+        "Connected to LiveKit room:",
         livekitRoom.name
+      );
+
+      // Check whoever is already inside as well - events only fire
+      // for what happens after we join.
+      livekitRoom.remoteParticipants.forEach(
+        (participant) => {
+          if (isAdminParticipant(participant)) {
+            markHandoff("connected");
+          }
+
+          const state =
+            participant.attributes?.[
+              HANDOFF_ATTRIBUTE
+            ];
+
+          if (state) {
+            markHandoff(state);
+          }
+        }
       );
 
       // ========================================================
@@ -655,7 +853,7 @@ ${JSON.stringify(
       );
 
       console.log(
-        "🎤 Microphone enabled."
+        "Microphone enabled."
       );
 
       // ========================================================
@@ -679,7 +877,7 @@ ${JSON.stringify(
       );
 
       console.log(
-        "✅ VOICE CALL CONNECTED"
+        "VOICE CALL CONNECTED"
       );
 
       console.log(
@@ -692,7 +890,7 @@ ${JSON.stringify(
       );
 
       console.error(
-        "❌ ERROR CONNECTING TO LIVEKIT"
+        "ERROR CONNECTING TO LIVEKIT"
       );
 
       console.error(
@@ -738,7 +936,7 @@ ${JSON.stringify(
           setIsPaused(false);
 
           console.log(
-            "🎤 Microphone resumed."
+            "Microphone resumed."
           );
         } else {
           await room.localParticipant.setMicrophoneEnabled(
@@ -748,13 +946,13 @@ ${JSON.stringify(
           setIsPaused(true);
 
           console.log(
-            "⏸️ Microphone paused."
+            "Microphone paused."
           );
         }
 
       } catch (err) {
         console.error(
-          "❌ Error changing microphone state:",
+          "Error changing microphone state:",
           err
         );
 
@@ -784,7 +982,7 @@ ${JSON.stringify(
 
       try {
         console.log(
-          "📞 Ending call..."
+          "Ending call..."
         );
 
         // ------------------------------------------------------
@@ -797,12 +995,12 @@ ${JSON.stringify(
           );
 
           console.log(
-            "🎤 Microphone disabled."
+            "Microphone disabled."
           );
 
         } catch (micError) {
           console.warn(
-            "⚠️ Could not disable microphone:",
+            "Could not disable microphone:",
             micError
           );
         }
@@ -812,38 +1010,20 @@ ${JSON.stringify(
         // ------------------------------------------------------
 
         console.log(
-          "🔌 Disconnecting frontend from LiveKit..."
+          "Disconnecting frontend from LiveKit..."
         );
 
         await room.disconnect();
 
         console.log(
-          "🚪 Frontend disconnected."
+          "Frontend disconnected."
         );
 
         // ------------------------------------------------------
         // Remove audio elements
         // ------------------------------------------------------
 
-        const audioElements =
-          document.querySelectorAll(
-            "audio"
-          );
-
-        audioElements.forEach(
-          (audio) => {
-            try {
-              audio.pause();
-              audio.srcObject = null;
-              audio.remove();
-            } catch (audioError) {
-              console.warn(
-                "⚠️ Could not remove audio:",
-                audioError
-              );
-            }
-          }
-        );
+        removeAudioElements();
 
         // ------------------------------------------------------
         // Reset state
@@ -853,14 +1033,19 @@ ${JSON.stringify(
         setSessionId(null);
         setIsConnected(false);
         setIsPaused(false);
+        setHandoff(null);
+
+        setEndedNotice(
+          "You ended the call."
+        );
 
         console.log(
-          "✅ Call ended successfully."
+          "Call ended successfully."
         );
 
       } catch (err) {
         console.error(
-          "❌ Error ending call:",
+          "Error ending call:",
           err
         );
 
@@ -915,15 +1100,16 @@ ${JSON.stringify(
           {/* ================================================== */}
 
           {/*
-            Call chal rahi ho to LiveKit ka apna visualizer - wo agent
-            ki ASLI awaaz par chalta hai. Room pehle se yahan bani hui
-            hai, is liye sirf RoomContext se neeche pahunchani hai;
-            useVoiceAssistant() wahin se agent aur us ka track uthata
-            hai.
+            While a call is running, LiveKit's own visualizer - it
+            moves to the agent's REAL audio. The room already exists
+            here, so it only has to be passed down through
+            RoomContext; useVoiceAssistant() picks the agent and its
+            track up from there.
 
-            Pehle yahan har haal mein ek framer-motion pulse chalta tha
-            (scale 1 -> 1.08 -> 1). Wo audio se juda hua nahi tha - agent
-            bol raha ho ya chup ho, daira bilkul ek jaisa dikhta tha.
+            A framer-motion pulse used to run here unconditionally
+            (scale 1 -> 1.08 -> 1). It was not tied to the audio at
+            all - the circle looked exactly the same whether the
+            agent was speaking or silent.
           */}
           {isConnected && room ? (
 
@@ -932,7 +1118,9 @@ ${JSON.stringify(
               className="assistant-speaker-float relative mt-10"
             >
               <RoomContext.Provider value={room}>
-                <AgentVisualizer />
+                <AgentVisualizer
+                  handoff={handoff}
+                />
               </RoomContext.Provider>
             </div>
 
@@ -981,6 +1169,32 @@ ${JSON.stringify(
           )}
 
           {/* ================================================== */}
+          {/* CALL KHATAM                                        */}
+          {/* ================================================== */}
+
+          {/*
+            The call has ended. The screen is back to its starting
+            state - the mic circle, no Pause/End Call, no Room or
+            Session id. Just this one line saying what happened, and
+            the mic can be pressed again.
+          */}
+          {!isConnected &&
+            !isConnecting &&
+            endedNotice && (
+              <div className="mt-5 flex flex-col items-center gap-1">
+
+                <p className="text-sm text-text-secondary">
+                  {endedNotice}
+                </p>
+
+                <p className="text-xs text-text-secondary/70">
+                  Tap the microphone to start a new call.
+                </p>
+
+              </div>
+            )}
+
+          {/* ================================================== */}
           {/* CONNECTED */}
           {/* ================================================== */}
 
@@ -988,17 +1202,37 @@ ${JSON.stringify(
             room && (
               <div className="mt-5">
 
-                <p
-                  className={
-                    isPaused
-                      ? "text-yellow-400"
-                      : "text-green-500"
-                  }
-                >
-                  {isPaused
-                    ? "Voice assistant paused"
-                    : "Connected to voice assistant"}
-                </p>
+                {/*
+                  The state has to be visible during a handoff. The
+                  AI has gone quiet and the admin has not arrived
+                  yet - with nothing on screen the user assumes the
+                  call has dropped and hangs up.
+                */}
+                {HANDOFF_TEXT[handoff] ? (
+                  <p
+                    className={
+                      HANDOFF_TEXT[handoff]
+                        .className
+                    }
+                  >
+                    {
+                      HANDOFF_TEXT[handoff]
+                        .text
+                    }
+                  </p>
+                ) : (
+                  <p
+                    className={
+                      isPaused
+                        ? "text-yellow-400"
+                        : "text-green-500"
+                    }
+                  >
+                    {isPaused
+                      ? "Voice assistant paused"
+                      : "Connected to voice assistant"}
+                  </p>
+                )}
 
                 <p className="mt-1 text-sm text-text-secondary">
                   Room: {room.name}

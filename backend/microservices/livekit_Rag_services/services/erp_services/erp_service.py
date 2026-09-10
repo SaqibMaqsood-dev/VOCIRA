@@ -5,7 +5,7 @@ from .prompt import build_erp_prompt
 from .endpoint import ERP_RESOURCES
 from .compact import compact_records
 
-# Voice assistant ke liye is se zyada records ka koi faida nahi.
+# More records than this are of no use to a voice assistant.
 DEFAULT_LIMIT = 20
 
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
@@ -28,16 +28,17 @@ class ERPService:
         erp_parent_id: str,
     ):
         """
-        Sawal se resource nikal kar data laayein (LLM ke zariye).
+        Work out the resource from the question and fetch the data
+        (through the LLM).
 
-        Voice pipeline ab ye NAHI use karta - wo router ke ek hi call
-        mein resource bhi le leta hai aur seedha fetch() bulata hai.
-        Ye raasta tests aur kisi bhi aise caller ke liye rakha hua hai
-        jiske paas sirf sawal ho.
+        The voice pipeline no longer uses this - it gets the resource
+        from the same router call and invokes fetch() directly. This
+        path is kept for tests, and for any caller that has only the
+        question.
         """
 
         print("=" * 70)
-        print("🏫 [ERP SERVICE]  (LLM planner path)")
+        print("[ERP SERVICE]  (LLM planner path)")
         print(f"User Query   : {user_query}")
         print(f"ERP Parent ID: {erp_parent_id}")
         print("=" * 70)
@@ -64,7 +65,7 @@ class ERPService:
         try:
             decision = json.loads(llm_response)
         except json.JSONDecodeError as exc:
-            print("❌ [ERP JSON ERROR]", repr(llm_response))
+            print("[ERP JSON ERROR]", repr(llm_response))
             raise ValueError(
                 "LLM returned invalid ERP query JSON"
             ) from exc
@@ -72,7 +73,7 @@ class ERPService:
         if not isinstance(decision, dict):
             raise ValueError("ERP query plan must be a JSON object")
 
-        print("🧠 [ERP QUERY PLAN]", decision)
+        print("[ERP QUERY PLAN]", decision)
 
         return await self.fetch(
             resource=decision.get("resource"),
@@ -93,15 +94,15 @@ class ERPService:
         student_name: str | None = None,
     ):
         """
-        Diye gaye resource ka data laayein.
+        Fetch the data for the given resource.
 
-        Authorization poori tarah yahin hoti hai - caller (chahe LLM ho
-        ya router) sirf ye batata hai KYA chahiye. KIS KA milega, wo
-        hamesha erp_parent_id se tay hota hai.
+        Authorization happens entirely here - the caller (whether the
+        LLM or the router) only says WHAT is wanted. WHOSE data comes
+        back is always decided by erp_parent_id.
         """
 
         print("=" * 70)
-        print("🏫 [ERP FETCH]")
+        print("[ERP FETCH]")
         print(f"Resource     : {resource}")
         print(f"Student      : {student_name or '(sab)'}")
         print(f"ERP Parent ID: {erp_parent_id}")
@@ -121,8 +122,8 @@ class ERPService:
         endpoint = resource_config["endpoint"]
         authorization = resource_config["authorization"]
 
-        # Filters sirf application banati hai. Caller ke bheje hue
-        # filters par kabhi bharosa nahi kiya jata.
+        # Filters are built by the application alone. Filters sent by
+        # the caller are never trusted.
         filters: list = []
 
         # ======================================================
@@ -177,7 +178,7 @@ class ERPService:
             ]
 
             print("=" * 70)
-            print("🔐 [AUTHORIZED STUDENT IDS]")
+            print("[AUTHORIZED STUDENT IDS]")
             print(
                 f"Guardian   : {erp_parent_id}"
             )
@@ -192,16 +193,16 @@ class ERPService:
             # Check whether LLM provided student_name
             # --------------------------------------------------
 
-            # NOTE: student_name ab fetch() ke parameter se aata hai.
-            # Pehle yahan filters se nikala jata tha - ab filters
-            # hamesha khali hoti hain, to wo parameter ko None kar deta.
+            # NOTE: student_name now arrives as a fetch() parameter.
+            # It used to be read out of the filters here - filters are
+            # always empty now, so that would set the parameter to None.
 
             resolved_student_ids = student_ids
 
             if student_name:
 
                 print("=" * 70)
-                print("🔎 [STUDENT NAME RESOLUTION]")
+                print("[STUDENT NAME RESOLUTION]")
                 print(
                     f"Requested Name: {student_name}"
                 )
@@ -222,22 +223,22 @@ class ERPService:
 
                 if not resolved_student_ids:
 
-                    # Is naam ka koi bachcha is parent ke record mein
-                    # nahi. Do wajahein ho sakti hain: naam waqai un ka
-                    # nahi, ya STT ne bola hua naam ghalat suna.
+                    # No child by this name in this parent's record.
+                    # There are two possible reasons: the name really
+                    # is not theirs, or STT misheard the spoken name.
                     #
-                    # Pehle yahan ValueError uthta tha aur parent ko
-                    # "school records tak pahunch nahi saki" sunai deta -
-                    # halanke records bilkul theek chal rahe hote, aur
-                    # "dobara koshish karein" kehna bekaar tha kyunke
-                    # nateeja hamesha wahi rehta.
+                    # A ValueError used to be raised here and the
+                    # parent heard "could not reach the school
+                    # records" - even though the records were
+                    # perfectly healthy, and "please try again" was
+                    # useless because the result never changed.
                     #
-                    # Dono sooraton ka jawab ek hi rakha hai, is liye
-                    # is se ye bhi zahir nahi hota ke bachcha mojood
-                    # hai magar kisi aur ka hai.
+                    # Both cases give the same answer on purpose, so
+                    # it also does not reveal that the child exists
+                    # but belongs to someone else.
                     print(
-                        f"⚠️ [ERP] '{student_name}' is parent ke "
-                        "bachon mein nahi mila"
+                        f"[ERP] '{student_name}' is parent ke "
+                        "not found among the children"
                     )
 
                     return {
@@ -284,9 +285,10 @@ class ERPService:
                 )
             )
 
-            # Kuch doctypes (misal Student Group) mein student ka link
-            # child table mein hota hai. Un ke liye Frappe ka 4-element
-            # filter chahiye: [child_doctype, field, operator, value]
+            # In some doctypes (Student Group, for example) the link
+            # to the student lives in a child table. Those need
+            # Frappe's 4-element filter: [child_doctype, field,
+            # operator, value]
             student_filter_doctype = (
                 resource_config.get(
                     "student_filter_doctype"
@@ -325,13 +327,13 @@ class ERPService:
             # =================================================
             # CLASS-BASED RESOURCES
             #
-            # Timetable aur upcoming exams student ke saath nahi,
-            # us ki CLASS ke saath jure hote hain. Is liye:
+            # Timetables and upcoming exams are attached to the
+            # student's CLASS, not to the student. Hence:
             #
-            #   guardian -> uske students -> un ki classes -> filter
+            #   guardian -> their students -> their classes -> filter
             #
-            # Authorization ab bhi application ke haath mein hai:
-            # sirf wahi classes jin mein guardian ke apne bachay hain.
+            # Authorization still rests with the application: only
+            # the classes the guardian's own children are in.
             # =================================================
 
             parent_students = (
@@ -353,11 +355,11 @@ class ERPService:
                 and student.get("name")
             ]
 
-            # Agar user ne kisi khaas bachay ka naam liya hai to
-            # sirf usi ki class tak mehdood karein.
-            # NOTE: student_name ab fetch() ke parameter se aata hai.
-            # Pehle yahan filters se nikala jata tha - ab filters
-            # hamesha khali hoti hain, to wo parameter ko None kar deta.
+            # If the user named a particular child, narrow this
+            # down to that child's class only.
+            # NOTE: student_name now arrives as a fetch() parameter.
+            # It used to be read out of the filters here - filters are
+            # always empty now, so that would set the parameter to None.
 
             resolved_student_ids = student_ids
 
@@ -372,22 +374,22 @@ class ERPService:
 
                 if not resolved_student_ids:
 
-                    # Is naam ka koi bachcha is parent ke record mein
-                    # nahi. Do wajahein ho sakti hain: naam waqai un ka
-                    # nahi, ya STT ne bola hua naam ghalat suna.
+                    # No child by this name in this parent's record.
+                    # There are two possible reasons: the name really
+                    # is not theirs, or STT misheard the spoken name.
                     #
-                    # Pehle yahan ValueError uthta tha aur parent ko
-                    # "school records tak pahunch nahi saki" sunai deta -
-                    # halanke records bilkul theek chal rahe hote, aur
-                    # "dobara koshish karein" kehna bekaar tha kyunke
-                    # nateeja hamesha wahi rehta.
+                    # A ValueError used to be raised here and the
+                    # parent heard "could not reach the school
+                    # records" - even though the records were
+                    # perfectly healthy, and "please try again" was
+                    # useless because the result never changed.
                     #
-                    # Dono sooraton ka jawab ek hi rakha hai, is liye
-                    # is se ye bhi zahir nahi hota ke bachcha mojood
-                    # hai magar kisi aur ka hai.
+                    # Both cases give the same answer on purpose, so
+                    # it also does not reveal that the child exists
+                    # but belongs to someone else.
                     print(
-                        f"⚠️ [ERP] '{student_name}' is parent ke "
-                        "bachon mein nahi mila"
+                        f"[ERP] '{student_name}' is parent ke "
+                        "not found among the children"
                     )
 
                     return {
@@ -422,20 +424,20 @@ class ERPService:
 
             if not student_groups:
 
-                # Bachcha kisi class (Student Group) mein daala hi
-                # nahi gaya - ye school ke record ka adhoorapan hai,
-                # koi ghalti nahi.
+                # The child has not been placed in any class
+                # (Student Group) - that is an incomplete school
+                # record, not an error.
                 #
-                # Pehle yahan ValueError uthta tha, jo call ko todh
-                # deta: parent ko "kuch gadbad ho gayi" milta, halanke
-                # sahi jawab ye hai ke "abhi class set nahi hui".
+                # A ValueError used to be raised here, which broke
+                # the call: the parent got "something went wrong",
+                # when the right answer is "no class is set yet".
                 #
-                # Khali data usi shakl mein lauta dete hain jaisi baqi
-                # khali natijon ki hoti hai, taake aage ka amal use
-                # aam khali jawab ki tarah sambhal le.
+                # Empty data is returned in the same shape as any
+                # other empty result, so the rest of the flow can
+                # treat it like an ordinary empty answer.
                 print(
-                    f"⚠️ [ERP] {student_name or 'student'} kisi class "
-                    "mein nahi hai - schedule khali lauta rahe hain"
+                    f"[ERP] {student_name or 'student'} kisi class "
+                    "is in no class - returning an empty schedule"
                 )
 
                 return {
@@ -487,9 +489,9 @@ class ERPService:
         # ======================================================
 
         # ------------------------------------------------------
-        # Fields hamesha endpoint.py se aate hain, kisi caller se
-        # nahi. LLM field ke naam bana leta tha ("attendance_date",
-        # "subject", "score") jin par Frappe HTTP 417 deta hai.
+        # Fields always come from endpoint.py, never from a caller.
+        # The LLM used to invent field names ("attendance_date",
+        # "subject", "score") that make Frappe return HTTP 417.
         # ------------------------------------------------------
 
         fields = resource_config.get(
@@ -507,7 +509,7 @@ class ERPService:
         # 11. LIMIT
         # ======================================================
 
-        # Voice jawab ke liye 20 records kaafi se zyada hain.
+        # For a spoken answer, 20 records is more than enough.
         limit = DEFAULT_LIMIT
 
         limit = min(
@@ -524,7 +526,7 @@ class ERPService:
         # ======================================================
 
         print("=" * 70)
-        print("🏫 [ERP REQUEST]")
+        print("[ERP REQUEST]")
         print(
             f"Resource            : {resource}"
         )
@@ -569,7 +571,7 @@ class ERPService:
         # ======================================================
 
         print("=" * 70)
-        print("🏫 [ERP LIST RESPONSE]")
+        print("[ERP LIST RESPONSE]")
         print(data)
         print("=" * 70)
 
@@ -590,10 +592,10 @@ class ERPService:
         # ======================================================
 
         # ------------------------------------------------------
-        # Jawab banane wale LLM ke liye context.
+        # Context for the LLM that writes the answer.
         #
-        # Sirf raw records dene se wo aksar samajh nahi pata ke
-        # "Class 5" ka record dar-asal us bachay ki class hai.
+        # Given only the raw records, it often fails to work out
+        # that a "Class 5" record is in fact that child's class.
         # ------------------------------------------------------
 
         if isinstance(data, dict):
@@ -606,7 +608,7 @@ class ERPService:
             )
 
         print("=" * 70)
-        print("🏫 [FINAL ERP DATA]")
+        print("[FINAL ERP DATA]")
         print(data)
         print("=" * 70)
 
@@ -681,7 +683,7 @@ class ERPService:
         }
 
         print("=" * 70)
-        print("🔎 [RESOLVE STUDENT NAME]")
+        print("[RESOLVE STUDENT NAME]")
         print(
             f"Requested Name: {student_name}"
         )
@@ -770,7 +772,7 @@ class ERPService:
                 )
 
         print("=" * 70)
-        print("🔎 [STUDENT NAME RESULT]")
+        print("[STUDENT NAME RESULT]")
         print(
             f"Requested Name : {student_name}"
         )
@@ -832,7 +834,7 @@ class ERPService:
 
             print("=" * 70)
             print(
-                "📚 [PROGRAM ENROLLMENT]"
+                "[PROGRAM ENROLLMENT]"
             )
             print(
                 "No program enrollments found."
@@ -862,7 +864,7 @@ class ERPService:
             if not enrollment_id:
 
                 print(
-                    "⚠️ Program Enrollment "
+                    "Program Enrollment "
                     "record has no name."
                 )
 
@@ -882,7 +884,7 @@ class ERPService:
 
             print("=" * 70)
             print(
-                "📚 [PROGRAM ENROLLMENT DETAIL]"
+                "[PROGRAM ENROLLMENT DETAIL]"
             )
             print(
                 f"Enrollment ID: {enrollment_id}"
@@ -905,7 +907,7 @@ class ERPService:
 
                 print("=" * 70)
                 print(
-                    "❌ [PROGRAM ENROLLMENT DETAIL ERROR]"
+                    "[PROGRAM ENROLLMENT DETAIL ERROR]"
                 )
                 print(
                     f"Enrollment ID: {enrollment_id}"
@@ -931,7 +933,7 @@ class ERPService:
                 dict,
             ):
                 print(
-                    "⚠️ Program Enrollment "
+                    "Program Enrollment "
                     "detail response invalid."
                 )
 
@@ -961,7 +963,7 @@ class ERPService:
 
             print("=" * 70)
             print(
-                "📚 [COURSES FOUND]"
+                "[COURSES FOUND]"
             )
             print(
                 f"Enrollment : {enrollment_id}"
@@ -1024,7 +1026,7 @@ class ERPService:
         }
 
         print("=" * 70)
-        print("🔍 [ERP STUDENT LOOKUP]")
+        print("[ERP STUDENT LOOKUP]")
         print(
             f"Guardian: {erp_parent_id}"
         )
@@ -1053,7 +1055,7 @@ class ERPService:
 
         print("=" * 70)
         print(
-            "👨‍👩‍👧 [PARENT STUDENTS]"
+            "[PARENT STUDENTS]"
         )
         print(
             f"Guardian     : {erp_parent_id}"
@@ -1077,11 +1079,11 @@ class ERPService:
         student_ids: list[str],
     ) -> list[str]:
         """
-        Diye gaye students kis kis class (Student Group) mein hain.
+        Which classes (Student Groups) the given students are in.
 
-        Timetable aur upcoming exams class ke saath jure hote hain,
-        student ke saath nahi. Ye sirf un hi students ki classes
-        deta hai jo pehle se authorize ho chuke hain.
+        Timetables and upcoming exams are attached to the class,
+        not to the student. This returns classes only for students
+        that have already been authorized.
         """
 
         if not student_ids:
@@ -1113,7 +1115,7 @@ class ERPService:
         }
 
         print("=" * 70)
-        print("🏫 [STUDENT GROUP LOOKUP]")
+        print("[STUDENT GROUP LOOKUP]")
         print(
             f"Students: {student_ids}"
         )
@@ -1137,7 +1139,7 @@ class ERPService:
                 "ERP Student Group response is invalid"
             )
 
-        # Ek hi class mein kai bachay ho sakte hain - duplicates hata dein
+        # Several children can share a class - drop the duplicates
         group_names = sorted(
             {
                 group["name"]
@@ -1148,7 +1150,7 @@ class ERPService:
         )
 
         print("=" * 70)
-        print("🏫 [AUTHORIZED CLASSES]")
+        print("[AUTHORIZED CLASSES]")
         print(
             f"Classes: {group_names}"
         )

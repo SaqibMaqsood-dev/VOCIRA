@@ -51,7 +51,7 @@ class SessionRepository(
         await db.refresh(new_session)
 
         print(
-            f"🆕 [SessionRepository] "
+            f"[SessionRepository] "
             f"Session created: {new_session.id} | "
             f"user_id={user_id}"
         )
@@ -70,7 +70,7 @@ class SessionRepository(
         skip: int = 0,
     ):
         print(
-            f"🔎 [SessionRepository] "
+            f"[SessionRepository] "
             f"Fetching sessions for user_id={user_id}"
         )
 
@@ -91,7 +91,7 @@ class SessionRepository(
         sessions = result.scalars().all()
 
         print(
-            f"📦 [SessionRepository] "
+            f"[SessionRepository] "
             f"Found {len(sessions)} sessions for user_id={user_id}"
         )
 
@@ -102,39 +102,6 @@ class SessionRepository(
             )
 
         return sessions
-
-    # =========================================================
-    # GET ALL SESSIONS
-    # =========================================================
-
-    async def get_all_sessions(
-        self,
-        db: AsyncSession,
-        limit: int = 10,
-        skip: int = 0,
-    ):
-        """
-        Return all sessions.
-
-        IMPORTANT:
-        This method must ONLY be exposed to admins/internal
-        services.
-
-        A normal parent must NEVER call this endpoint.
-        """
-
-        stmt = (
-            select(session_model.Session)
-            .order_by(
-                session_model.Session.start_at.desc()
-            )
-            .offset(skip)
-            .limit(limit)
-        )
-
-        result = await db.execute(stmt)
-
-        return result.scalars().all()
 
     # =========================================================
     # COUNT USER SESSIONS
@@ -296,7 +263,7 @@ class SessionRepository(
         if not session:
 
             print(
-                f"⚠️ [Session Cleanup] "
+                f"[Session Cleanup] "
                 f"No session found: {session_id}"
             )
 
@@ -312,7 +279,7 @@ class SessionRepository(
         ):
 
             print(
-                f"ℹ️ [Session Cleanup] "
+                f"[Session Cleanup] "
                 f"Already closed: {session_id}"
             )
 
@@ -337,7 +304,7 @@ class SessionRepository(
         await db.refresh(session)
 
         print(
-            f"🔒 [Session Cleanup] "
+            f"[Session Cleanup] "
             f"Session closed successfully: {session_id}"
         )
 

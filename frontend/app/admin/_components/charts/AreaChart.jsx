@@ -1,21 +1,20 @@
 "use client";
 
 /**
- * Waqt ke sath ek series - line + halka area fill.
+ * One series over time - a line with a soft area fill.
  *
- * Pehle yahan divs ka bar chart tha: na koi axis, na grid, na koi
- * tareeqa ye jaanne ka ke kis din kitne sawal aaye (sirf title
- * attribute par hover). Rujhan dekhna hi maqsad hai, aur us ke liye
- * line/area sahi shakl hai - bars magnitude ka muqabla karne ke liye
- * hote hain.
+ * This used to be a bar chart made of divs: no axes, no grid, and no
+ * way to tell how many questions came on a given day (only a hover
+ * title attribute). The point is to read a trend, and a line/area is
+ * the right form for that - bars are for comparing magnitudes.
  *
- * Ek hi series hai, is liye koi legend nahi - title hi bata deta hai
- * ke ye kya hai.
+ * There is a single series, so there is no legend - the title says
+ * what this is.
  *
  * Mark specs:
  *   line          2px, round join/cap
- *   end dot       r >= 4, surface ke rang ka 2px ring
- *   gridlines     1px solid, halke - kabhi dashed nahi
+ *   end dot       r >= 4, 2px ring in the surface colour
+ *   gridlines     1px solid, faint - never dashed
  */
 
 import { motion, useReducedMotion } from "framer-motion";
@@ -35,12 +34,12 @@ export default function AreaChart({
 }) {
   const [hover, setHover] = useState(null);
 
-  // Jis ne system mein animation kam karne ka kaha ho, us ke liye
-  // chart foran poora bana hua aaye - harkat sajawat hai, khabar
-  // nahi.
+  // For anyone who asked the system for reduced motion, the chart
+  // arrives fully drawn - the movement is decoration, not
+  // information.
   const still = useReducedMotion();
 
-  const W = 640; // viewBox ki chaurai - SVG khud responsive hai
+  const W = 640; // viewBox width - the SVG itself is responsive
   const H = height;
 
   const plotW = W - PAD.left - PAD.right;
@@ -140,9 +139,9 @@ export default function AreaChart({
             </g>
           ))}
 
-          {/* Area line ke peeche se ubharta hai - pehle lakeer
-              khinchti hai, phir bharav aata hai. Origin plot ke
-              neeche rakha hai taake wo baseline se upar uthe. */}
+          {/* The area rises from behind the line - the stroke draws
+              first, then the fill arrives. The origin sits at the
+              bottom of the plot so it grows up from the baseline. */}
           <motion.path
             d={areaPath}
             fill="url(#area-fill)"
@@ -152,9 +151,9 @@ export default function AreaChart({
             style={{ transformOrigin: `50% ${plotH}px` }}
           />
 
-          {/* pathLength framer-motion ka apna intezaam hai -
-              stroke-dasharray khud sambhal leta hai, hamein path
-              ki lambai naapni nahi parti. */}
+          {/* pathLength is framer-motion's own mechanism - it
+              handles stroke-dasharray itself, so we never have to
+              measure the path's length. */}
           <motion.path
             d={linePath}
             fill="none"
@@ -208,7 +207,7 @@ export default function AreaChart({
         </g>
       </svg>
 
-      {/* tooltip - text apne token pehnta hai, series ka rang nahi */}
+      {/* tooltip - the text wears its own token, not the series colour */}
       {hover && (
         <div
           className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg border border-white/10 bg-[#0b0a2a]/95 px-3 py-2 shadow-xl backdrop-blur"

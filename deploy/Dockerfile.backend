@@ -1,0 +1,95 @@
+# =============================================================
+# VOCIRA backend - the gateway, the livekit_Rag service, and the
+# agent worker
+#
+# All three run from one image, because all three need exactly the
+# same Python environment (locally the gateway also ran from
+# livekit_Rag_services' venv). One image = built once, on disk once,
+# three different commands.
+#
+# WORKDIR /app is REQUIRED - Piper's path to its model is written
+# relative in the code:
+#   backend/microservices/livekit_Rag_services/audio_models/...
+# Running from any other directory gives a FileNotFoundError.
+# =============================================================
+
+FROM python:3.12-slim
+
+# uv - the same tool used locally (start-vocira.ps1)
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+# ffmpeg + libsndfile: librosa (a top-level import in sst_whisper.py)
+#   crashes during audio resampling without them
+# build-essential: so packages like numba/llvmlite can build from
+#   source when no prebuilt wheel exists for ARM
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        build-essential \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# The user is created first and all the work is done as them.
+#
+# A `chown -R /app` at the end would make Docker write the whole venv
+# (several GB) again into a new layer - roughly doubling the image
+# size. So ownership is set correctly from the start.
+RUN useradd --create-home --uid 10001 vocira \
+    && mkdir -p /app \
+    && chown vocira:vocira /app
+
+WORKDIR /app
+USER vocira
+
+# -------------------------------------------------------------
+# Dependencies first, source afterwards.
+#
+# Docker caches every step. Keeping the source separate means a code
+# change rebuilds only the last layer - all the packages are not
+# reinstalled (which takes a very long time on ARM).
+# -------------------------------------------------------------
+
+COPY --chown=vocira:vocira \
+     backend/microservices/livekit_Rag_services/pyproject.toml \
+     backend/microservices/livekit_Rag_services/uv.lock \
+     /app/
+
+RUN uv sync --frozen --no-dev --no-install-project
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    VIRTUAL_ENV="/app/.venv"
+
+# -------------------------------------------------------------
+# Piper's voice model
+#
+# .onnx files are in .gitignore (63 MB), so they are not in the repo
+# - they are downloaded at build time. The same file that sits in
+# audio_models/ locally.
+# -------------------------------------------------------------
+
+ARG PIPER_VOICE=en_US-lessac-medium
+ARG PIPER_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium
+
+RUN mkdir -p /app/backend/microservices/livekit_Rag_services/audio_models \
+    && curl -fsSL "${PIPER_BASE}/${PIPER_VOICE}.onnx" \
+         -o "/app/backend/microservices/livekit_Rag_services/audio_models/${PIPER_VOICE}.onnx" \
+    && curl -fsSL "${PIPER_BASE}/${PIPER_VOICE}.onnx.json" \
+         -o "/app/backend/microservices/livekit_Rag_services/audio_models/${PIPER_VOICE}.onnx.json"
+
+# -------------------------------------------------------------
+# Source
+# -------------------------------------------------------------
+
+COPY --chown=vocira:vocira backend /app/backend
+
+# Each service gives its own command in docker-compose.prod.yml.
+# This default exists only so the image can be run on its own.
+CMD ["uvicorn", "backend.microservices.livekit_Rag_services.main.main:app", \
+     "--host", "0.0.0.0", "--port", "8001"]

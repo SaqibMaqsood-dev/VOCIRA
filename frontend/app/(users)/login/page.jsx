@@ -4,22 +4,24 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 
+import { clearSession, saveSession } from "@/lib/session";
+
 /**
- * JWT ke andar se role padhein.
+ * Read the role out of the JWT.
  *
- * Ye sirf raasta chunne ke liye hai (admin -> /admin, warna
- * /dashboard). Asli rok backend par hai: require_admin parent ke
- * token par 403 deta hai. Is liye yahan signature jaanchna zaroori
- * nahi - aur bina library ke ho bhi nahi sakta.
+ * This only picks a destination (admin -> /admin, otherwise
+ * /dashboard). The real gate is on the backend: require_admin
+ * returns 403 for a parent's token. So the signature does not need
+ * checking here - and could not be, without a library.
  *
- * Token kharab ho to null - us surat mein /dashboard chala jata hai.
+ * A malformed token gives null, and that goes to /dashboard.
  */
 function readRoleFromToken(token) {
   try {
     const part = token.split(".")[1];
     if (!part) return null;
 
-    // JWT base64url use karta hai; atob base64 chahta hai
+    // JWT uses base64url; atob expects base64
     const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
 
@@ -146,44 +148,20 @@ export default function LoginPage() {
       }
 
       /*
-       * Save access token
+       * Save the session.
+       *
+       * The refresh token matters now: the backend returns one, and
+       * authFetch uses it to renew the access token when it expires.
+       * Login used to store whatever came back, but nothing ever
+       * came back and nothing ever renewed, so a session simply
+       * ended after ACCESS_TOKEN_EXPIRE_MINUTES.
+       *
+       * The whole response used to be written to "auth_response" as
+       * well. Nothing read it, and it put a second copy of the
+       * refresh token in localStorage - so it is no longer stored.
        */
 
-      localStorage.setItem(
-        "access_token",
-        data.access_token
-      );
-
-      /*
-       * Save refresh token
-       */
-
-      if (data.refresh_token) {
-        localStorage.setItem(
-          "refresh_token",
-          data.refresh_token
-        );
-      }
-
-      /*
-       * Save token type
-       */
-
-      if (data.token_type) {
-        localStorage.setItem(
-          "token_type",
-          data.token_type
-        );
-      }
-
-      /*
-       * Save complete authentication response
-       */
-
-      localStorage.setItem(
-        "auth_response",
-        JSON.stringify(data)
-      );
+      saveSession(data);
 
       /*
        * Notify other frontend components
@@ -195,12 +173,12 @@ export default function LoginPage() {
       );
 
       /*
-       * Login successful - role ke hisab se bhejein.
+       * Login succeeded - route by role.
        *
-       * Role JWT ke andar hota hai. Yahan use sirf raasta chunne ke
-       * liye padha jata hai - asli rok backend par lagti hai
-       * (require_admin, jo parent ke token par 403 deta hai). Is
-       * liye token ki signature yahan jaanchne ki zaroorat nahi.
+       * The role lives inside the JWT. It is read here only to pick
+       * a destination - the real gate is on the backend
+       * (require_admin, which returns 403 for a parent's token). So
+       * the token's signature does not need verifying here.
        */
 
       const role = readRoleFromToken(data.access_token);
@@ -240,11 +218,7 @@ export default function LoginPage() {
    */
 
   const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("token_type");
-    localStorage.removeItem("auth_response");
-    localStorage.removeItem("role");
+    clearSession();
 
     /*
      * Notify navbar/components that the user logged out.
@@ -396,10 +370,11 @@ export default function LoginPage() {
                 </div>
               )}
 
-              {/* Login button - AuthForm.jsx wale style se match karta hai:
-                  glass surface + dono taraf accent glow. Pehle ye
-                  bg-accent-secondary (halka cyan) par white text tha,
-                  jis ka contrast kamzor tha aur baqi app se mel nahi khata tha. */}
+              {/* Login button - matches the style in AuthForm.jsx:
+                  a glass surface with an accent glow on both sides.
+                  This used to be white text on bg-accent-secondary
+                  (pale cyan), which had weak contrast and did not
+                  match the rest of the app. */}
               <motion.button
                 type="submit"
                 disabled={loading}
@@ -421,17 +396,17 @@ export default function LoginPage() {
             </form>
 
             {/*
-              Self-signup jaan bujh kar nahi hai.
+              Self-signup is deliberately absent.
 
-              Parent ka account ERPNext ke Guardian record se juRa
-              hota hai (parent_id). Wo ID school banati hai - parent
-              na use jaanta hai, na sabit kar sakta hai. Khud banaya
-              hua account ya to bekaar hota (koi bachcha nahi milta),
-              ya - agar parent_id likhne di jaye - doosre khandaan ka
-              data khol deta.
+              A parent's account is tied to an ERPNext Guardian
+              record (parent_id). The school creates that ID - a
+              parent neither knows it nor can prove it. A
+              self-created account would either be useless (it
+              reaches no child) or - if parent_id could be typed in -
+              would open another family's data.
 
-              Is liye account school deti hai. Ye link /signup par
-              jata tha jo mojood hi nahi (404).
+              So the school issues the account. This link used to
+              point at /signup, which does not exist (404).
             */}
             <div className="mt-6 text-center text-sm text-text-secondary">
               Need an account? Please contact the school office.

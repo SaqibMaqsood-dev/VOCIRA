@@ -1,34 +1,34 @@
 """
-ERP records ko LLM ke liye sikorna - BINA maloomat khoye.
+Shrinking ERP records for the LLM - WITHOUT losing information.
 
-Kyun: Groq ki hadd tokens-per-MINUTE par hai, is liye prompt ka har
-token seedha ye tay karta hai ke ek minute mein kitne sawal ho sakte
-hain. Attendance sab se mehnga tha - 20 records, aur har record mein
-student_name / student_group / andaroni IDs dohraye hue:
+Why: Groq's limit is on tokens-per-MINUTE, so every token in the
+prompt directly sets how many questions fit into a minute. Attendance
+was the most expensive - 20 records, each repeating student_name /
+student_group / internal IDs:
 
     {"name":"EDU-ATT-2026-00001","student":"EDU-STU-2026-00013",
      "student_name":"Muhammad Ali","date":"2026-08-10",
      "status":"Present","student_group":"Class 5"}
     ... x20
 
-Ye SUMMARY nahi hai. Har tareekh aur har status ab bhi mojood hai -
-bas ek baar likha jata hai, dohra kar nahi. Is liye "kitne din hazir
-raha" aur "kis din ghair-hazir tha" dono ka jawab ban sakta hai.
+This is not a SUMMARY. Every date and every status is still there -
+just written once instead of repeated. So both "how many days were
+they present" and "which day were they absent" can still be answered.
 
-Sath hi jawab sunne mein behtar hota hai: pehle LLM 20 tareekhein ek
-ek kar ke padhta tha ("present on July first, July second, July
-third..."), ab ginti bolta hai.
+It also sounds better: the LLM used to read all 20 dates out one by
+one ("present on July first, July second, July third..."), and now
+gives a count.
 """
 
 from collections import defaultdict
 
 
-# Andaroni IDs - sunane ke qabil nahi aur har record mein hote hain
+# Internal IDs - not worth speaking aloud, and present in every record
 _DROP = ("name", "student")
 
 
 def _who(row: dict) -> str:
-    """Record kis ke baare mein hai."""
+    """Who the record is about."""
     return (
         row.get("student_name")
         or row.get("customer")
@@ -38,7 +38,7 @@ def _who(row: dict) -> str:
 
 
 def _compact_attendance(rows: list) -> list:
-    """Har bache ka ek entry - ginti + tareekhein status ke hisab se."""
+    """One entry per child - a count, plus the dates grouped by status."""
 
     by_student = defaultdict(list)
 
@@ -78,21 +78,19 @@ def _compact_attendance(rows: list) -> list:
         if all_dates:
             entry["period"] = f"{all_dates[0]} to {all_dates[-1]}"
 
-        # ginti pehle - LLM ko yehi bolna chahiye
+        # the count first - this is what the LLM should say
         for status, dates in sorted(dates_by_status.items()):
             entry[f"{status.lower()}_days"] = len(dates)
 
-        # Tareekhein sirf UN statuses ki jo aam nahi hain.
+        # Dates only for the statuses that are NOT the common one.
         #
-        # Aam tor par bacha hazir hota hai, to 9 "present" tareekhein
-        # likhna sirf jagah kharab karta hai - aur LLM unhein ek ek
-        # kar ke padh deta tha ("July first, July second, July
-        # third..."). Ghair-hazri wali tareekhein wo hain jo parent
-        # asal mein poochta hai.
+        # A child is usually present, so listing 9 "present" dates
+        # only wastes room - and the LLM read them out one by one
+        # ("July first, July second, July third..."). The absent
+        # dates are the ones a parent actually asks about.
         #
-        # Maloomat phir bhi poori hai: jo din yahan nahi likha, wo
-        # sab se aam status ka din hai - neeche "note" ye keh deta
-        # hai.
+        # No information is lost: any day not listed here is a day
+        # with the most common status - the "note" below says so.
         common = max(dates_by_status, key=lambda s: len(dates_by_status[s]))
 
         for status, dates in sorted(dates_by_status.items()):
@@ -111,8 +109,8 @@ def _compact_attendance(rows: list) -> list:
 
 def _group_by_student(rows: list, repeated: tuple) -> list:
     """
-    Har bache ka ek entry; jo fields sab records mein ek jaise hain
-    wo upar ek baar, baqi neeche list mein.
+    One entry per child; fields that are identical across all the
+    records appear once at the top, the rest go in the list below.
     """
 
     by_student = defaultdict(list)
@@ -126,7 +124,7 @@ def _group_by_student(rows: list, repeated: tuple) -> list:
 
         entry = {"student_name": student}
 
-        # jo field har record mein ek hi value rakhta hai, wo upar
+        # a field holding one value across every record moves up
         for field in repeated:
             values = {r.get(field) for r in records if r.get(field)}
             if len(values) == 1:
@@ -153,10 +151,10 @@ def _group_by_student(rows: list, repeated: tuple) -> list:
 
 def compact_records(resource: str, data: dict) -> dict:
     """
-    ERP jawab ko LLM ke liye chhota karein.
+    Shrink an ERP response for the LLM.
 
-    Kuch samajh na aaye to data jaisa hai waisa hi wapis - ye kabhi
-    raaste ka rukawat nahi banna chahiye.
+    If anything is unclear, the data comes back untouched - this
+    should never stand in the way.
     """
 
     try:
@@ -184,5 +182,5 @@ def compact_records(resource: str, data: dict) -> dict:
         return {**data, "data": rows}
 
     except Exception as error:
-        print(f"⚠️ [ERP Compact] chhoR diya: {error}")
+        print(f"[ERP Compact] chhoR diya: {error}")
         return data

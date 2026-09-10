@@ -67,8 +67,8 @@ async def get_my_sessions(
     skip: int = 0,
 ):
     print("======================================")
-    print("🔐 CURRENT USER:", current_user)
-    print("🆔 CURRENT USER ID:", current_user.user_id)
+    print("CURRENT USER:", current_user)
+    print("CURRENT USER ID:", current_user.user_id)
     print("======================================")
 
     sessions = await ss_service.get_user_sessions(
@@ -78,7 +78,7 @@ async def get_my_sessions(
         skip=skip,
     )
 
-    print("📦 SESSIONS RETURNED:", len(sessions))
+    print("SESSIONS RETURNED:", len(sessions))
 
     return sessions
 

@@ -1,25 +1,24 @@
 """
-Parents ke accounts sambhalne ke liye - admin panel ke waaste.
+Managing parent accounts - for the admin panel.
 
-Kyun zaroori tha:
+Why this was needed:
 
-VOCIRA ke apne accounts (muhmmadahmed763@edu.com waghera) Postgres mein hain,
-ERPNext mein nahi. Aur unhein dekhne ya badalne ka KOI raasta nahi
-tha - na admin panel mein koi page, na password badalne ka endpoint,
-na "forgot password". Har cheez ke liye psql ya koi script chalani
-parti thi.
+VOCIRA's own accounts (muhmmadahmed763@edu.com and the like) live in
+Postgres, not in ERPNext. And there was NO way to see or change them
+- no page in the admin panel, no endpoint to change a password, no
+"forgot password". Everything meant reaching for psql or a script.
 
-Ye router us kami ko poora karta hai.
+This router fills that gap.
 
-Ye AUTH service mein kyun hai, livekit mein nahi:
+Why it sits in the AUTH service rather than livekit:
 
-Password hashing pwdlib + argon2 se hoti hai, aur wo sirf auth
-service ke venv mein mojood hai (livekit ke venv mein import hi
-fail ho jata hai). Us se hat kar bhi, users ka ghar auth service
-hi hai - unhein wahin se sambhalna theek hai.
+Password hashing uses pwdlib + argon2, which only exists in the auth
+service's venv (the import fails outright in livekit's venv). Beyond
+that, the auth service is where users live - managing them from there
+is the right place.
 
-Gateway /auth/{path} ko is service par bhejta hai, is liye panel
-ke liye raasta /auth/admin/users banta hai.
+The gateway forwards /auth/{path} to this service, so the panel's
+route becomes /auth/admin/users.
 """
 
 import uuid
@@ -56,16 +55,16 @@ class UserCreate(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     password: str = Field(min_length=MIN_PASSWORD, max_length=128)
 
-    # ERPNext ka Guardian record (EDU-GRD-...). Is ke baghair account
-    # ban to jayega magar us ko koi bachcha nahi milega.
+    # The ERPNext Guardian record (EDU-GRD-...). Without it the
+    # account is still created, but it reaches no child.
     parent_id: Optional[str] = Field(default=None, max_length=100)
     role: str = Field(default="guardian")
 
 
 class UserUpdate(BaseModel):
-    # Email badalna login badalna hai - purani se andar aana band ho
-    # jata hai. Ye jaan bujh kar mumkin rakha hai: parent ka pata
-    # badal sakta hai, ya ERPNext wale record se mel khana ho.
+    # Changing the email changes the login - the old one stops
+    # working. This is allowed deliberately: a parent's address can
+    # change, or it may need to match the ERPNext record.
     email: Optional[EmailStr] = None
     name: Optional[str] = Field(default=None, min_length=2, max_length=100)
     parent_id: Optional[str] = Field(default=None, max_length=100)
@@ -94,8 +93,8 @@ async def _role_id(db: AsyncSession, name: str) -> str:
 
 
 def _shape(user: Users, role_name: str | None) -> dict:
-    # password_hashed kabhi bahar nahi jata - us ki koi zaroorat nahi
-    # aur wo bahar bhejna ghalti se leak hone ka raasta banata hai.
+    # password_hashed never leaves the service - nothing needs it,
+    # and sending it out is just a way to leak it by accident.
     return {
         "user_id": str(user.user_id),
         "email": user.email,
@@ -181,7 +180,7 @@ async def create_user(
     await db.commit()
     await db.refresh(user)
 
-    print(f"👤 [Admin] account created: {email} -> {user.parent_id}")
+    print(f"[Admin] account created: {email} -> {user.parent_id}")
 
     return _shape(user, request.role.strip().lower())
 
@@ -210,9 +209,9 @@ async def update_user(
         email = str(request.email).strip().lower()
 
         if email != user.email:
-            # Doosre account ki email par le jana - warna do accounts
-            # ek hi email par ho jate aur login kis ka chale, ye tay
-            # hi nahi hota.
+            # Taking over another account's email would leave two
+            # accounts on the same address, with nothing to decide
+            # which one the login belongs to.
             taken = (
                 await db.execute(
                     select(Users).where(
@@ -228,16 +227,16 @@ async def update_user(
                     detail=f"Another account already uses {email}",
                 )
 
-            print(f"👤 [Admin] email changed: {user.email} -> {email}")
+            print(f"[Admin] email changed: {user.email} -> {email}")
             user.email = email
 
     if request.name is not None:
         user.name = request.name.strip()
 
     if request.parent_id is not None:
-        # Khali bhejna = link hatana. Is liye "" ko None kar dete hain,
-        # warna khali string DB mein chali jati aur wo ERPNext mein
-        # kisi guardian se mel nahi khati.
+        # Sending it empty means unlinking. So "" becomes None -
+        # otherwise an empty string reaches the DB and matches no
+        # guardian in ERPNext.
         user.parent_id = request.parent_id.strip() or None
 
     role_name = None
@@ -256,7 +255,7 @@ async def update_user(
             )
         ).scalar_one_or_none()
 
-    print(f"👤 [Admin] account update: {user.email}")
+    print(f"[Admin] account update: {user.email}")
 
     return _shape(user, role_name)
 
@@ -274,9 +273,9 @@ async def reset_password(
     """
     Naya password set karein.
 
-    Purana password nahi maanga jata - ye admin ka raasta hai, jis
-    ka maqsad hi ye hai ke parent apna password bhool jaye to school
-    us ki madad kar sake.
+    The old password is not asked for - this is the admin path, and
+    its whole purpose is to let the school help a parent who has
+    forgotten theirs.
     """
 
     user = (
@@ -292,7 +291,7 @@ async def reset_password(
     user.password_hashed = Hash.get_hash_password(request.password)
     await db.commit()
 
-    print(f"🔑 [Admin] password reset: {user.email}")
+    print(f"[Admin] password reset: {user.email}")
 
     return {"updated": True, "email": user.email}
 
@@ -317,8 +316,8 @@ async def delete_user(
             detail="User not found",
         )
 
-    # Apna hi account hatane se panel se bahar ho jayenge aur andar
-    # aane ka koi raasta nahi bachega.
+    # Deleting your own account locks you out of the panel with no
+    # way back in.
     if str(user.user_id) == str(getattr(admin, "user_id", "")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -329,6 +328,6 @@ async def delete_user(
     await db.delete(user)
     await db.commit()
 
-    print(f"🗑️ [Admin] account deleted: {email}")
+    print(f"[Admin] account deleted: {email}")
 
     return {"deleted": True, "email": email}

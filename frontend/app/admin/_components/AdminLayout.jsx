@@ -1,21 +1,22 @@
 "use client";
 
 /**
- * Admin panel ka dhaancha.
+ * The admin panel's frame.
  *
- * Pehle sidebar aur header viewport ke kinaron se chipke hue thay -
- * chapte rectangles, koi radius nahi, aur neeche chalta GradFlow
- * gradient un ke peeche gum ho jata tha.
+ * The sidebar and header used to be stuck to the edges of the
+ * viewport - flat rectangles, no radius, and the GradFlow gradient
+ * running underneath was lost behind them.
  *
- * Ab teenon hisse floating cards hain: chaaron taraf thori jagah
- * (p-3/p-4), rounded, aur background un ke darmiyan se nazar aata
- * hai. Sidebar aur header sticky hain, sirf content scroll hota hai.
+ * All three parts are now floating cards: a little space on every
+ * side (p-3/p-4), rounded, with the background visible between them.
+ * The sidebar and header are sticky; only the content scrolls.
  */
 
 import { useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import PageTransition from "./PageTransition";
+import IncomingCall from "./IncomingCall";
 
 export default function AdminLayout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -30,8 +31,8 @@ export default function AdminLayout({ children }) {
         onMobileClose={() => setMobileOpen(false)}
       />
 
-      {/* min-w-0 zaroori hai: is ke baghair lambi tables flex item ko
-          phaila deti hain aur poora page ufqi scroll karne lagta hai */}
+      {/* min-w-0 is required: without it, wide tables stretch the
+          flex item and the whole page scrolls horizontally */}
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:gap-4">
         <Header onMenuClick={() => setMobileOpen((open) => !open)} />
 
@@ -41,6 +42,12 @@ export default function AdminLayout({ children }) {
           </div>
         </main>
       </div>
+
+      {/* This lives in the layout, not in a page - a call can
+          arrive at any moment, and the admin may be on Knowledge or
+          Users at the time. It survives navigation, so a call in
+          progress is not cut off by changing route. */}
+      <IncomingCall />
     </div>
   );
 }

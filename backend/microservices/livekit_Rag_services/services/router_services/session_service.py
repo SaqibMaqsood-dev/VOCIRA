@@ -38,14 +38,14 @@ class SessionService:
                     )
 
                 session_id = new_session.id
-                print(f"🆕 [SessionService] Session created: {session_id} | user_id={user_id}")
+                print(f"[SessionService] Session created: {session_id} | user_id={user_id}")
 
                 # flush + refresh inside transaction
                 await db.flush()
                 await db.refresh(new_session)
 
             # after transaction exits, commit is guaranteed
-            # ✅ retry mechanism to handle commit visibility
+            # retry mechanism to handle commit visibility
             retries = 3
             saved_session = None
             for attempt in range(retries):
@@ -55,11 +55,11 @@ class SessionService:
                 saved_session = result.scalar_one_or_none()
                 if saved_session:
                     if attempt > 0:
-                        print(f"✅ [SessionService] Session found after retry {attempt}")
+                        print(f"[SessionService] Session found after retry {attempt}")
                     break
                 else:
                     if attempt < retries - 1:
-                        print(f"⚠️ [SessionService] Session not visible yet | Retrying...")
+                        print(f"[SessionService] Session not visible yet | Retrying...")
                         await asyncio.sleep(0.2)
                     else:
                         raise HTTPException(
@@ -67,11 +67,11 @@ class SessionService:
                             detail="Session was committed but could not be found.",
                         )
 
-            print(f"✅ [SessionService] Session verified successfully: {session_id}")
+            print(f"[SessionService] Session verified successfully: {session_id}")
 
             # publish only once, after verification
             await RabbitMQ().producer(message={"session_id": str(session_id)})
-            print(f"📤 [SessionService] Session published to RabbitMQ: {session_id}")
+            print(f"[SessionService] Session published to RabbitMQ: {session_id}")
 
             return saved_session
 
@@ -80,7 +80,7 @@ class SessionService:
             raise
         except Exception as e:
             await db.rollback()
-            print(f"❌ [SessionService] Failed to create session: {e}")
+            print(f"[SessionService] Failed to create session: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create session",
@@ -101,13 +101,13 @@ class SessionService:
 
     async def _decorate(self, db: AsyncSession, sessions: list):
         """
-        Har session par duration aur handler chipka dein.
+        Attach duration and handler to each session.
 
-        Dashboard ki ye do columns hamesha "-" dikhati thin kyunke API
-        ye maloomat deti hi nahi thi.
+        These two dashboard columns always showed "-" because the API
+        never returned the information.
 
-        Escalations ek hi query mein nikaali jati hain, har session ke
-        liye alag nahi - warna 20 rows ka matlab 20 queries hota.
+        Escalations are read in a single query rather than one per
+        session - otherwise 20 rows would mean 20 queries.
         """
 
         if not sessions:
@@ -115,8 +115,8 @@ class SessionService:
 
         ids = [s.id for s in sessions]
 
-        # Kis kis session mein insaan tak baat gayi.
-        # Escalation message se juRi hai, message session se.
+        # Which sessions reached a human.
+        # An escalation links to a message, and a message to a session.
         escalated = set(
             (
                 await db.execute(
@@ -137,8 +137,8 @@ class SessionService:
         for row in sessions:
             row.handler = "Human" if row.id in escalated else "AI"
 
-            # Chalti hui call ki koi duration nahi hoti - wo abhi barh
-            # rahi hai. Us par koi ginti dikhana jhoot hoga.
+            # A call in progress has no duration - it is still
+            # growing. Showing a number for it would be a lie.
             if row.end_at and row.start_at:
                 row.duration_seconds = max(
                     0, int((row.end_at - row.start_at).total_seconds())
@@ -147,12 +147,6 @@ class SessionService:
                 row.duration_seconds = None
 
         return sessions
-
-    # =========================================================
-    # GET ALL SESSIONS
-    # =========================================================
-    async def get_all_sessions(self, db: AsyncSession, limit: int = 10, skip: int = 0):
-        return await self.session_repo.get_all_sessions(db=db, limit=limit, skip=skip)
 
     # =========================================================
     # GET USER SESSION BY ID
@@ -178,10 +172,10 @@ class SessionService:
     # =========================================================
     # CLOSE USER SESSION
     # =========================================================
-    # Do tarah ke caller hain:
-    #   router            -> apna injected db bhejta hai
-    #   livekit worker    -> uske paas koi db session nahi hoti
-    # Is liye db optional hai; na mile to yahin ek khol lete hain.
+    # There are two kinds of caller:
+    #   router          -> passes its own injected db
+    #   livekit worker  -> has no db session at all
+    # So db is optional; when none arrives, one is opened here.
     async def close_session_by_id(
         self,
         user_id: UUID,
@@ -194,11 +188,23 @@ class SessionService:
         async with SessionLocal() as own_db:
             return await self._close(db=own_db, user_id=user_id, session_id=session_id)
 
+    # There is deliberately NO `async with db.begin()` here.
+    #
+    # The repository's close_session_by_id commits by itself, and then
+    # calls refresh(). Wrapping a begin() block around that ends the
+    # block's transaction at the commit, and on the very next line
+    # SQLAlchemy raises:
+    #
+    #   "Can't operate on closed transaction inside context manager."
+    #
+    # The result was that the session did close (the commit had
+    # already landed) but the call still ended in an exception: the
+    # frontend got a 500 from PATCH /sessions/{id}/close, and every
+    # worker teardown printed "[Session Cleanup Error]".
     async def _close(self, db: AsyncSession, user_id: UUID, session_id: UUID):
-        async with db.begin():  # transaction block for closing
-            session = await self.session_repo.get_by_id(db=db, id=session_id)
-            if not session:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-            if session.user_id != user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
-            return await self.session_repo.close_session_by_id(db=db, session_id=session_id)
+        session = await self.session_repo.get_by_id(db=db, id=session_id)
+        if not session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        if session.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
+        return await self.session_repo.close_session_by_id(db=db, session_id=session_id)

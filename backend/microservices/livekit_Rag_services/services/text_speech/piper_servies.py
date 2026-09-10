@@ -1,15 +1,15 @@
 """
 Piper text-to-speech.
 
-Pehle tts_converter() poore jawab ka audio banata tha aur tab lautata tha.
-CPU par ek lambe jawab mein 1.5-2 second lag jate the, jis dauran user
-ko bilkul khamoshi sunayi deti thi.
+tts_converter() used to build the audio for the whole answer before
+returning. On CPU a long answer took 1.5-2 seconds, and the user heard
+nothing at all through it.
 
-Ab tts_sentences() jawab ko jumlon mein tod kar EK EK karke audio deta
-hai, is liye pehla jumla ~400ms mein bajna shuru ho jata hai. Kul waqt
-utna hi rehta hai, magar mehsoos kaafi tez hota hai.
-
-tts_converter() waisa hi rakha hua hai taake purane callers na tooten.
+The caller (voice_pipeline.py) now splits the answer into sentences
+with split_sentences() and runs tts_converter() on each one, so the
+first sentence starts playing in ~400ms. Lock and generation tracking
+happen in that same loop, which made this more flexible than a
+generator function.
 """
 
 import io
@@ -24,16 +24,17 @@ voice = PiperVoice.load(
 
 _CONFIG = SynthesisConfig(length_scale=1)
 
-# Jumla khatam hone ki nishani. Decimal numbers (3.5) aur aam
-# ikhtisaraat (Mr. Dr.) par na toote, is liye lookbehind/lookahead.
+# Where a sentence ends. The lookbehind/lookahead keep it from
+# breaking on decimals (3.5) or common abbreviations (Mr. Dr.).
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 
-# Itne se chhote tukde alag na bajayein - warna awaaz katti hui lagti hai.
+# Do not play fragments smaller than this on their own - the audio
+# sounds chopped up.
 _MIN_CHUNK_CHARS = 24
 
 
 def split_sentences(text: str) -> list[str]:
-    """Jawab ko bajane laiq jumlon mein toRein."""
+    """Split an answer into sentences that can be spoken."""
     text = (text or "").strip()
     if not text:
         return []
@@ -55,19 +56,6 @@ def _synth(text: str) -> bytes:
     for chunk in voice.synthesize(text, syn_config=_CONFIG):
         buffer.write(chunk.audio_int16_bytes)
     return buffer.getvalue()
-
-
-def tts_sentences(text: str):
-    """
-    Har jumle ka audio alag alag deta hai (generator).
-
-    Caller pehla tukda milte hi bajana shuru kar sakta hai, aur agla
-    jumla us dauran ban raha hota hai.
-    """
-    for sentence in split_sentences(text):
-        audio = _synth(sentence)
-        if audio:
-            yield sentence, audio
 
 
 def tts_converter(text: str) -> bytes:

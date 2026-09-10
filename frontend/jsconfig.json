@@ -1,8 +1,0 @@
-{
-  "compilerOptions": {
-    "paths": {
-      "@/*": ["./*"]
-    },
-    "ignoreDeprecations": "6.0"
-  }
-}

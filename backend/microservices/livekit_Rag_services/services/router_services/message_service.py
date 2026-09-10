@@ -14,13 +14,13 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 
-# Call sites `usertype` mein kabhi enum ki value bhejte hain
-# ("guardian", "ai") aur kabhi us ka naam ("user"). Pehle yahan
-# sirf "guest"/"agent"/"admin" ke literals check hote the, is liye
-# `SenderTypeEnum.ai.value` == "ai" kisi shart par pura nahi utarta
-# tha aur har AI jawab `else` branch se guzar kar `user` ban jata
-# tha - database mein agent ki apni baat guardian ke naam likhi
-# ja rahi thi. Ab dono shaklein yahan se guzarti hain.
+# Call sites pass `usertype` sometimes as the enum's value
+# ("guardian", "ai") and sometimes as its name ("user"). Only the
+# literals "guest"/"agent"/"admin" were checked here before, so
+# `SenderTypeEnum.ai.value` == "ai" satisfied no condition and every
+# AI answer fell through the `else` branch and became `user` - the
+# agent's own words were being written to the database under the
+# guardian's name. Both forms now pass through here.
 _SENDER_ALIASES = {
     SenderTypeEnum.ai.value: SenderTypeEnum.ai,           # "ai"
     "agent": SenderTypeEnum.ai,                           # purana naam
@@ -58,7 +58,7 @@ class MessageService:
 
         if sender_type is SenderTypeEnum.ai:
 
-            # Agent ka apna jawab kisi user se mansoob nahi hota
+            # The agent's own answer is not attributed to any user
             user_id = None
 
         elif sender_type is SenderTypeEnum.guest:
@@ -67,7 +67,7 @@ class MessageService:
 
         elif sender_type is SenderTypeEnum.user and not user_id:
 
-            # Bina login ke aane wali baat guardian nahi hoti
+            # Something said without logging in is not a guardian
             sender_type = SenderTypeEnum.guest
 
         # -----------------------------

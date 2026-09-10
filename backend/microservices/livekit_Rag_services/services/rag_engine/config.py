@@ -1,24 +1,25 @@
 """
 RAG engine settings.
 
-NOTE: ye file wahi env vars padhti hai jo groq.py padhta hai, taake
-provider ek hi jagah se badle. Pehle yahan GROQ_MODEL alag hardcoded
-tha - jab gpt-oss-20b ka quota khatam hua to ERP sawal chalte rahe
-magar RAG wale "assistant is currently busy" dete rahe.
+NOTE: this file reads the same env vars as groq.py, so the provider
+is switched from one place. GROQ_MODEL used to be hardcoded here
+separately - when gpt-oss-20b ran out of quota, ERP questions kept
+working while RAG ones answered "assistant is currently busy".
 
-ENV LOADING KA TARTEEB AHEM HAI:
+ENV LOADING ORDER MATTERS:
 
-Do .env files hain - service ki (livekit_Rag_services/.env) aur ek
-purani yahan (rag_engine/.env). load_dotenv pehle se set variables
-ko override NAHI karta, is liye jo file PEHLE load ho wahi jeetti
-hai. Pehle yahan sirf local file load hoti thi, to import order ke
-mutabiq kabhi service ki setting chalti thi aur kabhi local wali.
-Natija: LLM_BASE_URL service .env mein Groq par hota tha magar RAG
-phir bhi OpenRouter ko jata tha aur 402 khata tha.
+There are two .env files - the service's
+(livekit_Rag_services/.env) and an older one here (rag_engine/.env).
+load_dotenv does NOT override variables that are already set, so
+whichever file loads FIRST wins. Only the local file was loaded here
+before, so depending on import order the service setting sometimes
+applied and sometimes the local one did. The result: LLM_BASE_URL
+pointed at Groq in the service .env while RAG still went to
+OpenRouter and got a 402.
 
-Ab service wali PEHLE load hoti hai (wahi asal source hai), aur
-local file sirf un keys ke liye rehti hai jo service .env mein
-nahi hain (jaise HUGGINGFACEHUB_API_TOKEN).
+The service file now loads FIRST (it is the real source), and the
+local file is left for keys the service .env does not carry (such as
+HUGGINGFACEHUB_API_TOKEN).
 """
 
 import os
@@ -51,9 +52,9 @@ URLS_FILE_PATH  = os.path.join(DATA_DIR, "urls.txt")
 # ── Embeddings ───────────────────────────────────────────────
 #
 # "local"  -> BAAI/bge-small-en-v1.5, 384 dims
-#             sentence-transformers + torch chahiye (~4 GB)
+#             needs sentence-transformers + torch (~4 GB)
 # "gemini" -> gemini-embedding-001, 768 dims
-#             sirf HTTP call, koi bhaari package nahi
+#             an HTTP call only, no heavy packages
 #
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
 
@@ -74,9 +75,9 @@ else:
 
 # ── Pinecone ─────────────────────────────────────────────────
 #
-# Index ka naam provider ke saath badalta hai kyunke dimensions alag
-# hain (384 vs 768). Ek hi index dono ke liye use nahi ho sakti -
-# aur dono alag rehne se provider badal kar foran wapis aa sakte hain.
+# The index name changes with the provider because the dimensions
+# differ (384 vs 768). One index cannot serve both - and keeping them
+# separate means you can switch provider and switch straight back.
 #
 INDEX_NAME         = os.getenv("PINECONE_INDEX", _DEFAULT_INDEX)
 PINECONE_NAMESPACE = os.getenv("PINECONE_NAMESPACE", "school-general")
@@ -84,14 +85,14 @@ PINECONE_NAMESPACE = os.getenv("PINECONE_NAMESPACE", "school-general")
 # ── RAG ──────────────────────────────────────────────────────
 MAX_CONTEXT_CHARS = 4000
 
-# 10 chunks laane par context MAX_CONTEXT_CHARS se bhi barh jata tha
-# (~6300 chars) aur phir kaat diya jata tha - yaani aakhri chunks
-# embed kar ke laaye jate the aur phenk diye jate the. Prompt phir
-# bhi ~1380 tokens ka rehta tha, jo Groq ki 8000/min hadd mein bhaari
-# parta hai. 5 chunks ab bhi MAX_CONTEXT_CHARS bhar dete hain.
+# Fetching 10 chunks pushed the context past MAX_CONTEXT_CHARS
+# (~6300 chars) and it was then truncated - so the last chunks were
+# embedded, fetched and thrown away. The prompt still came to ~1380
+# tokens, which is heavy against Groq's 8000/min limit. 5 chunks
+# still fill MAX_CONTEXT_CHARS.
 TOP_K             = int(os.getenv("RAG_TOP_K", "5"))
 
-# LLM ka model wahi jo baqi system use karta hai (services/groq/groq.py)
+# The same LLM model the rest of the system uses (services/groq/groq.py)
 GROQ_MODEL = os.getenv("LLM_SMART_MODEL") or os.getenv(
     "GROQ_SMART_MODEL", "openai/gpt-oss-120b"
 )

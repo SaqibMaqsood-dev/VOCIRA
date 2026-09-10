@@ -1,0 +1,43 @@
+# =============================================================
+# LiveKit server - production
+#
+# Locally this ran with `--dev --node-ip 127.0.0.1`. On a server both
+# of those are wrong:
+#
+#   --dev       installs a well-known (devkey/secret) key pair -
+#               meaning anyone can mint a token and walk into any
+#               room
+#   --node-ip   127.0.0.1 means "send the media inside me", which is
+#               impossible from outside
+#
+# The keys are not written here - they come from the LIVEKIT_KEYS
+# environment variable (see docker-compose.prod.yml), so this file
+# can live in git safely.
+# =============================================================
+
+# Signalling (WebSocket). Caddy sits in front of this and forwards
+# wss://lk.<domain> here.
+port: 7880
+
+rtc:
+  # A single UDP port for media - "UDP mux".
+  #
+  # By default LiveKit wants the whole 50000-60000 range. One port is
+  # far simpler: a single line to open in Oracle's Security List and
+  # in ufw, with much less room to forget something.
+  udp_port: 7882
+
+  # A TCP fallback for people whose network blocks UDP (often office
+  # or college wifi).
+  tcp_port: 7881
+
+  # Oracle (and most clouds) give a VM its public IP through NAT -
+  # the machine only ever sees its own private IP. With this set to
+  # true, LiveKit discovers its real public IP via STUN and hands
+  # that to the browser. Without it, signalling connects but the
+  # audio never arrives ("could not establish pc connection").
+  use_external_ip: true
+
+logging:
+  level: info
+  json: false

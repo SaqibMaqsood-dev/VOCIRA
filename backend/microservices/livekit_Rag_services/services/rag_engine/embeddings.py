@@ -1,20 +1,19 @@
 """
 Embedding providers.
 
-Do raaste hain, .env se chunein:
+There are two options, chosen from .env:
 
     EMBEDDING_PROVIDER=local    BAAI/bge-small-en-v1.5  (384 dims)
-                                sentence-transformers + torch chahiye (~4 GB)
+                                needs sentence-transformers + torch (~4 GB)
 
     EMBEDDING_PROVIDER=gemini   gemini-embedding-001    (768 dims)
-                                sirf HTTP call - koi bhaari package nahi
+                                an HTTP call only - no heavy packages
 
-Gemini wala class LangChain ka Embeddings interface implement karta hai,
-is liye PineconeVectorStore ko farq nahi parta ke kaun sa use ho raha hai.
+The Gemini class implements LangChain's Embeddings interface, so
+PineconeVectorStore cannot tell which one is in use.
 
-langchain-google-genai jaan bujh kar istemal nahi kiya - us se
-outputDimensionality par control nahi milta, aur httpx pehle se
-project mein maujood hai.
+langchain-google-genai is deliberately avoided - it gives no control
+over outputDimensionality, and httpx is already in the project.
 """
 
 import logging
@@ -26,7 +25,7 @@ log = logging.getLogger(__name__)
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
-# Gemini ek request mein zyada se zyada itne texts leta hai
+# The most texts Gemini accepts in one request
 _BATCH = 100
 
 
@@ -123,8 +122,8 @@ def build_embeddings(
             dimensions=gemini_dimensions,
         )
 
-    # local — torch yahin import hota hai, taake gemini use karte waqt
-    # wo bhaari import bilkul na chale
+    # local — torch is imported here so that the heavy import never
+    # runs at all when gemini is in use
     from langchain_huggingface import HuggingFaceEmbeddings
 
     log.info("Embeddings: local %s", local_model)

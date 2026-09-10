@@ -1,13 +1,13 @@
 """
-Admin panel ke liye endpoints.
+Endpoints for the admin panel.
 
-Frontend ka admin hissa pehle poora `data.js` ke jhoote data par
-chalta tha - 122 lines hardcoded, koi backend call nahi. Backend
-mein escalations/messages/sessions sab pehle se mojood thay, bas
-admin ke nazariye se (yaani SAARE users ka) koi endpoint nahi tha:
-`/sessions/stats` sirf apne user ki ginti deta hai.
+The admin side of the frontend used to run entirely on the fake data
+in `data.js` - 122 hardcoded lines and no backend call at all. The
+backend already had escalations, messages and sessions; what it
+lacked was an admin-wide view of them (that is, across ALL users):
+`/sessions/stats` only counts the caller's own.
 
-Har endpoint `require_admin` ke peeche hai.
+Every endpoint sits behind `require_admin`.
 """
 
 import json
@@ -50,12 +50,13 @@ router = APIRouter(
 )
 
 
-# Sawal wo message hai jo user ne kaha; jawab wo jo agent ne diya.
+# The question is the message the user spoke; the answer is the
+# one the agent gave back.
 _USER_SIDE = (SenderTypeEnum.user, SenderTypeEnum.guest)
 
 
 def _status_for(message_id, escalated_ids: set) -> str:
-    """Frontend teen haalaton mein sochta hai."""
+    """The frontend thinks in three states."""
     return "Escalated" if message_id in escalated_ids else "Resolved"
 
 
@@ -67,7 +68,7 @@ def _status_for(message_id, escalated_ids: set) -> str:
 async def admin_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Dashboard ke upar wale cards + dono chart."""
+    """The cards across the top of the dashboard, plus both charts."""
 
     now = datetime.utcnow()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -159,11 +160,11 @@ async def admin_queries(
     skip: int = Query(0, ge=0),
 ):
     """
-    Sawal aur us ka jawab, ek jodi ban kar.
+    A question paired with its answer.
 
-    Messages ek hi table mein hain, is liye har user-message ke
-    baad us ke session ka agla ai-message us ka jawab mana jata
-    hai - wahi tarteeb jo voice pipeline likhti hai.
+    Messages all live in one table, so the ai-message that follows a
+    user-message in the same session is taken to be its answer - the
+    same order the voice pipeline writes them in.
     """
 
     rows = (
@@ -181,7 +182,7 @@ async def admin_queries(
         ).scalars().all()
     )
 
-    # purane se naye - taake jawab dhoondna aasan ho
+    # oldest first, so an answer is easy to find
     rows = list(reversed(rows))
 
     out = []
@@ -231,7 +232,7 @@ async def admin_escalations(
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
 ):
-    """Escalation ke sath wo sawal bhi jis par wo bani thi."""
+    """An escalation together with the question that caused it."""
 
     rows = (
         await db.execute(
@@ -267,10 +268,10 @@ async def admin_knowledge():
     """
     Knowledge base ki asli halat.
 
-    Frontend par ye page "articles" ki jhooti list dikhata tha. Asli
-    knowledge base Pinecone ka index hai - RAG ke jawab wahin se
-    bante hain. /rag/status bhi yehi deta hai magar wo internal key
-    ke peeche hai, is liye admin ke liye yahan se.
+    This page used to show a fake list of "articles". The real
+    knowledge base is the Pinecone index - that is where RAG answers
+    come from. /rag/status returns the same thing, but it sits behind
+    an internal key, hence this admin-facing copy.
     """
 
     from backend.microservices.livekit_Rag_services.routers.users_route import (
@@ -338,18 +339,18 @@ async def set_escalation_status(
 # =========================================================
 # KNOWLEDGE BASE - DOCUMENTS
 #
-# Pehle naya data daalne ka sirf ek tareeqa tha: file server par
-# manually rakho, phir sync dabao. Ab panel se hi ho jata hai.
+# There used to be exactly one way to add new data: put the file on
+# the server by hand, then press sync. It can now be done from the
+# panel itself.
 # =========================================================
 
 @router.get("/knowledge/documents")
 async def admin_knowledge_documents():
     """
-    Kaunse documents mojood hain, aur har ek se kitne chunks bane.
+    Which documents exist, and how many chunks each produced.
 
-    Chunk ki ginti aakhri sync se aati hai. Jo file us ke baad rakhi
-    gayi ho us ka count null hota hai - yaani "abhi index mein nahi,
-    sync chalayein".
+    The chunk counts come from the last sync. A file added after that
+    has a null count - meaning "not in the index yet, run a sync".
     """
 
     from backend.microservices.livekit_Rag_services.routers.users_route import (
@@ -392,7 +393,7 @@ async def admin_upload_document(file: UploadFile = File(...)):
             detail=str(error),
         )
 
-    print(f"📄 [Knowledge] upload: {saved['name']} ({saved['size']} bytes)")
+    print(f"[Knowledge] upload: {saved['name']} ({saved['size']} bytes)")
 
     return {**saved, "message": "Uploaded. Run a sync to index it."}
 
@@ -405,10 +406,10 @@ class NoteRequest(BaseModel):
 @router.post("/knowledge/notes", status_code=201)
 async def admin_add_note(request: NoteRequest):
     """
-    Chhoti baat seedha likh dein - PDF banane ki zaroorat nahi.
+    Write a short note directly - no need to produce a PDF.
 
-    Note wahi text_files folder mein .txt ban kar jata hai, is liye
-    ingestion ke liye us mein aur kisi file mein koi farq nahi.
+    The note lands in the same text_files folder as a .txt, so as far
+    as ingestion is concerned it is no different from any other file.
     """
 
     from backend.microservices.livekit_Rag_services.services.rag_engine import (
@@ -426,7 +427,7 @@ async def admin_add_note(request: NoteRequest):
             detail=str(error),
         )
 
-    print(f"📝 [Knowledge] note: {saved['name']}")
+    print(f"[Knowledge] note: {saved['name']}")
 
     return {**saved, "message": "Saved. Run a sync to index it."}
 
@@ -453,22 +454,22 @@ async def admin_delete_document(name: str):
             detail="Document not found",
         )
 
-    print(f"🗑️ [Knowledge] deleted: {name}")
+    print(f"[Knowledge] deleted: {name}")
 
     return {"deleted": True, "name": name}
 
 
 # =========================================================
-# ERPNEXT KE GUARDIANS
+# ERPNEXT GUARDIANS
 #
-# Admin panel ka Users page account banate waqt Guardian ID
-# maangta tha - haath se likhi hui. Ek harf idhar udhar aur account
-# kisi bhi bachche tak nahi pahunchta, aur ghalti tab pakri jati jab
-# parent shikayat karta.
+# The admin panel's Users page used to ask for a Guardian ID when
+# creating an account - typed in by hand. One character out of place
+# and the account reached no child at all, and the mistake only
+# surfaced when the parent complained.
 #
-# Ab wahan list se chunte hain aur email ERPNext se khud bhar jati
-# hai. Ye endpoint yahan hai (auth service mein nahi) kyunke ERP
-# tak pahunch isi service ke paas hai.
+# It is now picked from a list, and the email is filled in from
+# ERPNext automatically. This endpoint lives here (rather than in the
+# auth service) because this service is the one with ERP access.
 # =========================================================
 
 @router.get("/guardians")
@@ -476,11 +477,10 @@ async def admin_guardians():
     """
     ERPNext ke saare guardians - naam, email aur kitne bachche.
 
-    email_address khali bhi ho sakta hai. Us surat mein hum khud koi
-    email nahi ghadte: account us email par banta hai jis se parent
-    login karega, aur andaze se banaya hua pata us ke kisi kaam ka
-    nahi. Panel wahan school ko pehle ERPNext mein email bharne ka
-    kehta hai.
+    email_address can be empty. We do not invent one in that case:
+    the account is created against the email the parent will log in
+    with, and a guessed address is of no use to them. The panel tells
+    the school to fill the email into ERPNext first.
     """
 
     from backend.microservices.livekit_Rag_services.services.erp_services.ERP_client import (
@@ -508,8 +508,8 @@ async def admin_guardians():
 
     guardians = (rows or {}).get("data") or []
 
-    # Har guardian ke kitne bachche hain - ek hi call mein, har
-    # guardian ke liye alag nahi
+    # How many children each guardian has - in a single call, not
+    # one call per guardian
     try:
         links = (
             await client.get(

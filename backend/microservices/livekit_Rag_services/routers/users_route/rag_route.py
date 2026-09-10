@@ -1,14 +1,13 @@
 """
 RAG knowledge base ka intezaam.
 
-Pehle knowledge base update karne ka KOI raasta nahi tha. Ingestion ka
-code maujood tha (ingestion.py + vectorstore.py) magar use sirf purana
-livekit_Rag_services/main.py bulata tha - jo dead prototype tha aur
-chalti hui service ka hissa nahi. Is liye data/text_files/ badalne se
-kuch nahi hota tha.
+There used to be NO way to update the knowledge base. The ingestion
+code existed (ingestion.py + vectorstore.py) but was only called by
+the old livekit_Rag_services/main.py - a dead prototype that is not
+part of the running service. So changing data/text_files/ did nothing.
 
-Ye ops endpoints hain, aam users ke liye nahi - is liye JWT ke bajaye
-X-Internal-Key se protect kiye gaye hain (wahi jo /users/internal par).
+These are ops endpoints, not for ordinary users - so they are guarded
+by X-Internal-Key rather than JWT (the same one /users/internal uses).
 """
 
 import asyncio
@@ -38,8 +37,8 @@ INTERNAL_KEY = os.getenv(
 )
 
 
-# Ek waqt mein ek hi sync - do sath chalein to ek doosre ke vectors
-# delete kar denge.
+# One sync at a time - two running together would delete each
+# other's vectors.
 _sync_lock = asyncio.Lock()
 
 _last_sync: dict = {
@@ -50,29 +49,29 @@ _last_sync: dict = {
     "error": None,
 }
 
-# Sync ka nateeja disk par bhi.
+# The sync result is written to disk as well.
 #
-# Pehle ye sirf memory mein tha, is liye service restart hone par
-# "never" ho jata tha - halanke Pinecone mein data mojood hota.
-# Admin panel phir har file par "not indexed" dikhata tha aur user
-# bewajah dobara sync chalata.
+# It lived only in memory before, so a service restart turned it into
+# "never" - even though the data was sitting in Pinecone. The admin
+# panel then showed "not indexed" against every file and the user ran
+# another sync for nothing.
 _STATE_FILE = os.path.join(
     os.path.dirname(DATA_DIR), "data", ".sync_state.json"
 )
 
 
 def _save_state() -> None:
-    """Ye khabar hai, kaam nahi - nakami par sirf likh dein."""
+    """This is a notification, not real work - just log a failure."""
     try:
         os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
         with open(_STATE_FILE, "w", encoding="utf-8") as handle:
             json.dump(_last_sync, handle)
     except Exception as error:
-        print(f"⚠️ [RAG Sync] could not save state: {error}")
+        print(f"[RAG Sync] could not save state: {error}")
 
 
 def _load_state() -> None:
-    """Service shuru hote waqt purani state wapis le aayein."""
+    """Restore the previous state when the service starts."""
     try:
         if not os.path.isfile(_STATE_FILE):
             return
@@ -81,9 +80,9 @@ def _load_state() -> None:
             saved = json.load(handle)
 
         if isinstance(saved, dict):
-            # "running" bharosay ke qabil nahi: agar service us waqt
-            # mari thi jab sync chal rahi thi, wo sync ab kahin nahi
-            # chal rahi.
+            # "running" cannot be trusted: if the service died while
+            # a sync was in progress, that sync is not running
+            # anywhere now.
             if saved.get("state") == "running":
                 saved["state"] = "failed"
                 saved["error"] = "Service restarted while syncing"
@@ -91,7 +90,7 @@ def _load_state() -> None:
             _last_sync.update(saved)
 
     except Exception as error:
-        print(f"⚠️ [RAG Sync] could not read the saved state: {error}")
+        print(f"[RAG Sync] could not read the saved state: {error}")
 
 
 _load_state()
@@ -121,7 +120,7 @@ async def _run_sync():
         )
 
         try:
-            print("📚 [RAG Sync] assembling the knowledge base...")
+            print("[RAG Sync] assembling the knowledge base...")
             chunks = await assemble_knowledge_base()
 
             if not chunks:
@@ -130,12 +129,12 @@ async def _run_sync():
                     "and data/urls.txt"
                 )
 
-            print(f"📚 [RAG Sync] {len(chunks)} chunks -> Pinecone")
+            print(f"[RAG Sync] {len(chunks)} chunks -> Pinecone")
             result = await rebuild_vector_store(chunks)
 
-            # Kis file se kitne chunks bane - admin panel ye
-            # dikhata hai. Pinecone se ye ginti poochna mehnga
-            # hai, aur yahan wo pehle se haath mein hai.
+            # How many chunks came from each file - the admin panel
+            # displays this. Asking Pinecone for the counts is
+            # expensive, and here they are already at hand.
             counts = {}
             for chunk in chunks:
                 source = (chunk.metadata or {}).get("source")
@@ -152,7 +151,7 @@ async def _run_sync():
                 result=result,
             )
             _save_state()
-            print(f"✅ [RAG Sync] done: {result}")
+            print(f"[RAG Sync] done: {result}")
 
         except Exception as exc:
             _last_sync.update(
@@ -161,7 +160,7 @@ async def _run_sync():
                 error=f"{type(exc).__name__}: {exc}",
             )
             _save_state()
-            print(f"❌ [RAG Sync] fail: {exc}")
+            print(f"[RAG Sync] fail: {exc}")
 
 
 # ============================================================
@@ -175,7 +174,7 @@ async def sync_knowledge_base(
     """
     Knowledge base dobara banayein.
 
-    Background mein chalta hai - is liye foran 202 milta hai.
+    Runs in the background - so a 202 comes back immediately.
     Progress /rag/status se dekhein.
     """
     _check_key(x_internal_key)

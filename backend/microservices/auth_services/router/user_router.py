@@ -183,10 +183,10 @@ async def get_internal_user(
     db: AsyncSession = Depends(get_db),
     x_internal_key: str | None = Header(default=None),
 ):
-    # Ye endpoint kisi bhi user ka role aur ERP parent_id deta hai -
-    # yaani ERP authorization ki chabi. Pehle bilkul khula tha.
-    # Ye service-to-service call hai (JWT ke baghair aati hai),
-    # is liye shared secret se protect kiya gaya hai.
+    # This endpoint returns any user's role and ERP parent_id - the
+    # key to ERP authorization. It used to be wide open. It is a
+    # service-to-service call (it arrives without a JWT), so it is
+    # guarded by the shared secret.
     if x_internal_key != settings.INTERNAL_SERVICE_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

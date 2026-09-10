@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import StatsCard from "@/components/StatsCard";
 import CallTable from "@/components/CallTable";
 
+import { authFetch, clearSession, getAccessToken } from "@/lib/session";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function DashboardPage() {
@@ -25,7 +27,7 @@ export default function DashboardPage() {
         setLoading(true);
         setError("");
 
-        const accessToken = localStorage.getItem("access_token");
+        const accessToken = getAccessToken();
 
         if (!accessToken) {
           window.location.href = "/login";
@@ -41,22 +43,15 @@ export default function DashboardPage() {
         // GET DASHBOARD STATISTICS
         // =====================================================
 
-        const statsResponse = await fetch(
-          `${API_URL}/livekit/sessions/stats`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          }
+        // authFetch renews an expired access token and retries, so
+        // a 401 here means the refresh token is gone too.
+        const statsResponse = await authFetch(
+          "/livekit/sessions/stats",
+          { method: "GET" }
         );
 
         if (statsResponse.status === 401) {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("role");
-          localStorage.removeItem("refresh_token");
-          localStorage.removeItem("token_type");
-          localStorage.removeItem("auth_response");
+          clearSession();
 
           window.location.href = "/login";
           return;
@@ -85,22 +80,13 @@ export default function DashboardPage() {
         // GET USER'S SESSIONS
         // =====================================================
 
-        const sessionsResponse = await fetch(
-          `${API_URL}/livekit/sessions/?limit=20&skip=0`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          }
+        const sessionsResponse = await authFetch(
+          "/livekit/sessions/?limit=20&skip=0",
+          { method: "GET" }
         );
 
         if (sessionsResponse.status === 401) {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("role");
-          localStorage.removeItem("refresh_token");
-          localStorage.removeItem("token_type");
-          localStorage.removeItem("auth_response");
+          clearSession();
 
           window.location.href = "/login";
           return;
@@ -148,10 +134,10 @@ export default function DashboardPage() {
       } catch (err) {
         console.error("Dashboard error:", err);
 
-        // fetch() network nakami par TypeError phenkta hai aur
-        // us ka paighaam "Failed to fetch" hota hai - jo user
-        // ko kuch nahi batata. Aam wajah yehi hoti hai ke
-        // backend chal hi nahi raha.
+        // fetch() throws a TypeError on network failure, and its
+        // message is "Failed to fetch" - which tells the user
+        // nothing. The usual cause is simply that the backend is
+        // not running.
         setError(
           err instanceof TypeError
             ? "Could not reach the server. Please make sure the API Gateway is running."
@@ -185,8 +171,9 @@ export default function DashboardPage() {
     // DURATION
     // =======================================================
 
-    // Backend ab duration_seconds seedha deta hai. Purana hisaab
-    // fallback ke tor par rakha hai - agar kabhi wo field na aaye.
+    // The backend now returns duration_seconds directly. The old
+    // calculation is kept as a fallback, in case that field is ever
+    // missing.
     let seconds = session.duration_seconds;
 
     if (seconds === null || seconds === undefined) {
@@ -200,9 +187,9 @@ export default function DashboardPage() {
       }
     }
 
-    // Chalti hui call ki duration nahi hoti - wo abhi barh rahi hai.
-    // "—" se ye pata nahi chalta ke data nadarad hai ya call jaari
-    // hai, is liye saaf likh dete hain.
+    // A call in progress has no duration - it is still growing.
+    // "—" would not say whether the data is missing or the call is
+    // ongoing, so we spell it out.
     const duration =
       seconds === null || seconds === undefined || seconds < 0
         ? session.status === "active"
@@ -366,11 +353,11 @@ export default function DashboardPage() {
 
 
 /**
- * Seconds ko parhne laayak banayein.
+ * Make a number of seconds readable.
  *
- * Pehle hamesha "Xm Ys" likha jata tha, is liye 34 second ki call
- * "0m 34s" dikhti thi - jo padhne mein ajeeb hai aur "0" bekaar
- * jagah leta hai.
+ * It always wrote "Xm Ys" before, so a 34 second call showed as
+ * "0m 34s" - awkward to read, with the "0" taking up room for
+ * nothing.
  *
  *     34    ->  34s
  *     124   ->  2m 4s
@@ -384,7 +371,8 @@ function formatDuration(total) {
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
 
-  // Ghanton mein seconds bemani hain - koi "1h 1m 7s" nahi padhta
+  // Seconds are meaningless at the scale of hours - nobody reads
+  // "1h 1m 7s"
   if (hours > 0) {
     return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   }

@@ -38,12 +38,12 @@ h6 {
 }
 
 /*
- * Edge/IE apna password-reveal button khud lagate hain (::-ms-reveal).
- * Hamare paas apna eye ka button pehle se hai, is liye do icons nazar
- * aane lagte thay - aur Edge wala kaala hota hai jo gehre theme par
- * bhadda lagta hai.
+ * Edge/IE add a password-reveal button of their own (::-ms-reveal).
+ * We already have our own eye button, so two icons showed up - and
+ * Edge's is black, which looks wrong against the dark theme.
  *
- * ::-ms-clear bhi isi tarah ka hai - text fields mein "x" ka button.
+ * ::-ms-clear is the same kind of thing - the "x" button in text
+ * fields.
  */
 input::-ms-reveal,
 input::-ms-clear {
@@ -266,13 +266,13 @@ input::-ms-clear {
 /* =====================================================================
    LIVEKIT AGENT VISUALIZER
 
-   BarVisualizer (@livekit/components-react) har bar par .lk-audio-bar
-   lagata hai, aur us par data-lk-highlighted="true" jab wo bar us
-   lamhe ki awaaz ka hissa ho. Container par data-lk-va-state hota hai
+   BarVisualizer (@livekit/components-react) puts .lk-audio-bar on
+   every bar, with data-lk-highlighted="true" on the bars that are part
+   of the audio at that moment. The container carries data-lk-va-state
    (connecting / listening / thinking / speaking).
 
-   Package apni default CSS bhi deta hai magar wo apne rang laata hai;
-   yahan sirf itna likha hai ke bars project ke theme jaise lagein.
+   The package ships default CSS too, but that brings its own colours;
+   all this does is make the bars match the project's theme.
    ===================================================================== */
 
 .agent-visualizer .lk-audio-bar {
@@ -287,8 +287,8 @@ input::-ms-clear {
   box-shadow: 0 0 14px rgba(255, 255, 255, 0.55);
 }
 
-/* Sochte waqt bars halke se saans lete hain - taake khamoshi aur
-   "kuch ho raha hai" mein farq nazar aaye. */
+/* While thinking, the bars breathe gently - so that silence and
+   "something is happening" look different. */
 .agent-visualizer[data-lk-va-state="thinking"] .lk-audio-bar {
   animation: agent-bar-breathe 1.1s ease-in-out infinite;
 }
@@ -303,12 +303,12 @@ input::-ms-clear {
 }
 
 /*
- * Install wala card neeche se aata hai.
+ * The install card rises from the bottom.
  *
- * Ye yahan hai, component ke andar styled-jsx mein nahi: wahan
- * Tailwind ke arbitrary animation ka class-name escape karna parta
- * hai, aur prefers-reduced-motion ka override us par nazuk ho jata
- * hai. Ek saada class zyada bharosay ke qabil hai.
+ * This lives here rather than in styled-jsx inside the component:
+ * there, Tailwind's arbitrary animation class name has to be escaped,
+ * and the prefers-reduced-motion override on top of it becomes
+ * fragile. A plain class is more dependable.
  */
 @keyframes install-in {
   from { opacity: 0; transform: translateY(14px) scale(0.97); }

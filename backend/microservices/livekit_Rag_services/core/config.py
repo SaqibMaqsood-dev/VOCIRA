@@ -62,9 +62,31 @@ class Settings(BaseSettings):
     # LiveKit
     # --------------------------------------------------------
 
+    # This is the address handed to the BROWSER - so on the server
+    # it is the public wss:// one.
     LIVEKIT_URL: str
+
+    # And this is the address the AGENT itself connects to LiveKit
+    # on.
+    #
+    # Why they differ: on the server the agent and LiveKit sit inside
+    # the same machine. Sending the agent to the public wss:// means
+    # the machine has to come back to its own public IP - and cloud
+    # NAT often refuses exactly that ("hairpin"). When it does,
+    # signalling keeps working for the browser, but the agent never
+    # joins the room and the call stays silent.
+    #
+    # Left empty, LIVEKIT_URL is used - so a local setup keeps
+    # working exactly as before.
+    LIVEKIT_INTERNAL_URL: str = ""
+
     LIVEKIT_API_KEY: str
     LIVEKIT_API_SECRET: str
+
+    @property
+    def LIVEKIT_AGENT_URL(self) -> str:
+        """Agent isi par judta hai."""
+        return self.LIVEKIT_INTERNAL_URL or self.LIVEKIT_URL
 
     # --------------------------------------------------------
     # ERP
@@ -153,21 +175,21 @@ URLS_FILE_PATH = DATA_DIR / "urls.txt"
 # Debug
 # ============================================================
 
-print(f"📁 [RAG Config] BASE_DIR: {BASE_DIR}")
-print(f"📄 [RAG Config] ENV_FILE: {ENV_FILE}")
-print(f"📄 [RAG Config] ENV_EXISTS: {ENV_FILE.exists()}")
+print(f"[RAG Config] BASE_DIR: {BASE_DIR}")
+print(f"[RAG Config] ENV_FILE: {ENV_FILE}")
+print(f"[RAG Config] ENV_EXISTS: {ENV_FILE.exists()}")
 
 print(
-    f"🔑 [RAG Config] PINECONE_API_KEY loaded: "
+    f"[RAG Config] PINECONE_API_KEY loaded: "
     f"{bool(settings.PINECONE_API_KEY)}"
 )
 
 print(
-    f"🔑 [RAG Config] GROQ_API_KEY loaded: "
+    f"[RAG Config] GROQ_API_KEY loaded: "
     f"{bool(settings.GROQ_API_KEY)}"
 )
 
 print(
-    f"🔑 [RAG Config] HF_TOKEN loaded: "
+    f"[RAG Config] HF_TOKEN loaded: "
     f"{bool(settings.HF_TOKEN)}"
 )

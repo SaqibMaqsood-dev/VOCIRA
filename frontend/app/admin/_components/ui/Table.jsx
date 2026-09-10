@@ -3,13 +3,13 @@ import { cn } from "@/lib/utils";
 /**
  * Table.
  *
- * Yahan bhi wahi toota hua border tha ("border-white/8" - Tailwind
- * us ka CSS banati hi nahi, tafseel Card.jsx mein). Ab /10, aur
- * radius baqi shell jaisa.
+ * This carried the same broken border ("border-white/8" - Tailwind
+ * generates no CSS for it; the details are in Card.jsx). It is now
+ * /10, with a radius matching the rest of the shell.
  *
- * Sath hi rows ko saans di gayi: pehle har row divide-white/10 ki
- * lakeer se kati hui thi, jo ghani tables mein jaali jaisi lagti
- * hai. Ab lakeerein halki hain aur padding zyada.
+ * The rows were also given room to breathe: every row used to be cut
+ * by a divide-white/10 line, which reads as a grid in dense tables.
+ * The lines are now fainter and the padding larger.
  */
 export function Table({ children, className }) {
   return (
@@ -47,8 +47,8 @@ export function THead({ children }) {
 }
 
 export function TBody({ children }) {
-  // divide-white/10 se har row ek jaali mein band lagti thi -
-  // /5 par lakeer nazar to aati hai magar shor nahi machati
+  // divide-white/10 made every row look boxed into a grid - at /5
+  // the line is still visible without shouting
   return <tbody className="divide-y divide-white/5">{children}</tbody>;
 }
 

@@ -1,12 +1,12 @@
 /**
  * PWA manifest.
  *
- * Next ise khud /manifest.webmanifest par serve karta hai, is liye
- * public/ mein alag file rakhne ki zaroorat nahi.
+ * Next serves this at /manifest.webmanifest by itself, so there is
+ * no need for a separate file in public/.
  *
- * start_url "/assistant" hai, "/" nahi: jo banda app ko phone par
- * install karta hai wo baat karne aata hai, marketing page parhne
- * nahi. Home page browser mein khulta rehta hai.
+ * start_url is "/assistant", not "/": someone who installs the app
+ * on their phone comes to talk, not to read the marketing page. The
+ * home page still opens in the browser.
  */
 
 export default function manifest() {
@@ -41,9 +41,9 @@ export default function manifest() {
         type: "image/png",
         purpose: "any",
       },
-      // Android icon ko gol/squircle mein kaat-ta hai. Maskable icons
-      // mein logo beech mein chhota rakha gaya hai, warna kinare kat
-      // jate hain.
+      // Android crops the icon into a circle/squircle. The logo is
+      // kept small and centred in the maskable icons, or the edges
+      // get cut off.
       {
         src: "/icons/maskable-192.png",
         sizes: "192x192",

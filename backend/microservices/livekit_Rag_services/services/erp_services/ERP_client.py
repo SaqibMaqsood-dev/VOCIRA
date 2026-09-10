@@ -37,12 +37,12 @@ class ERPClient:
 
         url = f"{self.base_url}{endpoint}"
 
-        # NOTE: yahan pehle poora self.headers chhapta tha, jis mein
-        # "token <API_KEY>:<API_SECRET>" hota hai - yaani ERP ki
-        # dono chabiyan har request par logs mein chali jati thin.
-        # Sirf itna batayein ke auth laga hua hai ya nahi.
+        # NOTE: this used to print the whole of self.headers, which
+        # contains "token <API_KEY>:<API_SECRET>" - meaning both ERP
+        # keys went into the logs on every request. Report only
+        # whether auth is set.
         print("=" * 52)
-        print("🔎 [ERP CLIENT REQUEST]")
+        print("[ERP CLIENT REQUEST]")
         print(f"URL     : {url}")
         print(f"PARAMS  : {params}")
         print(
@@ -100,10 +100,10 @@ class ERPClient:
         payload: dict,
     ) -> dict:
         """
-        ERP mein nayi cheez banayein.
+        Create something new in ERP.
 
-        Pehle yahan sirf get() tha - poora ERP integration read-only
-        tha. Support tickets ke liye likhna bhi zaroori hua.
+        There was only get() here before - the whole ERP integration
+        was read-only. Support tickets made writing necessary too.
         """
 
         # --------------------------------------------------
@@ -119,7 +119,7 @@ class ERPClient:
         url = f"{self.base_url}{endpoint}"
 
         print("=" * 52)
-        print("✍️ [ERP CLIENT WRITE]")
+        print("[ERP CLIENT WRITE]")
         print(f"URL     : {url}")
         print(f"FIELDS  : {sorted(payload.keys())}")
         print(
@@ -156,11 +156,11 @@ class ERPClient:
 
         except httpx.HTTPStatusError as exc:
 
-            # ERPNext apni asli wajah body mein bhejta hai
-            # (mandatory field, ghalat link waghera) - wo log
-            # mein rakhein, warna sirf "417" hath aata hai.
+            # ERPNext sends the real reason in the body (a
+            # mandatory field, a bad link, and so on) - keep that in
+            # the log, or all you have is "417".
             print(
-                f"❌ [ERP WRITE FAILED] "
+                f"[ERP WRITE FAILED] "
                 f"HTTP {exc.response.status_code}: "
                 f"{exc.response.text[:400]}"
             )

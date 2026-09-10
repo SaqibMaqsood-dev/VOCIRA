@@ -1,18 +1,17 @@
 """
-Support tickets - ERPNext ke apne Issue doctype mein.
+Support tickets - in ERPNext's own Issue doctype.
 
-Kyun ERPNext mein aur VOCIRA ke DB mein nahi:
+Why ERPNext rather than VOCIRA's database:
 
-ERPNext ka Support module pehle se poora ticket system rakhta hai -
-list, filter, staff ko assign karna, reply, resolve, close. School
-ka banda localhost:8081/app/issue par wahi kaam karta hai jo wo aam
-tor par karta hai. Hamein na koi admin screen banani parti, na koi
-nayi table.
+ERPNext's Support module already is a complete ticket system - list,
+filter, assign to staff, reply, resolve, close. Someone at the school
+works at localhost:8081/app/issue exactly as they normally would. We
+have to build neither an admin screen nor a new table.
 
-Maalik ERPNext hai: ticket ka status, assignment aur reply sab wahin
-rehte hain. VOCIRA sirf ticket banata hai aur us ka number lauta
-deta hai - apni koi copy nahi rakhta, warna do jagah status rakh kar
-drift shuru ho jati.
+ERPNext owns the data: ticket status, assignment and replies all live
+there. VOCIRA only creates the ticket and returns its number - it
+keeps no copy of its own, which would mean status in two places and
+the drift that follows.
 """
 
 import html
@@ -24,7 +23,7 @@ from backend.microservices.livekit_Rag_services.services.erp_services.ERP_client
 
 ISSUE_ENDPOINT = "/api/resource/Issue"
 
-# Voice call se aayi baat aur form se aayi baat alag pehchani jaayein
+# Tell apart what came from a voice call and what came from the form
 TYPE_SUPPORT = "Support Request"
 TYPE_ESCALATION = "Voice Escalation"
 
@@ -54,9 +53,9 @@ class SupportService:
         priority: str = DEFAULT_PRIORITY,
     ) -> dict:
         """
-        ERPNext mein Issue banayein aur us ka ticket number lautayein.
+        Create an Issue in ERPNext and return its ticket number.
 
-        subject ERPNext mein lazmi hai; baqi sab optional.
+        subject is required by ERPNext; everything else is optional.
         """
 
         subject = (subject or "").strip()[:MAX_SUBJECT]
@@ -65,12 +64,12 @@ class SupportService:
         if not subject:
             raise ValueError("Subject is required")
 
-        # Kis ne bheja - description ke upar bhi likh dete hain.
+        # Who sent it - written above the description as well.
         #
-        # raised_by field mein email pehle se jata hai, magar wo Data
-        # field hai: naam us mein nahi aa sakta, aur ERPNext ke kuch
-        # views us ko numayan nahi karte. Ticket kholte hi school ko
-        # bhejne wale ka naam aur email saaf nazar aana chahiye.
+        # The email already goes into the raised_by field, but that is
+        # a Data field: a name cannot go in it, and some ERPNext views
+        # do not show it prominently. Opening the ticket should show
+        # the school the sender's name and email straight away.
         header = (
             f"<p><b>From:</b> {html.escape(raised_by_name or 'Guest')} "
             f"&lt;{html.escape(raised_by or 'no email')}&gt;</p>"
@@ -78,9 +77,9 @@ class SupportService:
 
         payload = {
             "subject": subject,
-            # description "Text Editor" field hai - HTML samajhti hai.
-            # Parent ka likha hua escape karna zaroori hai, warna
-            # us ka text markup ban kar tootta hai.
+            # description is a "Text Editor" field - it interprets
+            # HTML. What the parent wrote has to be escaped, or their
+            # text is read as markup and breaks.
             "description": (
                 f"{header}<div>{html.escape(message)}</div>"
                 if message
@@ -94,8 +93,8 @@ class SupportService:
         if raised_by:
             payload["raised_by"] = raised_by
 
-        # Bachche ka Customer record - is se ticket us ke record se
-        # juR jata hai. Na mile to ticket phir bhi banta hai.
+        # The child's Customer record - this attaches the ticket to
+        # their record. If none is found the ticket is still created.
         if customer:
             payload["customer"] = customer
 
@@ -126,8 +125,8 @@ class SupportService:
         """
         Sirf isi parent ke tickets.
 
-        Filter yahan lagti hai, caller par bharosa nahi kiya jata -
-        wahi usool jo ERP ke baqi data par hai.
+        The filter is applied here; the caller is not trusted - the
+        same rule that governs the rest of the ERP data.
         """
 
         if not raised_by:

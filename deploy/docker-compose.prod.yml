@@ -1,0 +1,300 @@
+# =============================================================
+# VOCIRA - production stack (everything on one VM)
+#
+# How to run it (from the repo root):
+#
+#     docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --build
+#
+# ERPNext is NOT in this file - it runs from its own
+# frappe_test/pwd.yml. deploy/README.md explains how to join the two.
+#
+# DIFFERENCES FROM THE LOCAL COMPOSE (docker-compose.infra.yml):
+#
+#   - The host ports for Postgres/Redis/RabbitMQ have been REMOVED.
+#     Locally 5433/6380/5672 were exposed so Windows could connect
+#     directly. On a server those would be open to the internet, so
+#     they now live on Docker's internal network only.
+#
+#   - RabbitMQ no longer runs on guest/guest.
+#
+#   - LiveKit no longer runs with --dev (that installs known keys).
+#
+#   - Caddy is new: HTTPS and reverse proxy.
+# =============================================================
+
+name: vocira
+
+x-backend-image: &backend-image
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.backend
+  image: vocira-backend:latest
+
+x-backend-env: &backend-env
+  # ---- Database ----
+  POSTGRESQL: postgresql+asyncpg
+  DB_USER: ${POSTGRES_USER}
+  DB_PASSWORD: ${POSTGRES_PASSWORD}
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ${POSTGRES_DB}
+
+  # ---- Redis ----
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+
+  # ---- RabbitMQ ----
+  RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+
+  # ---- Service-to-service, inside the network ----
+  AUTH_SERVICE_URL: http://auth:8000
+  LIVEKIT_SERVICE_URL: http://livekit_rag:8001
+
+  # ---- Auth ----
+  #
+  # Every service needs these, not just auth: verify_tokken.py imports
+  # the auth service's Settings, so livekit_rag, gateway and worker all
+  # load this config too and verify tokens with the same key.
+  #
+  # The name has to be JWT_ALGORITHM. This said ALGORITHM, which no
+  # setting reads - it only worked because JWT_ALGORITHM defaults to
+  # HS256, so changing it here would have silently changed nothing.
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+  JWT_ALGORITHM: HS256
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+  REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS}
+  INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY}
+
+  # ---- LiveKit ----
+  # The address handed to the browser - through Caddy, hence wss://
+  LIVEKIT_URL: wss://lk.${DOMAIN}
+  # The agent's own route - it shares a network with LiveKit.
+  # Sending it to the public URL would make the machine come back to
+  # its own public IP, which cloud NAT usually refuses.
+  LIVEKIT_INTERNAL_URL: ws://livekit:7880
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+
+  # ---- ERPNext ----
+  ERP_BASE_URL: ${ERP_BASE_URL}
+  ERP_API_KEY: ${ERP_API_KEY}
+  ERP_API_SECRET: ${ERP_API_SECRET}
+
+  # ---- LLM / RAG ----
+  GROQ_API_KEY: ${GROQ_API_KEY}
+  HF_TOKEN: ${HF_TOKEN}
+  PINECONE_API_KEY: ${PINECONE_API_KEY}
+  LLM_BASE_URL: ${LLM_BASE_URL}
+  LLM_API_KEY: ${LLM_API_KEY}
+  LLM_FAST_MODEL: ${LLM_FAST_MODEL}
+  LLM_SMART_MODEL: ${LLM_SMART_MODEL}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER}
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL}
+  GEMINI_EMBEDDING_DIM: ${GEMINI_EMBEDDING_DIM}
+
+  # ---- Call limits ----
+  MAX_CONCURRENT_CALLS: ${MAX_CONCURRENT_CALLS}
+  MAX_CALL_SECONDS: ${MAX_CALL_SECONDS}
+  HANDOFF_ANSWER_TIMEOUT_SECONDS: ${HANDOFF_ANSWER_TIMEOUT_SECONDS}
+
+services:
+
+  # ===========================================================
+  # DATA
+  # ===========================================================
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks: [internal]
+    restart: unless-stopped
+
+  # ===========================================================
+  # WEBRTC
+  # ===========================================================
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    environment:
+      # LiveKit reads keys in exactly this shape: "<key>: <secret>"
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      # Media only. Signalling (7880) goes through Caddy, so it is
+      # not here.
+      #
+      # Without these two lines a call hangs at "connecting":
+      # signalling connects but the audio has no route.
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    networks: [internal, edge]
+    restart: unless-stopped
+
+  # ===========================================================
+  # APPLICATION
+  # ===========================================================
+
+  auth:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.auth
+    image: vocira-auth:latest
+    command: >
+      uvicorn backend.microservices.auth_services.main.main:app
+      --host 0.0.0.0 --port 8000
+    environment:
+      # The whole backend env, ON TOP OF auth's own settings.
+      #
+      # Why: backend/helper_functions/database/session.py builds the
+      # database engine from livekit_Rag's settings, and auth uses
+      # that same shared helper. So auth's process loads
+      # livekit_Rag's config too - and that config demands all of its
+      # values (ERP, Pinecone and the rest) or the import itself
+      # fails.
+      <<: *backend-env
+      APP_NAME: vocira-auth
+      APP_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8000"
+      DB_ECHO: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PASSWORD_HASH_ALGORITHM: ${PASSWORD_HASH_ALGORITHM}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: unless-stopped
+
+  livekit_rag:
+    <<: *backend-image
+    command: >
+      uvicorn backend.microservices.livekit_Rag_services.main.main:app
+      --host 0.0.0.0 --port 8001
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks: [internal]
+    restart: unless-stopped
+
+  gateway:
+    <<: *backend-image
+    command: >
+      uvicorn backend.microservices.gateway_api.main:app
+      --host 0.0.0.0 --port 9000
+    environment:
+      <<: *backend-env
+      # Let only our own frontend in. Left empty this becomes "*" -
+      # meaning any website at all.
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    depends_on:
+      - auth
+      - livekit_rag
+    networks: [internal]
+    restart: unless-stopped
+
+  worker:
+    <<: *backend-image
+    # This has no HTTP port - it listens for session.created on
+    # RabbitMQ and sends an agent into the room for each call.
+    command: python -m backend.microservices.livekit_Rag_services.livekit_worker
+    environment:
+      <<: *backend-env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: unless-stopped
+
+  # ===========================================================
+  # EDGE
+  # ===========================================================
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates - is volume ke baghair har restart par naya
+      # certificate banega aur Let's Encrypt rate-limit laga dega
+      - caddydata:/data
+      - caddyconfig:/config
+      - caddylogs:/var/log/caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - gateway
+      - livekit_rag
+      - livekit
+    networks: [internal, edge]
+    restart: unless-stopped
+
+networks:
+  # Services ki apas ki baat - bahar se bilkul band
+  internal:
+    driver: bridge
+
+  # Caddy <-> ERPNext (which runs from a separate compose file).
+  # This is created beforehand:  docker network create vocira-edge
+  edge:
+    external: true
+    name: vocira-edge
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitdata:
+  caddydata:
+  caddyconfig:
+  caddylogs:

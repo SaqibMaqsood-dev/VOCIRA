@@ -1,36 +1,37 @@
 "use client";
 
 /**
- * Admin panel ka darwaza.
+ * The admin panel's front door.
  *
- * Pehle koi guard nahi tha: /admin URL kisi ko bhi khul jata tha.
- * Data zaroor nahi milta (backend ke saare admin endpoints
- * require_admin ke peeche hain, parent ke token par 403 dete hain) -
- * magar panel ka poora dhaancha render ho jata tha, sidebar aur
- * headings samet, aur ghalti ka paighaam kuch der baad aata tha.
+ * There was no guard at all before: the /admin URL opened for
+ * anyone. No data came back (every admin endpoint on the backend
+ * sits behind require_admin and returns 403 for a parent's token) -
+ * but the panel's whole frame rendered, sidebar and headings
+ * included, and the error message arrived some moments later.
  *
- * Ab role pehle dekha jata hai:
+ * The role is now checked first:
  *
- *     token nahi        ->  /login
- *     role admin nahi   ->  /dashboard
- *     admin             ->  panel
+ *     no token        ->  /login
+ *     role not admin  ->  /dashboard
+ *     admin           ->  the panel
  *
- * AHEM: ye rok nahi, sirf tameez hai. localStorage ka role badal
- * dena aasan hai - aur us se kuch nahi milta, kyunke data phir bhi
- * backend se aata hai jo token ka role khud jaanchta hai. Ye guard
- * sirf ye karta hai ke ghalat jagah aane wale ko saaf raasta mile,
- * aur admin UI ki bemani jhalak na dikhe.
+ * IMPORTANT: this is manners, not a gate. Changing the role in
+ * localStorage is easy - and gains nothing, because the data still
+ * comes from the backend, which checks the token's role itself. All
+ * this guard does is send someone in the wrong place somewhere
+ * sensible, and avoid a pointless glimpse of the admin UI.
  */
 
 import { useEffect, useState } from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
+import { getAccessToken } from "@/lib/session";
 
 export default function AdminGuard({ children }) {
-  // "checking" -> abhi pata nahi, "allowed" -> admin, "denied" -> bhej diya
+  // "checking" -> not known yet, "allowed" -> admin, "denied" -> redirected
   const [state, setState] = useState("checking");
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
+    const token = getAccessToken();
 
     if (!token) {
       window.location.href = "/login";
@@ -38,8 +39,8 @@ export default function AdminGuard({ children }) {
       return;
     }
 
-    // Role login ke waqt rakha jata hai. Purane session mein na ho
-    // to token se nikal lete hain.
+    // The role is stored at login. If an older session does not
+    // have it, read it out of the token.
     let role = localStorage.getItem("role");
 
     if (!role) {
@@ -80,10 +81,10 @@ export default function AdminGuard({ children }) {
 }
 
 /**
- * JWT se role padhein - login page jaisa hi.
+ * Read the role out of the JWT - the same as on the login page.
  *
- * base64url ko base64 mein badalna parta hai; atob base64url nahi
- * samajhta.
+ * base64url has to be converted to base64; atob does not understand
+ * base64url.
  */
 function readRoleFromToken(token) {
   try {

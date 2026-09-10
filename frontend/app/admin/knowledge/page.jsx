@@ -3,19 +3,20 @@
 /**
  * Knowledge base.
  *
- * Pehle yahan sirf "Re-sync" ka button tha - jo PEHLE SE rakhi hui
- * files parhta tha. Naya data daalne ke liye server tak pahunch
- * chahiye thi: file khud sahi folder mein rakho, phir sync dabao.
+ * There was only a "Re-sync" button here before - and it read the
+ * files that were ALREADY in place. Adding new data needed access to
+ * the server: put the file in the right folder yourself, then press
+ * sync.
  *
- * Ab do raaste hain:
+ * There are now two routes:
  *
- *   Upload   PDF ya TXT - bare documents ke liye
- *   Note     seedha likh dein - "timing badal gaya" ke liye PDF
- *            edit karna bewaqoofi hai
+ *   Upload   PDF or TXT - for full documents
+ *   Note     write it straight in - editing a PDF for "the timings
+ *            changed" is absurd
  *
- * Aur ek list: kaunsa document, kab aaya, kitne chunks bane. Ye
- * pehle kahin nazar nahi aata tha - index mein 32 vectors thay
- * magar ye pata nahi chalta tha ke wo kis kis cheez se bane.
+ * And a list: which document, when it arrived, how many chunks it
+ * produced. None of this was visible before - the index held 32
+ * vectors with no way to tell what they had been built from.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -63,10 +64,10 @@ export default function KnowledgePage() {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
 
-  // Sync ka intezaar lamba ho sakta hai. Agar us dauran user kisi
-  // aur page par chala jaye to component hat jata hai - aur us ke
-  // baad setState karna React ka warning deta hai aur bekaar bhi
-  // hai. Is liye har await ke baad ye dekh lete hain.
+  // Waiting for a sync can take a while. If the user moves to
+  // another page meanwhile, the component unmounts - and calling
+  // setState after that warns in React and is pointless anyway. So
+  // this is checked after every await.
   const alive = useRef(true);
   const flashTimer = useRef(null);
 
@@ -79,10 +80,10 @@ export default function KnowledgePage() {
   }, []);
 
   /**
-   * Ek paighaam jo khud chala jata hai.
+   * A message that clears itself.
    *
-   * Pehle notice hamesha ke liye chipka reh jata tha - "Sync started"
-   * screen par para rehta chahe sync kab ki mukammal ho chuki ho.
+   * The notice used to stick around forever - "Sync started" sat on
+   * screen no matter how long ago the sync had finished.
    */
   const flash = (message, ms = 4000) => {
     setNotice(message);
@@ -111,12 +112,12 @@ export default function KnowledgePage() {
     try {
       await adminFetch("/livekit/admin/knowledge/sync", { method: "POST" });
 
-      // Server 202 foran de deta hai - sync background mein chalti
-      // hai. Pehle yahan ek setTimeout(4s) tha aur bas: notice hamesha
-      // ke liye chipka reh jata tha, aur sync 4s se lambi hoti to
-      // panel purane numbers dikhata rehta.
+      // The server returns 202 immediately - the sync runs in the
+      // background. There was just a setTimeout(4s) here before: the
+      // notice stuck around forever, and if the sync took longer
+      // than 4s the panel kept showing the old numbers.
       //
-      // Ab poochte rehte hain ke khatam hui ya nahi.
+      // We now keep asking whether it has finished.
       const finished = await waitForSync();
 
       if (!alive.current) return;
@@ -126,14 +127,15 @@ export default function KnowledgePage() {
         flash("Sync complete — Vocira is using the latest documents.");
       } else if (finished.state === "failed") {
         setNotice("");
-        // Ghalti poll se seedha lete hain, `data` se nahi - wo abhi
-        // purani halat rakhta hai kyunke refresh hua hi nahi.
+        // Take the error straight from the poll, not from `data` -
+        // that still holds the old state because no refresh has
+        // happened yet.
         setProblem(
           finished.error || "The sync failed. Check the server logs."
         );
       } else {
-        // itni der ho gayi ke hum ne poochna chhor diya - sync shayad
-        // ab bhi chal rahi ho, is liye ise nakami nahi kehte
+        // we waited long enough to stop asking - the sync may well
+        // still be running, so this is not called a failure
         setNotice("");
         refreshAll();
       }
@@ -147,11 +149,11 @@ export default function KnowledgePage() {
   }
 
   /**
-   * State "running" se nikalne ka intezaar.
+   * Wait for the state to leave "running".
    *
-   * Do minute (60 x 2s) tak poochte hain. Us se aage sync shayad ab
-   * bhi chal rahi ho - is liye "timeout" ko nakami nahi kehte, bas
-   * poochna chhor dete hain.
+   * We ask for two minutes (60 x 2s). Beyond that the sync may still
+   * be running - so a "timeout" is not treated as a failure, we
+   * simply stop asking.
    */
   async function waitForSync() {
     for (let i = 0; i < 60; i++) {
@@ -165,8 +167,8 @@ export default function KnowledgePage() {
           return last;
         }
       } catch {
-        // ek poochne mein nakami se sab kuch nahi rukna chahiye -
-        // agli baar phir koshish ho jayegi
+        // one failed poll should not stop everything - the next
+        // attempt will try again
       }
     }
     return { state: "timeout" };

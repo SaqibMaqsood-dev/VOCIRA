@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import traceback
 from typing import Optional
 from uuid import UUID
@@ -62,12 +63,15 @@ class LivekitRoomServices:
         self.human_has_joined = False
         self.admin_has_joined = False
 
-        # Greeting sirf EK baar - warna har participant event par
-        # dobara bol deta
+        # Greet ONCE only - otherwise it speaks again on every
+        # participant event
         self._greeted = False
 
         self._admin_handoff_requested = False
         self._escalation_created = False
+
+        # If no admin picks up, the AI takes over again
+        self._handoff_timeout_task = None
 
         # =====================================================
         # HANDOFF INFORMATION
@@ -115,21 +119,21 @@ class LivekitRoomServices:
 
         self._speech_generation = 0
 
-        # Aakhri generation jo waqai bol di gayi. Isi se tay hota
-        # hai ke koi jawab purana hai ya nahi - sirf _speech_generation
-        # se tay karne par har jawab phenka ja raha tha.
+        # The last generation that was actually spoken. This is what
+        # decides whether an answer is stale - judging by
+        # _speech_generation alone was throwing every answer away.
         self._last_played_generation = 0
 
         self._is_agent_speaking = False
 
-        # Aakhri haalat jo frontend ko bheji gayi (lk.agent.state).
-        # LiveKit ka visualizer isi se listening / thinking /
-        # speaking dikhata hai. None ka matlab abhi kuch nahi bheja.
+        # The last state published to the frontend (lk.agent.state).
+        # LiveKit's visualizer shows listening / thinking / speaking
+        # from this. None means nothing has been published yet.
         self._agent_state = None
 
-        # Agent ne aakhri baar kab bolna khatam kiya. Iske baad
-        # thori der mic nahi suna jata, warna speaker se nikalti
-        # awaaz ki dum agla "sawal" ban jati hai.
+        # When the agent last finished speaking. The mic is ignored
+        # for a short while after that, or the tail of its own audio
+        # coming out of the speaker becomes the next "question".
         self._agent_speech_ended_at = 0.0
 
         # =====================================================
@@ -264,11 +268,11 @@ class LivekitRoomServices:
                     can_subscribe=True,
                     agent=(participant_type == "agent"),
 
-                    # Agent apni haalat "lk.agent.state" attribute se
-                    # batata hai (listening / thinking / speaking) -
-                    # LiveKit ke UI components isi ko parhte hain.
-                    # set_attributes() ke liye yehi permission chahiye;
-                    # is ke baghair wo chup-chaap nakaam ho jata hai.
+                    # The agent publishes its state through the
+                    # "lk.agent.state" attribute (listening /
+                    # thinking / speaking) - LiveKit's UI components
+                    # read exactly that. set_attributes() needs this
+                    # permission; without it, it fails silently.
                     can_update_own_metadata=(
                         participant_type == "agent"
                     ),
@@ -296,10 +300,10 @@ class LivekitRoomServices:
 
     async def greet_once(self):
         """
-        Insaan ke room mein aate hi ek baar salaam karein.
+        Greet once, as soon as a person joins the room.
 
-        Pehle koi greeting thi hi nahi - agent chup baitha rehta tha
-        aur user ko pata hi nahi chalta tha ke wo juda bhi hai ya nahi.
+        There was no greeting at all before - the agent just sat
+        there silently and the user could not tell it had connected.
         """
 
         if self._greeted:
@@ -308,11 +312,11 @@ class LivekitRoomServices:
         self._greeted = True
 
         try:
-            # speak_text har nakami par exception nahi phenkta - track
-            # tayyar na ho, room na ho, ya frame bhejna fail ho jaye to
-            # wo sirf False lauta deta hai. Pehle ye return value
-            # nazarandaz hoti thi, is liye greeting bilkul khamoshi se
-            # ghayab ho jati thi aur logs mein koi nishan nahi hota tha.
+            # speak_text does not raise on every failure - if the
+            # track is not ready, the room is gone, or sending a frame
+            # fails, it simply returns False. This return value used
+            # to be ignored, so the greeting vanished silently and
+            # left no trace in the logs.
             spoken = await voice_pipeline.speak_text(
                 service_handle=self,
                 audio_source=self.agent_source,
@@ -321,14 +325,14 @@ class LivekitRoomServices:
 
             if not spoken:
                 print(
-                    "⚠️ [Greeting] boli nahi ja saki - "
+                    "[Greeting] boli nahi ja saki - "
                     "agent track ya room tayyar nahi tha. "
-                    "(upar [Speak] wali line asal wajah batati hai)"
+                    "(the [Speak] line above gives the real reason)"
                 )
 
         except Exception as error:
             print(
-                f"❌ [Greeting] fail: "
+                f"[Greeting] fail: "
                 f"{type(error).__name__}: {error}"
             )
 
@@ -336,8 +340,8 @@ class LivekitRoomServices:
 
     def _schedule_greeting(self):
         """
-        Greeting background task mein - event handler sync hai,
-        is liye yahan await nahi kar sakte.
+        Greet in a background task - the event handler is sync, so
+        it cannot await here.
         """
         task = asyncio.create_task(self.greet_once())
         self._background_tasks.add(task)
@@ -369,6 +373,8 @@ class LivekitRoomServices:
         self._admin_handoff_requested = False
         self._escalation_created = False
 
+        self._cancel_handoff_timeout()
+
         self._admin_handoff_user_id = None
         self._admin_handoff_session_id = None
         self._admin_handoff_user_type = None
@@ -387,7 +393,7 @@ class LivekitRoomServices:
         self._agent_speech_ended_at = 0.0
 
         print(
-            f"🚀 [Worker] Spin-up initialized "
+            f"[Worker] Spin-up initialized "
             f"for room: {self.room_name}"
         )
 
@@ -415,7 +421,7 @@ class LivekitRoomServices:
         def on_connected():
 
             print(
-                f"✅ [Worker] Successfully connected "
+                f"[Worker] Successfully connected "
                 f"to room: {self.room.name}"
             )
 
@@ -458,7 +464,7 @@ class LivekitRoomServices:
             )
 
             print(
-                "👤 [Participant Joined]"
+                "[Participant Joined]"
             )
 
             print(
@@ -491,7 +497,7 @@ class LivekitRoomServices:
             ):
 
                 print(
-                    "🤖 [Participant] "
+                    "[Participant] "
                     "AI agent detected."
                 )
 
@@ -507,12 +513,16 @@ class LivekitRoomServices:
             ):
 
                 print(
-                    "👨‍💼 [Participant] "
+                    "[Participant] "
                     "ADMIN detected."
                 )
 
                 self.admin_has_joined = True
                 self.human_has_joined = True
+
+                # An admin arrived - the "nobody is answering"
+                # watchdog should no longer fire
+                self._cancel_handoff_timeout()
 
                 if self._disconnect_timer:
 
@@ -523,7 +533,7 @@ class LivekitRoomServices:
                 if self._admin_handoff_requested:
 
                     print(
-                        "📞 [Admin Handoff] "
+                        "[Admin Handoff] "
                         "Admin joined after handoff."
                     )
 
@@ -546,12 +556,12 @@ class LivekitRoomServices:
             if participant_type == "guest":
 
                 print(
-                    "👤 [Participant] "
+                    "[Participant] "
                     "GUEST detected."
                 )
 
                 print(
-                    "🔒 [Security] "
+                    "[Security] "
                     "Guest has no authenticated user ID."
                 )
 
@@ -577,12 +587,12 @@ class LivekitRoomServices:
             ):
 
                 print(
-                    "👤 [Participant] "
+                    "[Participant] "
                     "AUTHENTICATED USER detected."
                 )
 
                 print(
-                    f"🔐 Authenticated User ID: "
+                    f"Authenticated User ID: "
                     f"{participant_user_id}"
                 )
 
@@ -603,7 +613,7 @@ class LivekitRoomServices:
             # =================================================
 
             print(
-                "⚠️ [Participant] "
+                "[Participant] "
                 "Unknown participant type."
             )
 
@@ -617,7 +627,7 @@ class LivekitRoomServices:
         ):
 
             print(
-                f"🚪 [User Left] "
+                f"[User Left] "
                 f"Participant left: "
                 f"{participant.identity}"
             )
@@ -659,7 +669,7 @@ class LivekitRoomServices:
             ):
 
                 print(
-                    "👨‍💼 [Admin] "
+                    "[Admin] "
                     "Admin left the room."
                 )
 
@@ -672,7 +682,7 @@ class LivekitRoomServices:
             if self._intentional_disconnect:
 
                 print(
-                    "📞 [Worker] "
+                    "[Worker] "
                     "Intentional call termination detected."
                 )
 
@@ -696,7 +706,7 @@ class LivekitRoomServices:
             if not humans_in_room:
 
                 print(
-                    "🤫 [Worker] "
+                    "[Worker] "
                     "Last human left. "
                     "Starting 10s grace period..."
                 )
@@ -730,7 +740,7 @@ class LivekitRoomServices:
                 return
 
             print(
-                f"🎤 [Audio Active] "
+                f"[Audio Active] "
                 f"Subscribed to track from "
                 f"{participant.identity}"
             )
@@ -772,7 +782,7 @@ class LivekitRoomServices:
             ):
 
                 print(
-                    "👨‍💼 [Audio] "
+                    "[Audio] "
                     "Admin audio detected. "
                     "AI will not process admin audio."
                 )
@@ -797,7 +807,7 @@ class LivekitRoomServices:
             }:
 
                 print(
-                    "⚠️ [Audio] "
+                    "[Audio] "
                     "Unknown participant type. "
                     "Ignoring audio."
                 )
@@ -831,8 +841,11 @@ class LivekitRoomServices:
 
         try:
 
+            # Not the browser's public address - the agent's own
+            # route. On the server this is the internal
+            # ws://livekit:7880; locally the two are the same thing.
             await self.room.connect(
-                settings.LIVEKIT_URL,
+                settings.LIVEKIT_AGENT_URL,
                 token,
             )
 
@@ -843,7 +856,7 @@ class LivekitRoomServices:
         except Exception as error:
 
             print(
-                f"❌ [Worker Error] "
+                f"[Worker Error] "
                 f"Loop exception occurred: "
                 f"{error}"
             )
@@ -863,7 +876,7 @@ class LivekitRoomServices:
             except Exception as error:
 
                 print(
-                    f"⚠️ [Session Cleanup Error] "
+                    f"[Session Cleanup Error] "
                     f"{error}"
                 )
 
@@ -874,7 +887,7 @@ class LivekitRoomServices:
     async def end_call(self):
 
         print(
-            "📞 [Worker] "
+            "[Worker] "
             "Explicit End Call requested."
         )
 
@@ -900,9 +913,131 @@ class LivekitRoomServices:
             await self.room.disconnect()
 
         print(
-            "📞 [Worker] "
+            "[Worker] "
             "Explicit End Call completed."
         )
+
+    # =========================================================
+    # HANDOFF STATE -> THE USER'S BROWSER
+    #
+    # The AI's voice was the only sign the user got that they were
+    # being connected to a person. Nothing changed on screen, so
+    # during the silence it felt like the call had dropped.
+    #
+    # The frontend reads this attribute:
+    #     requested  -> "Connecting you to a human agent..."
+    #     connected  -> "You are speaking with a human agent"
+    #
+    # NOTE: the AI's attributes go away the moment it leaves the
+    # room, so the frontend also infers "connected" from the admin
+    # participant joining - that signal survives the AI leaving.
+    # =========================================================
+
+    HANDOFF_ATTRIBUTE = "vocira.handoff"
+
+    # If no admin arrives within this long, the AI takes over again.
+    #
+    # Without it the caller was left in silence forever: the AI has
+    # stopped speaking (all the handoff TTS guards), and the admin
+    # never comes. The screen just kept saying "Connecting you to a
+    # human agent..." while nothing happened.
+    HANDOFF_ANSWER_TIMEOUT = int(
+        os.getenv("HANDOFF_ANSWER_TIMEOUT_SECONDS", "60")
+    )
+
+    HANDOFF_NO_ANSWER_TEXT = (
+        "I am sorry, no one from our staff is free at the moment. "
+        "Your request has been saved and someone will get back to "
+        "you. In the meantime, I can keep helping you."
+    )
+
+    async def _publish_handoff_state(self, state: str) -> None:
+
+        if not self.room or not self.room.isconnected():
+            return
+
+        try:
+
+            await self.room.local_participant.set_attributes(
+                {self.HANDOFF_ATTRIBUTE: state}
+            )
+
+            print(
+                f"[Handoff State] '{state}' user ko bhej diya."
+            )
+
+        except Exception as error:
+
+            # Only a notification - a handoff must not fail over this
+            print(
+                f"[Handoff State] '{state}' nahi bhej sake: {error}"
+            )
+
+    # =========================================================
+    # KOI ADMIN NA UTHAYE TO
+    # =========================================================
+
+    def _cancel_handoff_timeout(self):
+
+        task = self._handoff_timeout_task
+
+        self._handoff_timeout_task = None
+
+        if task and not task.done():
+            task.cancel()
+
+    async def _handoff_no_answer_watchdog(self):
+        """
+        Muqarrara waqt tak admin na aaye to AI dobara sambhal le.
+
+        The escalation stays 'pending' - an admin can still see it
+        later on the Escalations page. All this does is keep the
+        caller from sitting in silence.
+        """
+
+        try:
+
+            await asyncio.sleep(
+                self.HANDOFF_ANSWER_TIMEOUT
+            )
+
+        except asyncio.CancelledError:
+
+            # An admin arrived - which is the whole point
+            return
+
+        if (
+            self.admin_has_joined
+            or not self._admin_handoff_requested
+        ):
+            return
+
+        print(
+            f"[Admin Handoff] "
+            f"no admin arrived within "
+            f"{self.HANDOFF_ANSWER_TIMEOUT}s - the AI is taking over."
+        )
+
+        # The flag has to be cleared first: without that, the
+        # handoff guards in speak_text keep the AI muted.
+        self._admin_handoff_requested = False
+
+        await self._publish_handoff_state("no_answer")
+
+        try:
+
+            await voice_pipeline.speak_text(
+                service_handle=self,
+                audio_source=self.agent_source,
+                text=self.HANDOFF_NO_ANSWER_TEXT,
+            )
+
+        except Exception as error:
+
+            print(
+                f"[Admin Handoff] no-answer paighaam "
+                f"nahi bola ja saka: {error}"
+            )
 
     # =========================================================
     # REQUEST ADMIN HANDOFF
@@ -921,7 +1056,7 @@ class LivekitRoomServices:
         if self._admin_handoff_requested:
 
             print(
-                "⚠️ [Admin Handoff] "
+                "[Admin Handoff] "
                 "Handoff already requested."
             )
 
@@ -930,31 +1065,31 @@ class LivekitRoomServices:
         print("=" * 60)
 
         print(
-            "📞 [ADMIN HANDOFF REQUESTED]"
+            "[ADMIN HANDOFF REQUESTED]"
         )
 
         print(
-            f"👤 User ID       : {user_id}"
+            f"User ID       : {user_id}"
         )
 
         print(
-            f"👤 User Type     : {user_type}"
+            f"User Type     : {user_type}"
         )
 
         print(
-            f"🆔 Session ID    : {session_id}"
+            f"Session ID    : {session_id}"
         )
 
         print(
-            f"🗣️ User Request  : {user_query}"
+            f"User Request  : {user_query}"
         )
 
         print(
-            f"🚨 Escalation ID : {escalation_id}"
+            f"Escalation ID : {escalation_id}"
         )
 
         print(
-            f"💬 Message ID    : {message_id}"
+            f"Message ID    : {message_id}"
         )
 
         print("=" * 60)
@@ -980,14 +1115,16 @@ class LivekitRoomServices:
         self._is_agent_speaking = False
 
         print(
-            "✋ [Admin Handoff] "
+            "[Admin Handoff] "
             "Current AI generation cancelled."
         )
+
+        await self._publish_handoff_state("requested")
 
         if self.admin_has_joined:
 
             print(
-                "👨‍💼 [Admin Handoff] "
+                "[Admin Handoff] "
                 "Admin is already in the room."
             )
 
@@ -1004,8 +1141,23 @@ class LivekitRoomServices:
             return
 
         print(
-            "⏳ [Admin Handoff] "
-            "Waiting for admin to join..."
+            "[Admin Handoff] "
+            f"Waiting up to {self.HANDOFF_ANSWER_TIMEOUT}s "
+            "for an admin to join..."
+        )
+
+        self._cancel_handoff_timeout()
+
+        watchdog = asyncio.create_task(
+            self._handoff_no_answer_watchdog()
+        )
+
+        self._handoff_timeout_task = watchdog
+
+        self._background_tasks.add(watchdog)
+
+        watchdog.add_done_callback(
+            self._background_tasks.discard
         )
 
     # =========================================================
@@ -1017,7 +1169,7 @@ class LivekitRoomServices:
         if not self.room:
 
             print(
-                "⚠️ [Admin Handoff] "
+                "[Admin Handoff] "
                 "Room unavailable."
             )
 
@@ -1026,20 +1178,26 @@ class LivekitRoomServices:
         if not self.room.isconnected():
 
             print(
-                "⚠️ [Admin Handoff] "
+                "[Admin Handoff] "
                 "Room already disconnected."
             )
 
             return
 
         print(
-            "📞 [Admin Handoff] "
+            "[Admin Handoff] "
             "Admin successfully joined."
         )
+
+        self._cancel_handoff_timeout()
 
         self._speech_generation += 1
 
         self._is_agent_speaking = False
+
+        # Publish this BEFORE the AI leaves the room - otherwise the
+        # news never reaches the user at all.
+        await self._publish_handoff_state("connected")
 
         try:
 
@@ -1067,7 +1225,7 @@ class LivekitRoomServices:
                         )
 
                         print(
-                            "🔇 [Admin Handoff] "
+                            "[Admin Handoff] "
                             "AI voice track unpublished."
                         )
 
@@ -1076,7 +1234,7 @@ class LivekitRoomServices:
         except Exception as error:
 
             print(
-                "⚠️ [Admin Handoff] "
+                "[Admin Handoff] "
                 "Failed to unpublish AI track:"
             )
 
@@ -1085,21 +1243,21 @@ class LivekitRoomServices:
         try:
 
             print(
-                "🤖 [Admin Handoff] "
+                "[Admin Handoff] "
                 "Disconnecting AI agent..."
             )
 
             await self.room.disconnect()
 
             print(
-                "✅ [Admin Handoff] "
+                "[Admin Handoff] "
                 "AI disconnected."
             )
 
         except Exception as error:
 
             print(
-                "❌ [Admin Handoff] "
+                "[Admin Handoff] "
                 "Failed to disconnect AI:"
             )
 
@@ -1118,7 +1276,7 @@ class LivekitRoomServices:
         if not self.room:
 
             print(
-                "❌ [LiveKit] "
+                "[LiveKit] "
                 "Cannot publish agent voice. "
                 "Room is unavailable."
             )
@@ -1128,7 +1286,7 @@ class LivekitRoomServices:
         if not self.agent_track:
 
             print(
-                "❌ [LiveKit] "
+                "[LiveKit] "
                 "Cannot publish agent voice. "
                 "Agent track is unavailable."
             )
@@ -1152,7 +1310,7 @@ class LivekitRoomServices:
             )
 
             print(
-                f"📡 Published Track SID: "
+                f"Published Track SID: "
                 f"{publication.sid}"
             )
 
@@ -1161,12 +1319,12 @@ class LivekitRoomServices:
                 self.agent_track.unmute()
 
             print(
-                f"🎤 Track Muted State: "
+                f"Track Muted State: "
                 f"{publication.muted}"
             )
 
             print(
-                "📚 Local Publications: "
+                "Local Publications: "
                 f"{list(
                     self.room
                     .local_participant
@@ -1180,7 +1338,7 @@ class LivekitRoomServices:
         except Exception as error:
 
             print(
-                "❌ [LiveKit] "
+                "[LiveKit] "
                 "Failed publishing agent track:"
             )
 
@@ -1197,7 +1355,7 @@ class LivekitRoomServices:
             await asyncio.sleep(10)
 
             print(
-                "🤫 [Worker] "
+                "[Worker] "
                 "Grace period expired. "
                 "Initiating clean room teardown..."
             )
@@ -1214,7 +1372,7 @@ class LivekitRoomServices:
         except asyncio.CancelledError:
 
             print(
-                "🔄 [Worker] "
+                "[Worker] "
                 "Teardown cancelled. "
                 "Human returned safely."
             )
@@ -1226,10 +1384,12 @@ class LivekitRoomServices:
     async def cleanup(self):
 
         print(
-            "🛑 [Worker] "
+            "[Worker] "
             "Cleaning up resources and "
             "cancelling background tasks..."
         )
+
+        self._cancel_handoff_timeout()
 
         if self._disconnect_timer:
 
@@ -1261,7 +1421,7 @@ class LivekitRoomServices:
         except Exception as error:
 
             print(
-                f"⚠️ [Worker Cleanup] "
+                f"[Worker Cleanup] "
                 f"Room disconnect failed: "
                 f"{error}"
             )
@@ -1269,7 +1429,7 @@ class LivekitRoomServices:
         self._shutdown_event.set()
 
         print(
-            f"🛑 [Worker] "
+            f"[Worker] "
             f"Disconnected from "
             f"{self.room_name}."
         )

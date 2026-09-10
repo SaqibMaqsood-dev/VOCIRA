@@ -42,11 +42,11 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    print("✅ Auth service started successfully")
+    print("Auth service started successfully")
 
     yield
 
-    logging.critical("🛑 Auth Service is shutting down")
+    logging.critical("Auth Service is shutting down")
 
 
 # ============================================================
@@ -63,9 +63,9 @@ app = FastAPI(
 # ============================================================
 
 app.include_router(user_router.router)
-# Admin panel ka Users page - parents ke accounts sambhalne ke liye.
-# Ye auth service mein hai kyunke password hashing (argon2) sirf
-# yahan ke venv mein mojood hai.
+# The admin panel's Users page - for managing parent accounts.
+# It lives in the auth service because password hashing (argon2)
+# exists only in this venv.
 app.include_router(admin_users_router.router)
 app.include_router(refresh_token_router.route)
 app.include_router(auth_router.router)

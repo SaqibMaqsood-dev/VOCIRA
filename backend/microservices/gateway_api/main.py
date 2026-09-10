@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, Request, Response
 import httpx
 
@@ -14,10 +16,26 @@ app = FastAPI(
 # ============================================================
 # CORS
 # ============================================================
+#
+# Locally everything is localhost, so "*" was good enough. On the
+# internet it is not: "*" together with allow_credentials means ANY
+# website can call this API on behalf of a logged-in user.
+#
+# Put your frontend's address into CORS_ORIGINS (the Vercel one);
+# several can be given, separated by commas. Leave it unset and the
+# old "*" behaviour remains - for local development.
+
+_origins = os.getenv("CORS_ORIGINS", "").strip()
+
+ALLOWED_ORIGINS = (
+    [o.strip() for o in _origins.split(",") if o.strip()]
+    if _origins
+    else ["*"]
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,9 +45,21 @@ app.add_middleware(
 # ============================================================
 # SERVICES
 # ============================================================
+#
+# Under Docker each service lives in its own container, so 127.0.0.1
+# there is the gateway's own container and the call reaches nothing.
+# The default is left as it was so a local setup keeps working
+# exactly as before.
 
-AUTH_SERVICE = "http://127.0.0.1:8000"
-LIVEKIT_SERVICE = "http://127.0.0.1:8001"
+AUTH_SERVICE = os.getenv(
+    "AUTH_SERVICE_URL",
+    "http://127.0.0.1:8000",
+).rstrip("/")
+
+LIVEKIT_SERVICE = os.getenv(
+    "LIVEKIT_SERVICE_URL",
+    "http://127.0.0.1:8001",
+).rstrip("/")
 
 
 # ============================================================

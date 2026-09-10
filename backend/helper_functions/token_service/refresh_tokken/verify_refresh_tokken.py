@@ -7,16 +7,17 @@ from backend.microservices.auth_services.schema.token_schema import TokenData
 
 def verify_refresh_tokken(token, credentials_exception):
     """
-    Refresh token verify karein aur TokenData lautayein.
+    Verify a refresh token and return TokenData.
 
-    Pehle yahan do bug the, jin ki wajah se /refresh 500 deta tha:
+    There were two bugs here that made /refresh return a 500:
 
-      1. settings.ALGORITHM  -> Settings mein aisa koi field hai hi
-         nahi (JWT_ALGORITHM hai). AttributeError uthta tha, aur wo
-         InvalidTokenError na hone ki wajah se catch bhi nahi hota tha.
+      1. settings.ALGORITHM  -> no such field exists on Settings (it
+         is JWT_ALGORITHM). It raised AttributeError, which was not
+         caught either, not being an InvalidTokenError.
 
-      2. TokenData(username=email) -> TokenData ko user_id: UUID bhi
-         chahiye (koi default nahi). Pydantic validation fail hoti thi.
+      2. TokenData(username=email) -> TokenData also requires
+         user_id: UUID (it has no default). Pydantic validation
+         failed.
     """
     try:
         payload = jwt.decode(
@@ -29,7 +30,7 @@ def verify_refresh_tokken(token, credentials_exception):
         user_id = payload.get("user_id")
         token_type = payload.get("type")
 
-        # sirf refresh token qubool karein - access token nahi
+        # accept refresh tokens only - not access tokens
         if email is None or user_id is None or token_type != "refresh":
             raise credentials_exception
 

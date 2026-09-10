@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { LogOut, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { clearSession } from "@/lib/session";
 import BrandLogo from "@/components/BrandLogo";
 
 const navItems = [
@@ -63,11 +64,7 @@ export default function Navbar() {
    * Logout
    */
   const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("token_type");
-    localStorage.removeItem("auth_response");
+    clearSession();
 
     setIsLoggedIn(false);
 
@@ -162,13 +159,14 @@ export default function Navbar() {
               </>
             ) : (
               <>
-                {/* Kaun login hai - pehle iska koi nishaan hi
-                    nahi tha, sirf "Logout" para rehta tha aur
-                    ye pata nahi chalta ke kis ka session hai. */}
-                {/* Chip jagah ke hisab se simat jata hai: chhoti
-                    screen par sirf avatar, phir naam, aur email
-                    sirf bari screen par. Warna nav bar se bahar
-                    nikal jata tha aur Logout hi nazar na aata. */}
+                {/* Who is logged in - there was no sign of this
+                    before, just "Logout" sitting there with no way
+                    to tell whose session it was. */}
+                {/* The chip shrinks with the space available: on a
+                    small screen the avatar only, then the name, and
+                    the email only on a large screen. Otherwise it
+                    pushed out of the nav bar and Logout disappeared
+                    with it. */}
                 <div className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] p-1.5 shadow-card backdrop-blur-xl lg:gap-2.5 lg:pr-3">
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent-primary to-accent-secondary text-xs font-bold text-[#05041c]">
                     {initialsOf(who)}
@@ -319,14 +317,15 @@ export default function Navbar() {
 
 
 /**
- * JWT se naam aur email.
+ * Name and email from the JWT.
  *
- * Login ke waqt backend token mein "name" bhi daalta hai (pehle sirf
- * sub/user_id/role thay). Us se pehle UI ke paas naam tha hi nahi -
- * "Muhammad Ahmed" ki jagah "ahmed@test.com" dikhana parta.
+ * At login the backend now puts "name" into the token as well (it
+ * held only sub/user_id/role before). Until then the UI had no name
+ * at all - it had to show "ahmed@test.com" in place of "Muhammad
+ * Ahmed".
  *
- * Signature yahan nahi jaanchi jati: ye sirf dikhane ke liye hai,
- * asli rok har API call par backend lagata hai.
+ * The signature is not verified here: this is for display only, and
+ * the real gate is applied by the backend on every API call.
  */
 function readUser(token) {
   try {

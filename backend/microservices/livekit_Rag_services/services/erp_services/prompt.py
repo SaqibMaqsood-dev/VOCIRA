@@ -1,23 +1,24 @@
 """
 ERP query planner prompt — FALLBACK raasta.
 
-Voice pipeline ab ye use NAHI karta. Wo router ke ek hi call mein
-intent + resource + student le leta hai aur seedha ERPService.fetch()
-bulata hai (dekhein services/groq/intent_prompt.py).
+The voice pipeline no longer uses this. It gets intent + resource +
+student from a single router call and invokes ERPService.fetch()
+directly (see services/groq/intent_prompt.py).
 
-Ye sirf ERPService.handle_query() ke liye reh gaya hai — jab caller ke
-paas sirf sawal ho, resource maloom na ho (tests waghera).
+This remains only for ERPService.handle_query() — for when the caller
+has just the question and does not know the resource (tests and the
+like).
 
-Pehle ye prompt 810 lines ka tha aur har ERP sawal par ~4,000 tokens
-kharch karta tha. Wajah ye thi ke wo poora query plan bananay ki koshish
-karta tha — filters, fields, limit. Magar application:
+This prompt used to be 810 lines and spent ~4,000 tokens on every ERP
+question. The reason was that it tried to produce a whole query plan —
+filters, fields, limit. But the application:
 
-    fields   -> poori tarah ignore karti hai (endpoint.py se aate hain)
-    filters  -> sirf student_name nikalti hai, baqi phenk deti hai
-    limit    -> constant hi rakhti hai
+    fields   -> ignores them entirely (they come from endpoint.py)
+    filters  -> reads out only student_name and discards the rest
+    limit    -> keeps constant
 
-Yaani us saare prompt ka asli nateeja do string thay. Is liye ab prompt
-sirf wahi do cheezein maangta hai.
+So the real output of that entire prompt was two strings. The prompt
+now asks for exactly those two things.
 """
 
 

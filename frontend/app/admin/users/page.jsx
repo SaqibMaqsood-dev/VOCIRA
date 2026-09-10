@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * Parents ke accounts.
+ * VOCIRA's own accounts - both admins and parents.
  *
- * Pehle VOCIRA ke accounts kahin se bhi nazar nahi aate thay. Log
- * ERPNext ke Users mein dhoondte thay aur wahan milte hi nahi -
- * kyunke wo Postgres mein hain, ERPNext mein nahi. Na account
- * banane ka raasta tha, na password badalne ka.
+ * VOCIRA accounts used to be invisible from everywhere. People
+ * looked for them in ERPNext's Users and never found them - because
+ * they live in Postgres, not in ERPNext. There was no way to create
+ * an account and no way to change a password.
  *
- * parent_id sab se ahem field hai: wahi ERPNext ke Guardian record
- * se joRta hai. Us ke baghair account ban to jata hai magar us ko
- * koi bachcha nahi milta - is liye us ki kami saaf dikhayi jati hai.
+ * parent_id is the most important field: it is what links to the
+ * ERPNext Guardian record. Without it an account is still created
+ * but reaches no child - so a missing one is shown clearly.
  */
 
 import { useState } from "react";
@@ -40,10 +40,10 @@ export default function UsersPage() {
   const { data, loading, error, reload } = useAdminData(BASE, EMPTY);
   const { data: roles } = useAdminData(`${BASE}/roles`, []);
 
-  // ERPNext ke guardians - account banate waqt list se chunne ke
-  // liye. Pehle Guardian ID haath se likhi jati thi: ek harf idhar
-  // udhar aur account kisi bachche tak nahi pahunchta, aur ghalti
-  // tab pakri jati jab parent shikayat karta.
+  // ERPNext's guardians - to pick from a list when creating an
+  // account. The Guardian ID used to be typed by hand: one character
+  // out of place and the account reached no child, and the mistake
+  // only surfaced when the parent complained.
   const { data: guardians } = useAdminData("/livekit/admin/guardians", []);
 
   const [busy, setBusy] = useState("");
@@ -53,18 +53,18 @@ export default function UsersPage() {
   const [form, setForm] = useState(null);   // { mode, user }
   const [picked, setPicked] = useState("");  // chuna hua Guardian ID
 
-  // Email aur naam guardian se bharte hain, magar admin unhein badal
-  // bhi sakta hai. "typed" null ho to guardian wali value chalti hai;
-  // ek baar likh diya to admin ki marzi chalti hai.
+  // Email and name are filled in from the guardian, but the admin
+  // can change them. While "typed" is null the guardian's value
+  // applies; once something is typed, the admin's choice wins.
   const [emailTyped, setEmailTyped] = useState(null);
   const [nameTyped, setNameTyped] = useState(null);
   const [pwFor, setPwFor] = useState(null); // password reset ke liye
 
   const users = data.users || [];
 
-  // Admin aur parent do bilkul alag cheezein hain - ek panel
-  // chalata hai, doosra apne bachche ka data poochta hai. Ek hi
-  // list mein dono rakhna dono ko ulajha deta tha.
+  // Admins and parents are two entirely different things - one runs
+  // the panel, the other asks about their child's data. Keeping both
+  // in one list only confused both.
   const admins = users.filter((u) => u.role === "admin");
   const parents = users.filter((u) => u.role !== "admin");
 
@@ -72,8 +72,8 @@ export default function UsersPage() {
 
   const chosen = (guardians || []).find((g) => g.id === picked) || null;
 
-  // Har row ko us ka ERPNext guardian record - login email us se mel
-  // khati hai ya nahi, ye dikhane ke liye.
+  // Each row's ERPNext guardian record - so we can show whether the
+  // login email matches it.
   const guardianById = Object.fromEntries(
     (guardians || []).map((g) => [g.id, g])
   );
@@ -176,10 +176,11 @@ export default function UsersPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white">
-            Parent accounts
+            Accounts
           </h1>
           <p className="mt-1 text-xs text-text-secondary">
-            Vocira logins. These are separate from ERPNext users.
+            Admin and parent logins for Vocira. These are separate from
+            ERPNext users.
           </p>
         </div>
 
@@ -268,10 +269,10 @@ export default function UsersPage() {
           </div>
 
           <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
-            {/* Guardian pehle chunte hain - email aur naam usi se
-                bhar jate hain. Pehle email haath se likhi jati thi,
-                jo ERPNext wale record se mel na khaye to school ke
-                paas do alag pate ho jate. */}
+            {/* Pick the guardian first - email and name are filled
+                in from it. The email used to be typed by hand, and
+                if it did not match the ERPNext record the school
+                ended up with two different addresses. */}
             <label className="block sm:col-span-2">
               <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
                 Guardian (from ERPNext)
@@ -301,7 +302,7 @@ export default function UsersPage() {
               )}
             </label>
 
-            {/* Guardian ka email ERPNext mein nahi hai */}
+            {/* The guardian has no email in ERPNext */}
             {chosen && !chosen.email && (
               <div className="flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/[0.07] px-3 py-2.5 text-[11px] leading-5 text-amber-100 sm:col-span-2">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -317,16 +318,15 @@ export default function UsersPage() {
             )}
 
             {/*
-                Email dono halaton mein badli ja sakti hai.
+                The email can be changed in both cases.
 
-                Banate waqt wo guardian se khud bhar jati hai aur
-                readOnly hoti hai - wahan matching ka usool lagana
-                theek hai.
+                While creating, it fills in from the guardian and is
+                readOnly - enforcing a match there is right.
 
-                Edit karte waqt readOnly NAHI: parent ka pata badal
-                sakta hai, ya purane account ki email ERPNext se mel
-                nahi khati aur usay theek karna ho. Rok lagane se
-                admin ke paas koi raasta hi na bachta.
+                While editing it is NOT readOnly: a parent's address
+                can change, or an older account's email may not match
+                ERPNext and need fixing. Locking it would leave the
+                admin no way through.
             */}
             <label className="block">
               <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
@@ -354,8 +354,8 @@ export default function UsersPage() {
                     : "No guardian selected — type the email manually."}
                 </span>
               ) : chosen?.email && chosen.email !== emailValue ? (
-                // Sirf tab jab waqai farq ho - warna ye ek button
-                // hota jo kuch karta hi nahi
+                // Only when something actually differs - otherwise
+                // this is a button that does nothing
                 <button
                   type="button"
                   onClick={() => setEmailTyped(chosen.email)}
@@ -462,10 +462,10 @@ export default function UsersPage() {
 
       {/* ---- do alag list: admins aur parents ----
 
-          Pehle dono ek hi table mein mile hue thay. Ye do bilkul
-          alag cheezein hain: admin panel chalata hai, parent apne
-          bachche ka data poochta hai. Aur admin ke liye "Guardian
-          ID" ka column bemani hai - us ke bachche hote hi nahi. */}
+          The two used to be mixed into one table. They are entirely
+          different things: an admin runs the panel, a parent asks
+          about their child's data. And the "Guardian ID" column is
+          meaningless for an admin - they have no children. */}
 
       <AccountTable
         title="Administrators"
@@ -498,11 +498,11 @@ export default function UsersPage() {
 }
 
 /**
- * Accounts ki ek list.
+ * A list of accounts.
  *
- * Admins aur parents ka dhaancha ek hi hai, sirf "Guardian ID" ka
- * column farq karta hai - admin ke bachche hote hi nahi, is liye
- * us ke liye wo column bemani hai.
+ * Admins and parents share the same structure; only the "Guardian
+ * ID" column differs - an admin has no children, so that column is
+ * meaningless for them.
  */
 function AccountTable({
   title,
@@ -560,10 +560,10 @@ function AccountTable({
               <TD className="whitespace-nowrap text-[11px] text-text-secondary">
                 {u.email}
                 {(() => {
-                  // Login email ERPNext ke guardian record se alag ho
-                  // to bata dein. Ye kharabi nahi - VOCIRA parent_id
-                  // se joRta hai, email se nahi - magar school ke paas
-                  // ek hi parent ke do pate hona uljhan paida karta hai.
+                  // Flag it when the login email differs from the
+                  // ERPNext guardian record. It is not a fault -
+                  // VOCIRA links by parent_id, not by email - but two
+                  // addresses for one parent confuses the school.
                   const g = guardianById?.[u.parent_id];
                   if (!g?.email || g.email === u.email) return null;
                   return (
@@ -626,8 +626,9 @@ function AccountTable({
 }
 
 function Field({ label, hint, ...props }) {
-  // readOnly field par cursor aur rang batate hain ke ye khud bhari
-  // gayi hai - warna admin type karta rehta hai aur kuch nahi hota.
+  // On a readOnly field the cursor and colour show that it was
+  // filled in automatically - otherwise the admin keeps typing and
+  // nothing happens.
   const locked = props.readOnly;
 
   return (
@@ -653,13 +654,13 @@ function Field({ label, hint, ...props }) {
 }
 
 /**
- * Password ka field, dekhne ke button ke sath.
+ * A password field with a reveal button.
  *
- * Admin doosre ke liye password type kar raha hota hai, is liye
- * use dekhna zaroori hai - warna typo ka pata tab chalta hai jab
- * parent login na kar sake.
+ * The admin is typing a password for someone else, so being able to
+ * see it matters - otherwise a typo only surfaces when the parent
+ * cannot log in.
  *
- * Login page par yahi tareeqa pehle se hai.
+ * The login page already works this way.
  */
 function PasswordField({ label, ...props }) {
   const [shown, setShown] = useState(false);

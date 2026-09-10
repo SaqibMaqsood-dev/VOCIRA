@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.24",
-    "@livekit/components-styles": "^1.2.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.18.2",
     "gradflow": "^0.1.0",

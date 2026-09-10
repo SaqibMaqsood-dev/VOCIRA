@@ -1,19 +1,21 @@
 """
-Thori der ke liye jawab yaad rakhein.
+Remember answers for a short while.
 
-Kyun: Groq ki hadd tokens-per-MINUTE par hai. Ek hi sawal dobara
-poochne par poora kharcha dobara lagta tha - router, ERP, aur jawab
-banane wali LLM call. Demo ke dauran ye aam baat hai (jab jawab theek
-se sunai na de, ya koi doosra bandah wahi sawal poochay).
+Why: Groq's limit is on tokens-per-MINUTE. Asking the same question
+twice used to cost the full round trip again - router, ERP, and the
+LLM call that writes the answer. During a demo that happens often
+(when an answer was not heard clearly, or someone else asks the same
+thing).
 
-EHTIYAT:
+CARE TAKEN:
 
-  - Key mein user_id shaamil hai. Ek parent ka jawab kabhi doosre ko
-    nahi milta - yehi is cache ki sab se ahem shart hai.
-  - TTL chhota (2 minute). Fees ya attendance itni der mein nahi
-    badalti, magar agli call par taaza data mil jata hai.
-  - Ghalti wale jawab ("records tak pahunch nahi") kabhi yaad nahi
-    rakhe jate - warna ek waqti kharabi do minute tak chipki rehti.
+  - The key includes user_id. One parent's answer never reaches
+    another - the most important condition on this cache.
+  - The TTL is short (2 minutes). Fees and attendance do not change
+    in that time, and the next call gets fresh data anyway.
+  - Error answers ("cannot reach the records") are never remembered -
+    otherwise one temporary fault would stick around for two
+    minutes.
 """
 
 import re
@@ -22,10 +24,10 @@ import time
 
 TTL_SECONDS = 120
 
-# Bounded - warna lambi call mein memory barhti rehti hai
+# Bounded - otherwise memory grows through a long call
 MAX_ENTRIES = 200
 
-# Ye jawab yaad NAHI rakhne - waqti kharabi ki nishani hain
+# Answers NOT to remember - they signal a temporary fault
 _DO_NOT_CACHE = (
     "cannot reach",
     "having trouble",
@@ -40,8 +42,8 @@ _store: dict[tuple[str, str], tuple[float, str]] = {}
 
 def _normalise(question: str) -> str:
     """
-    "Have my fees been paid?" aur "have my fees been paid"
-    ek hi cheez hain.
+    "Have my fees been paid?" and "have my fees been paid"
+    are the same thing.
     """
     text = question.lower().strip()
     text = re.sub(r"[^\w\s]", "", text)
@@ -49,12 +51,12 @@ def _normalise(question: str) -> str:
 
 
 def _key(user_id, question: str) -> tuple[str, str]:
-    # user_id None (guest) apni alag bucket hai
+    # a user_id of None (guest) gets its own bucket
     return (str(user_id), _normalise(question))
 
 
 def get(user_id, question: str) -> str | None:
-    """Yaad hai to jawab dein, warna None."""
+    """Return the remembered answer, or None."""
 
     if not question:
         return None
@@ -75,7 +77,7 @@ def get(user_id, question: str) -> str | None:
 
 
 def put(user_id, question: str, answer: str) -> bool:
-    """Jawab yaad rakhein. Rakha gaya ya nahi, wo batata hai."""
+    """Remember an answer. Reports whether it was stored."""
 
     if not question or not answer:
         return False

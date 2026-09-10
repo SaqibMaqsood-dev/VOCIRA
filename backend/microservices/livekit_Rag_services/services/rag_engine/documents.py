@@ -1,14 +1,14 @@
 """
-Knowledge base ke documents - list, upload, note, delete.
+Knowledge base documents - list, upload, note, delete.
 
-Pehle naya data daalne ka sirf ek tareeqa tha: file server par
-manually rakho (rag_engine/data/pdf ya text_files mein), phir sync
-dabao. Admin panel se kuch nahi ho sakta tha - na upload, na ye
-dekhna ke index kis kis cheez se bana hai.
+There used to be exactly one way to add new data: put the file on the
+server by hand (into rag_engine/data/pdf or text_files), then press
+sync. Nothing could be done from the admin panel - no upload, and no
+way to see what the index had been built from.
 
-Ye module wahi kaam panel ke liye khol deta hai. Files wahin jati
-hain jahan ingestion.py unhein dhoondti hai - koi naya raasta nahi
-banaya, warna do jagah rakhi files ka masla shuru ho jata.
+This module opens that up to the panel. Files go exactly where
+ingestion.py looks for them - no new location was introduced, or
+files would start living in two places.
 """
 
 import os
@@ -22,8 +22,8 @@ from backend.microservices.livekit_Rag_services.services.rag_engine.config impor
 )
 
 
-# Wahi qismein jo ingestion.py parh sakti hai - is se zyada qubool
-# karna jhoot hoga: file rakhi jayegi magar index mein kabhi na aati.
+# Only the types ingestion.py can read - accepting more than this
+# would be a lie: the file would be stored but never reach the index.
 KINDS = {
     ".pdf": ("pdf", PDF_PATH),
     ".txt": ("text", TEXT_FILES_PATH),
@@ -41,22 +41,22 @@ def safe_filename(name: str) -> str:
     """
     Naam ko mehfooz banayein.
 
-    AHEM: user ka bheja hua naam kabhi seedha path mein nahi jata.
-    "../../.env" jaisa naam data folder se bahar likh sakta hai.
-    Yahan sirf basename liya jata hai aur us mein se bhi khatarnaak
-    harf nikal diye jate hain.
+    IMPORTANT: a name sent by the user never goes straight into a
+    path. A name like "../../.env" could write outside the data
+    folder. Only the basename is taken here, and dangerous characters
+    are stripped out of that too.
     """
 
     name = os.path.basename(name or "").strip()
 
-    # Unicode ki chaalein (fullwidth solidus waghera) normalize karein
+    # Normalise Unicode tricks (a fullwidth solidus and the like)
     name = unicodedata.normalize("NFKC", name)
 
-    # sirf harf, ginti, space, dash, underscore, dot
+    # letters, digits, space, dash, underscore and dot only
     name = re.sub(r"[^\w\s.\-]", "", name)
     name = re.sub(r"\s+", " ", name).strip()
 
-    # aage peeche ke dots - ".." aur chhupi hui files rok dein
+    # leading and trailing dots - blocks ".." and hidden files
     name = name.strip(". ")
 
     if not name:
@@ -67,10 +67,10 @@ def safe_filename(name: str) -> str:
 
 def _resolve(kind_dir: str, filename: str) -> str:
     """
-    Poora path banayein aur tasdeeq karein ke wo folder ke ANDAR hai.
+    Build the full path and confirm it stays INSIDE the folder.
 
-    safe_filename ke baad bhi ye doosri chhanni lagti hai - path se
-    juri baatein ek check par nahi chhorni chahiyein.
+    This second sieve runs even after safe_filename - anything to do
+    with paths should never rest on a single check.
     """
 
     full = os.path.realpath(os.path.join(kind_dir, filename))
@@ -100,9 +100,9 @@ def list_documents(chunks_by_source: dict | None = None) -> list[dict]:
     """
     Disk par jo documents hain, un ki list.
 
-    chunks_by_source aakhri sync se aata hai (source -> kitne chunks).
-    Jo file sync ke baad rakhi gayi ho us ka count None hota hai -
-    yani "abhi index mein nahi".
+    chunks_by_source comes from the last sync (source -> chunk
+    count). A file added after that sync has a count of None -
+    meaning "not in the index yet".
     """
 
     chunks_by_source = chunks_by_source or {}
@@ -148,7 +148,7 @@ def list_documents(chunks_by_source: dict | None = None) -> list[dict]:
 # =========================================================
 
 def save_upload(filename: str, content: bytes) -> dict:
-    """Uploaded file ko usi folder mein rakhein jahan ingestion dhoondti hai."""
+    """Store an uploaded file where ingestion looks for it."""
 
     if not content:
         raise DocumentError("File is empty")
@@ -171,16 +171,17 @@ def save_upload(filename: str, content: bytes) -> dict:
 
 
 # =========================================================
-# NOTE  (chhoti baaton ke liye - PDF banane ki zaroorat nahi)
+# NOTE  (for small things - no need to produce a PDF)
 # =========================================================
 
 def save_note(title: str, text: str) -> dict:
     """
     Ek chhota note .txt ki soorat mein.
 
-    "School ka timing badal gaya" jaisi baat ke liye PDF edit karna
-    bewaqoofi hai. Note wahi text_files folder mein jata hai, is
-    liye ingestion ke liye ye aur kisi file mein koi farq nahi.
+    Editing a PDF for something like "the school timings changed"
+    is absurd. The note goes into the same text_files folder, so as
+    far as ingestion is concerned it is no different from any other
+    file.
     """
 
     title = (title or "").strip()
@@ -204,8 +205,8 @@ def save_note(title: str, text: str) -> dict:
     os.makedirs(TEXT_FILES_PATH, exist_ok=True)
     path = _resolve(TEXT_FILES_PATH, name)
 
-    # Title bhi file mein likhte hain - RAG ke chunks mein wo
-    # context banata hai ("School timings" wala hissa).
+    # The title is written into the file as well - it gives the
+    # RAG chunks context (the "School timings" part).
     body = f"{title}\n\n{text}\n"
 
     with open(path, "w", encoding="utf-8") as handle:
@@ -219,7 +220,7 @@ def save_note(title: str, text: str) -> dict:
 # =========================================================
 
 def delete_document(name: str) -> bool:
-    """File hatayein. Index se wo agli sync par nikalti hai."""
+    """Delete a file. It leaves the index on the next sync."""
 
     name = safe_filename(name)
     _, folder = _kind_for(name)

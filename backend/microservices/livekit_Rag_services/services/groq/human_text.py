@@ -1,15 +1,16 @@
 from datetime import date
 
 
-# ERPNext ke andaroni IDs - "EDU-ATT-2026-00001", "EDU-STU-2026-00013",
-# "ACC-SINV-2026-00007". Ye bol kar sunane ke qabil nahi hain aur har
-# resource mein in ke sath parhne wala naam pehle se mojood hai
-# (student_name / customer / guardian_name / student_group_name).
+# ERPNext's internal IDs - "EDU-ATT-2026-00001",
+# "EDU-STU-2026-00013", "ACC-SINV-2026-00007". They are not worth
+# speaking aloud, and every resource already carries a readable name
+# alongside them (student_name / customer / guardian_name /
+# student_group_name).
 #
-# Do fayde:
-#   - har record se ~50 harf kam, yaani kam tokens (Groq ki hadd
-#     tokens-per-minute par hai, is liye seedha zyada calls milti hain)
-#   - LLM ye ID bol hi nahi sakta. Pehle bolta tha:
+# Two benefits:
+#   - ~50 fewer characters per record, so fewer tokens (Groq's limit
+#     is tokens-per-minute, so this is directly more calls)
+#   - the LLM cannot read such an ID aloud. It used to say:
 #     "ACC-SINV-two thousand twenty-six-zero zero zero zero seven"
 _INTERNAL_ID_FIELDS = ("name", "student")
 
@@ -39,8 +40,8 @@ def build_response_prompt(
     Convert structured ERP/API data into a natural,
     conversational response suitable for text and TTS.
 
-    `today` diya jaye to "kal", "is hafte" jaise sawal
-    theek se hal ho jate hain.
+    Passing `today` lets questions like "yesterday" or "this week"
+    resolve correctly.
     """
 
     today = today or date.today().isoformat()
