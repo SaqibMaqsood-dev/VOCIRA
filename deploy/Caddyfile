@@ -6,6 +6,12 @@
 # these four subdomains point at this VM's public IP in DNS, and that
 # ports 80 and 443 are open from outside.
 #
+# The four subdomains come from API_DOMAIN / RT_DOMAIN / LK_DOMAIN /
+# ERP_DOMAIN (docker-compose.prod.yml), which default to
+# api.<DOMAIN>, rt.<DOMAIN> and so on for anyone with a real domain.
+# A free DuckDNS name cannot be split into subdomains that way, so
+# there they are set individually instead - see deploy/README.md.
+#
 # Why HTTPS is mandatory (this is not a matter of taste):
 #
 #   - browsers grant mic access (getUserMedia) only on HTTPS or
@@ -14,7 +20,7 @@
 #     there is "mixed content" and gets blocked.
 #   - LiveKit signalling from an https page has to be wss://.
 #
-# {$DOMAIN} and {$ACME_EMAIL} come from .env.
+# {$API_DOMAIN}, {$RT_DOMAIN}, {$LK_DOMAIN}, {$ERP_DOMAIN} and {$ACME_EMAIL} come from .env.
 # =============================================================
 {
 	# Let's Encrypt sends notice here before the certificate
@@ -25,7 +31,7 @@
 # -------------------------------------------------------------
 # API - frontend ka NEXT_PUBLIC_API_URL
 # -------------------------------------------------------------
-api.{$DOMAIN} {
+{$API_DOMAIN} {
 	reverse_proxy gateway:9000
 
 	encode gzip
@@ -46,7 +52,7 @@ api.{$DOMAIN} {
 # Caddy recognises a WebSocket upgrade by itself; no separate setting
 # is needed.
 # -------------------------------------------------------------
-rt.{$DOMAIN} {
+{$RT_DOMAIN} {
 	reverse_proxy livekit_rag:8001
 
 	log {
@@ -63,7 +69,7 @@ rt.{$DOMAIN} {
 # that port has to be opened separately; this proxy alone is not
 # enough.
 # -------------------------------------------------------------
-lk.{$DOMAIN} {
+{$LK_DOMAIN} {
 	reverse_proxy livekit:7880
 
 	log {
@@ -79,7 +85,7 @@ lk.{$DOMAIN} {
 # two have to share an external network - deploy/README.md describes
 # the override file that arranges it.
 # -------------------------------------------------------------
-erp.{$DOMAIN} {
+{$ERP_DOMAIN} {
 	reverse_proxy erpnext:8080
 
 	# ERPNext sends large files (backups, print formats)

@@ -66,6 +66,22 @@ CORS_ORIGINS=https://vocira.vercel.app
 ERP_BASE_URL=http://erpnext:8080
 ```
 
+If you have a real domain, that is all you need — `api.<DOMAIN>`,
+`rt.<DOMAIN>`, `lk.<DOMAIN>` and `erp.<DOMAIN>` are built from it
+automatically. On a free service like DuckDNS there is no wildcard —
+each name is one flat registration — so add these four instead, once
+you have registered the four names in step 4:
+
+```env
+API_DOMAIN=api-vocira.duckdns.org
+RT_DOMAIN=rt-vocira.duckdns.org
+LK_DOMAIN=lk-vocira.duckdns.org
+ERP_DOMAIN=erp-vocira.duckdns.org
+```
+
+With all four set, `DOMAIN` itself is never actually used — leave it
+as whatever `gen-secrets.py` filled in.
+
 > `JWT_SECRET_KEY` is now 64 bytes. The old one was 6 bytes — on the
 > internet that can be brute-forced, letting anyone mint an admin token.
 
@@ -116,7 +132,8 @@ sudo netfilter-persistent save    # or the rules are lost on reboot
 
 ### 4. DNS
 
-Four subdomains, all pointing at the VM's public IP:
+**With your own domain**, four subdomains, all pointing at the VM's
+public IP:
 
 ```
 api.<domain>    →  <VM public IP>
@@ -125,10 +142,29 @@ lk.<domain>     →  <VM public IP>
 erp.<domain>    →  <VM public IP>
 ```
 
-DuckDNS offers no wildcards, so there you have to create four separate
-subdomains (`api-vocira.duckdns.org` and so on) and change the names in
-`Caddyfile` to match. With your own domain, `*.<domain>` covers it in one
-go.
+`*.<domain>` covers all four in one DNS record.
+
+**With DuckDNS** (free, no domain purchase needed): DuckDNS gives out
+one flat name per registration, not a wildcard, so register four
+separate names at [duckdns.org](https://www.duckdns.org) — sign in,
+pick a base like `vocira`, and add these four in the dashboard, each
+pointed at the VM's public IP:
+
+```
+api-vocira.duckdns.org
+rt-vocira.duckdns.org
+lk-vocira.duckdns.org
+erp-vocira.duckdns.org
+```
+
+Then set `API_DOMAIN` / `RT_DOMAIN` / `LK_DOMAIN` / `ERP_DOMAIN` to
+these in `.env.prod` (step 1) — `docker-compose.prod.yml` and the
+`Caddyfile` both read from those, so nothing else needs editing.
+
+Oracle's default public IP is ephemeral: stopping and starting the
+instance can change it. Reserve a **Reserved Public IP** in the
+console (still free) before pointing DNS at it, or DuckDNS's records
+will need updating every time the VM restarts.
 
 ### 5. Code and secrets onto the VM
 

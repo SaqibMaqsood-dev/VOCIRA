@@ -67,7 +67,12 @@ x-backend-env: &backend-env
 
   # ---- LiveKit ----
   # The address handed to the browser - through Caddy, hence wss://
-  LIVEKIT_URL: wss://lk.${DOMAIN}
+  #
+  # LK_DOMAIN defaults to lk.<DOMAIN> for anyone with a real domain.
+  # Override it when the four subdomains cannot share one suffix -
+  # DuckDNS's free tier gives one flat name per registration, not a
+  # wildcard, so lk-yourname.duckdns.org has to be set explicitly.
+  LIVEKIT_URL: wss://${LK_DOMAIN:-lk.${DOMAIN}}
   # The agent's own route - it shares a network with LiveKit.
   # Sending it to the public URL would make the machine come back to
   # its own public IP, which cloud NAT usually refuses.
@@ -261,8 +266,16 @@ services:
   caddy:
     image: caddy:2-alpine
     environment:
-      DOMAIN: ${DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL}
+      # Each defaults to <prefix>.<DOMAIN>, which is all a real
+      # domain needs. DuckDNS's free tier registers one flat name at
+      # a time rather than a wildcard, so its four subdomains
+      # (api-yourname.duckdns.org, and so on) have to be set here
+      # individually instead - see deploy/README.md.
+      API_DOMAIN: ${API_DOMAIN:-api.${DOMAIN}}
+      RT_DOMAIN: ${RT_DOMAIN:-rt.${DOMAIN}}
+      LK_DOMAIN: ${LK_DOMAIN:-lk.${DOMAIN}}
+      ERP_DOMAIN: ${ERP_DOMAIN:-erp.${DOMAIN}}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Certificates - is volume ke baghair har restart par naya
