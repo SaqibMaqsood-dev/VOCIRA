@@ -1,9 +1,25 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 import httpx
 
 from fastapi.middleware.cors import CORSMiddleware
+
+
+# The gateway has no .env of its own - it reads whatever is already
+# in the process environment (which is how docker-compose's shared
+# x-backend-env block reaches it). Running it directly with uvicorn
+# outside Docker left CORS_ORIGINS unset every time, silently falling
+# back to "*" - fine on localhost, wrong the moment the frontend is a
+# real deployed origin. This loads the same .env the livekit_Rag
+# service uses, so a value set once survives every local restart.
+load_dotenv(
+    Path(__file__).resolve().parent.parent
+    / "livekit_Rag_services"
+    / ".env"
+)
 
 
 app = FastAPI(
