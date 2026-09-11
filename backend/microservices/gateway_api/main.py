@@ -1,8 +1,11 @@
+import asyncio
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
+import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 import httpx
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -430,3 +433,130 @@ async def gateway_livekit_delete(
         path,
         request,
     )
+
+
+# ============================================================
+# LIVEKIT - WEBSOCKET
+# ============================================================
+#
+# httpx cannot carry a WebSocket, so until now the gateway spoke
+# HTTP only and the admin panel had to reach the livekit service
+# directly on :8001. That works on one machine and nowhere else:
+# deployed, the browser resolved "localhost:8001" to the phone or
+# laptop it was running on, the notification socket never opened,
+# and escalations rang on nobody's screen.
+#
+# Proxying it here means one address (and one tunnel) serves the
+# whole API, WebSocket included.
+
+
+async def _pump_client_to_service(client_ws: WebSocket, service_ws):
+    """Browser -> livekit service."""
+
+    while True:
+
+        message = await client_ws.receive()
+
+        if message["type"] == "websocket.disconnect":
+            return
+
+        text = message.get("text")
+
+        if text is not None:
+            await service_ws.send(text)
+            continue
+
+        data = message.get("bytes")
+
+        if data is not None:
+            await service_ws.send(data)
+
+
+async def _pump_service_to_client(client_ws: WebSocket, service_ws):
+    """livekit service -> browser."""
+
+    async for message in service_ws:
+
+        if isinstance(message, str):
+            await client_ws.send_text(message)
+        else:
+            await client_ws.send_bytes(message)
+
+
+@app.websocket("/livekit/{path:path}")
+async def gateway_livekit_websocket(
+    client_ws: WebSocket,
+    path: str,
+):
+    # Same rule as forward_livekit_request: the gateway's /livekit
+    # namespace maps onto the service's own /livekit prefix.
+    target_url = (
+        f"{LIVEKIT_SERVICE.replace('http', 'ws', 1)}"
+        f"/livekit/{path.lstrip('/')}"
+    )
+
+    # The JWT rides in the query string - a browser cannot put
+    # headers on a WebSocket - so this has to be carried over.
+    query = urlencode(
+        list(client_ws.query_params.multi_items())
+    )
+
+    if query:
+        target_url = f"{target_url}?{query}"
+
+    await client_ws.accept()
+
+    try:
+        service_ws = await websockets.connect(target_url)
+
+    except Exception as error:
+
+        print(
+            f"[Gateway WS] Could not reach {target_url}: {error}"
+        )
+
+        # 1011 = the gateway itself failed, not the client
+        await client_ws.close(code=1011)
+        return
+
+    print(f"[Gateway WS] Connected -> {target_url}")
+
+    try:
+
+        both_directions = [
+            asyncio.create_task(
+                _pump_client_to_service(client_ws, service_ws)
+            ),
+            asyncio.create_task(
+                _pump_service_to_client(client_ws, service_ws)
+            ),
+        ]
+
+        # Whichever side hangs up first ends the session; the other
+        # pump is then cancelled rather than left waiting forever.
+        done, pending = await asyncio.wait(
+            both_directions,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+
+        for task in done:
+            # Surfaces a real error instead of losing it silently.
+            task.result()
+
+    except Exception as error:
+
+        print(f"[Gateway WS] Session ended: {error}")
+
+    finally:
+
+        await service_ws.close()
+
+        try:
+            await client_ws.close()
+        except (RuntimeError, WebSocketDisconnect):
+            # Already gone from the other end - closing a socket that
+            # has hung up is not an error worth a traceback.
+            pass

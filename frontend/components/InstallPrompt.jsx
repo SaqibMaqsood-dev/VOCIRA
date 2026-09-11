@@ -143,8 +143,16 @@ export default function InstallPrompt() {
               shadow   deep and spread out; this is what separates
                        the card from the background, not the border
         */}
+        {/*
+            Solid background, not glass. The wrapper's entry animation
+            uses fill-mode: both, so transform: translateY(0) scale(1)
+            stays on it after the animation ends - and any transform,
+            even an identity one, makes that element a backdrop root.
+            backdrop-filter here therefore blurred nothing, and the
+            leftover translucency just let the page show through sharp.
+        */}
         <div
-          className="relative overflow-hidden rounded-2xl bg-[#0b0a2a]/94 p-4 backdrop-blur-2xl"
+          className="relative overflow-hidden rounded-2xl bg-[#0b0a2a] p-4"
           style={{
             boxShadow: [
               "0 0 0 1px rgba(255,255,255,0.06)",
@@ -165,11 +173,16 @@ export default function InstallPrompt() {
             className="pointer-events-none absolute -right-12 -top-14 h-36 w-36 rounded-full bg-accent-primary/20 blur-3xl"
           />
 
+          {/*
+              z-10 matters: the content row below is position: relative
+              and comes later in the DOM, so with both at z-index auto
+              it painted over this button and swallowed the clicks.
+          */}
           <button
             type="button"
             onClick={dismiss}
             aria-label="Not now"
-            className="absolute right-2.5 top-2.5 rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-white/10 hover:text-white"
+            className="absolute right-2.5 top-2.5 z-10 rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-white/10 hover:text-white"
           >
             <X className="h-3.5 w-3.5" />
           </button>

@@ -5,16 +5,22 @@
 #   .\start-vocira.ps1 -All             + ERPNext + frontend  (aam istemal)
 #   .\start-vocira.ps1 -WithErp         + sirf ERPNext
 #   .\start-vocira.ps1 -WithFrontend    + sirf frontend
+#   .\start-vocira.ps1 -WithTunnel      + Cloudflare tunnel (Vercel ke liye)
 #   .\start-vocira.ps1 -Stop            sab band
 #   .\start-vocira.ps1 -Status          kya chal raha hai
 #
 # Har service apni window mein khulti hai taake logs nazar aayen.
+#
+# -WithTunnel jaan bujh kar -All mein shamil nahi hai: ye backend ko
+# internet par khol deta hai, jis ki zaroorat sirf Vercel wali site
+# test karte waqt hoti hai - roz ke local kaam mein nahi.
 # =====================================================================
 
 param(
     [switch]$All,
     [switch]$WithErp,
     [switch]$WithFrontend,
+    [switch]$WithTunnel,
     [switch]$Stop,
     [switch]$Status
 )
@@ -28,6 +34,16 @@ $ROOT = "D:\college_vocira_project\VOCIRA-feature-backend"
 $ERP  = Join-Path $ROOT "frappe_test"
 $LK   = "backend\microservices\livekit_Rag_services"
 $AUTH = "backend\microservices\auth_services"
+
+# Tunnel ka log aur us se nikali hui URL. -Status baad mein yahin se
+# padhta hai, taake URL dobara dhoondni na pare.
+$TUNNEL_LOG = Join-Path $ROOT ".tunnel.log"
+$TUNNEL_URL = Join-Path $ROOT ".tunnel-url.txt"
+
+# Quick tunnel ki URL har baar nayi hoti hai - ye pattern usay log se
+# nikalta hai. api.trycloudflare.com Cloudflare ka apna endpoint hai,
+# hamari URL nahi, is liye usay chhod dete hain.
+$TUNNEL_RX = 'https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com'
 
 if ($All) { $WithErp = $true; $WithFrontend = $true }
 
@@ -86,6 +102,18 @@ if ($Status) {
         if ($q.consumers -lt 1) { Write-Host "  worker nahi chal raha - koi call connect nahi hogi" -ForegroundColor Red }
     } catch { Write-Host "  RabbitMQ tak nahi pohancha" -ForegroundColor DarkGray }
 
+    Write-Host "`n--- Cloudflare tunnel ---" -ForegroundColor Cyan
+    $cf = @(Get-Process cloudflared -ErrorAction SilentlyContinue)
+    if ($cf.Count -eq 0) {
+        Write-Host "  band  (-WithTunnel se chalta hai)" -ForegroundColor DarkGray
+    } elseif (Test-Path $TUNNEL_URL) {
+        $u = (Get-Content $TUNNEL_URL -Raw).Trim()
+        Write-Host "  $u" -ForegroundColor Green
+        Write-Host "  ^ yehi Vercel ke NEXT_PUBLIC_API_URL mein honi chahiye" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  chal raha hai magar URL nahi mili - .tunnel.log dekhein" -ForegroundColor Yellow
+    }
+
     Write-Host ""
     return
 }
@@ -101,6 +129,11 @@ if ($Stop) {
     Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -and $_.CommandLine -like "*VOCIRA-feature-backend*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+    Write-Host "Tunnel band kar rahe hain..." -ForegroundColor Yellow
+    Get-Process cloudflared -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+    Remove-Item $TUNNEL_URL -ErrorAction SilentlyContinue
 
     Write-Host "Infra containers band kar rahe hain..." -ForegroundColor Yellow
     docker compose -f docker-compose.infra.yml stop | Out-Null
@@ -167,14 +200,14 @@ if (-not $?) {
 # ---------------------------------------------------------------------
 $old = @(Get-VociraPython)
 if ($old.Count -gt 0) {
-    Write-Host ("`n[0/5] {0} purane process mil gaye - band kar rahe hain..." -f $old.Count) -ForegroundColor Yellow
+    Write-Host ("`n[0/6] {0} purane process mil gaye - band kar rahe hain..." -f $old.Count) -ForegroundColor Yellow
     Stop-VociraPython | Out-Null
 }
 
 # ---------------------------------------------------------------------
 # 1. INFRA  (Postgres 5433, Redis 6380, RabbitMQ 5672, LiveKit 7880)
 # ---------------------------------------------------------------------
-Write-Host "`n[1/5] Infra containers..." -ForegroundColor Cyan
+Write-Host "`n[1/6] Infra containers..." -ForegroundColor Cyan
 docker compose -f docker-compose.infra.yml up -d | Out-Null
 
 Write-Host "      Postgres ka intezaar..." -ForegroundColor DarkGray
@@ -194,7 +227,7 @@ else     { Write-Host "      Postgres ne jawab nahi diya." -ForegroundColor Red 
 # baghair) to us ki session "active" reh jati hai aur RabbitMQ message
 # atka reh jata hai - phir worker nayi calls nahi uthata.
 # ---------------------------------------------------------------------
-Write-Host "`n[2/5] Purani atki hui calls saaf..." -ForegroundColor Cyan
+Write-Host "`n[2/6] Purani atki hui calls saaf..." -ForegroundColor Cyan
 
 # RabbitMQ ko uthne mein 20-30 second lag jate hain. Pehle yahan
 # intezaar nahi tha, is liye purge chup chaap fail ho jata tha - aur
@@ -231,7 +264,7 @@ try {
 # 3. ERPNext  (port 8081)
 # ---------------------------------------------------------------------
 if ($WithErp) {
-    Write-Host "`n[3/5] ERPNext..." -ForegroundColor Cyan
+    Write-Host "`n[3/6] ERPNext..." -ForegroundColor Cyan
     Push-Location $ERP
     # NOTE: 'down' KABHI mat chalayein - education app container mein
     #       hai, volume mein nahi. 'stop'/'start' mehfooz hain.
@@ -239,13 +272,13 @@ if ($WithErp) {
     Pop-Location
     Write-Host "      http://localhost:8081  (Administrator / admin)" -ForegroundColor Green
 } else {
-    Write-Host "`n[3/5] ERPNext skip (-WithErp ya -All se chalta hai)" -ForegroundColor DarkGray
+    Write-Host "`n[3/6] ERPNext skip (-WithErp ya -All se chalta hai)" -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------
 # 4. BACKEND SERVICES
 # ---------------------------------------------------------------------
-Write-Host "`n[4/5] Backend services..." -ForegroundColor Cyan
+Write-Host "`n[4/6] Backend services..." -ForegroundColor Cyan
 
 function Start-Svc($title, $cmd) {
     Start-Process powershell -ArgumentList @(
@@ -289,10 +322,72 @@ Start-Svc "VOCIRA agent worker" `
     "uv run --project $LK python -u -m backend.microservices.livekit_Rag_services.livekit_worker"
 
 # ---------------------------------------------------------------------
-# 5. FRONTEND  (port 3000)
+# 5. CLOUDFLARE TUNNEL  (gateway :9000 ko internet par le aata hai)
+#
+# Quick tunnel ko Cloudflare account nahi chahiye, magar do baatein
+# yaad rakhein:
+#
+#   - URL har baar nayi banti hai. Process band, URL khatam. Is liye
+#     har restart ke baad Vercel ka NEXT_PUBLIC_API_URL badalna parta
+#     hai (aur redeploy).
+#   - Cloudflare ka quick-tunnel API kabhi kabhi slow hota hai aur
+#     cloudflared apna intezaar chhod deta hai. Is liye neeche 3 baar
+#     koshish hoti hai - warna script bilkul chup chaap URL ke baghair
+#     aage nikal jati thi.
+# ---------------------------------------------------------------------
+$tunnelUrl = $null
+
+if ($WithTunnel) {
+    Write-Host "`n[5/6] Cloudflare tunnel..." -ForegroundColor Cyan
+
+    if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
+        Write-Host "      cloudflared install nahi hai - tunnel skip." -ForegroundColor Red
+    } else {
+        # Purani tunnel zinda ho to nayi ke saath do URL chal parti hain
+        Get-Process cloudflared -ErrorAction SilentlyContinue |
+            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+
+        for ($try = 1; $try -le 3 -and -not $tunnelUrl; $try++) {
+            Remove-Item $TUNNEL_LOG -ErrorAction SilentlyContinue
+
+            $cf = Start-Process cloudflared `
+                -ArgumentList "tunnel", "--url", "http://localhost:9000", "--no-autoupdate" `
+                -RedirectStandardError $TUNNEL_LOG `
+                -RedirectStandardOutput "$TUNNEL_LOG.out" `
+                -WindowStyle Hidden -PassThru
+
+            for ($i = 0; $i -lt 40 -and -not $tunnelUrl; $i += 2) {
+                Start-Sleep -Seconds 2
+                if (Test-Path $TUNNEL_LOG) {
+                    $hit = Select-String -Path $TUNNEL_LOG -Pattern $TUNNEL_RX -ErrorAction SilentlyContinue |
+                           Select-Object -First 1
+                    if ($hit) { $tunnelUrl = $hit.Matches[0].Value }
+                }
+            }
+
+            if (-not $tunnelUrl) {
+                Write-Host ("      koshish {0} nakaam - dobara..." -f $try) -ForegroundColor DarkGray
+                Stop-Process -Id $cf.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        if ($tunnelUrl) {
+            Set-Content -Path $TUNNEL_URL -Value $tunnelUrl
+            Write-Host "      $tunnelUrl" -ForegroundColor Green
+        } else {
+            Write-Host "      Tunnel nahi bani (Cloudflare ka API slow hai)." -ForegroundColor Red
+            Write-Host "      Baad mein: cloudflared tunnel --url http://localhost:9000" -ForegroundColor DarkGray
+        }
+    }
+} else {
+    Write-Host "`n[5/6] Tunnel skip (-WithTunnel se chalta hai)" -ForegroundColor DarkGray
+}
+
+# ---------------------------------------------------------------------
+# 6. FRONTEND  (port 3000)
 # ---------------------------------------------------------------------
 if ($WithFrontend) {
-    Write-Host "`n[5/5] Frontend..." -ForegroundColor Cyan
+    Write-Host "`n[6/6] Frontend..." -ForegroundColor Cyan
     if (-not (Test-Path (Join-Path $ROOT "frontend\node_modules"))) {
         Write-Host "      node_modules nahi hai - pehle 'cd frontend ; npm install' chalayein." -ForegroundColor Red
     } else {
@@ -303,7 +398,7 @@ if ($WithFrontend) {
         Write-Host "      VOCIRA frontend :3000" -ForegroundColor Green
     }
 } else {
-    Write-Host "`n[5/5] Frontend skip (-WithFrontend ya -All se chalta hai)" -ForegroundColor DarkGray
+    Write-Host "`n[6/6] Frontend skip (-WithFrontend ya -All se chalta hai)" -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------
@@ -327,3 +422,23 @@ Write-Host @"
   Haal      .\start-vocira.ps1 -Status
 ---------------------------------------------------------------
 "@ -ForegroundColor Cyan
+
+# Sab se aakhir mein, taake health check ke shor mein gum na ho jaye -
+# har restart par yehi ek cheez hai jo haath se karni parti hai.
+if ($tunnelUrl) {
+    Write-Host @"
+
+===============================================================
+  TUNNEL URL (har restart par nayi hoti hai)
+
+  $tunnelUrl
+
+  Vercel -> Settings -> Environment Variables
+      NEXT_PUBLIC_API_URL  =  $tunnelUrl
+  phir Deployments -> Redeploy
+
+  (agar NEXT_PUBLIC_REALTIME_URL maujood ho to usay delete kar
+   dein - warna admin notifications kaam nahi karengi)
+===============================================================
+"@ -ForegroundColor Yellow
+}

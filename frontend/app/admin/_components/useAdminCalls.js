@@ -29,10 +29,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { adminFetch } from "@/app/admin/useAdminApi";
 import { getAccessToken } from "@/lib/session";
 
-// The gateway (:9000) forwards HTTP only, not WebSockets - so the
-// realtime channel connects straight to the livekit service.
+// The gateway proxies WebSockets now, so the realtime channel goes
+// through the same address as every other call. It used to point
+// straight at the livekit service, defaulting to localhost:8001 -
+// which meant that on any deployed build the browser tried to open
+// a socket to the visitor's own machine, and no call ever rang.
+//
+// NEXT_PUBLIC_REALTIME_URL still overrides it, for a setup that
+// really does want to bypass the gateway.
 const REALTIME_URL =
-  process.env.NEXT_PUBLIC_REALTIME_URL || "http://localhost:8001";
+  process.env.NEXT_PUBLIC_REALTIME_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:9000";
 
 // Is se purani pending escalation par ring nahi bajti.
 const RING_MAX_AGE_MS = 5 * 60 * 1000;
@@ -44,7 +52,9 @@ const RECONNECT_MAX_MS = 15000;
 
 function wsUrl(token) {
   const base = REALTIME_URL.replace(/^http/, "ws").replace(/\/+$/, "");
-  return `${base}/notifications/ws/admin?token=${encodeURIComponent(token)}`;
+  return `${base}/livekit/notifications/ws/admin?token=${encodeURIComponent(
+    token
+  )}`;
 }
 
 /**

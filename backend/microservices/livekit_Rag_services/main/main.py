@@ -95,22 +95,33 @@ async def lifespan(app: FastAPI):
     # -----------------------------------------------------
     # RabbitMQ
     # -----------------------------------------------------
+    # Best-effort: the broker being down shouldn't stop the whole
+    # API from serving. Auth, sessions and CRUD don't need it —
+    # only admin notifications and the voice worker handoff do,
+    # and those degrade on their own until the broker is back.
 
-    await rabbitmq.connect()
+    try:
 
-    # -----------------------------------------------------
-    # Start Admin Notification Consumer
-    # -----------------------------------------------------
+        await rabbitmq.connect()
 
-    notification_consumer_task = asyncio.create_task(
-        rabbitmq.admin_notification_consumer(
-            notification_manager
+        notification_consumer_task = asyncio.create_task(
+            rabbitmq.admin_notification_consumer(
+                notification_manager
+            )
         )
-    )
 
-    print(
-        "Admin notification consumer started"
-    )
+        print(
+            "Admin notification consumer started"
+        )
+
+    except Exception as e:
+
+        notification_consumer_task = None
+
+        print(
+            f"WARNING: RabbitMQ unavailable ({e}). "
+            "Starting without admin notifications / voice worker handoff."
+        )
 
     print(
         "Application started successfully"
@@ -221,7 +232,14 @@ app.include_router(
 # ---------------------------------------------------------
 # Notification WebSocket
 # ---------------------------------------------------------
+#
+# Same /livekit prefix as every other router here. Without it the
+# socket sat at /notifications/... while the gateway maps its own
+# /livekit namespace onto the service's - so the gateway could not
+# reach it, and the admin panel had to bypass the gateway and talk
+# to :8001 directly (which only ever worked on one machine).
 
 app.include_router(
-    notification_router
+    notification_router,
+    prefix="/livekit",
 )
