@@ -184,6 +184,7 @@ backend/audio_models/
 # start-vocira.ps1 -WithTunnel isay likhta hai. Har restart par nayi
 # URL hoti hai, machine ke sath makhsoos - commit karne layak nahi.
 .tunnel-url.txt
+.tunnel.log.out
 
 *.tmp
 *.temp
