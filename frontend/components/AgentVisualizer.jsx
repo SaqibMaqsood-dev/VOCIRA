@@ -29,6 +29,8 @@
  * LiveKit Agents SDK uses.
  */
 
+import { useEffect, useRef } from "react";
+
 import {
   BarVisualizer,
   useParticipantAttributes,
@@ -42,6 +44,18 @@ import { isAdminParticipant } from "@/lib/handoff";
 
 const AGENT_IDENTITY = "agent";
 const STATE_KEY = "lk.agent.state";
+
+/*
+ * How long the circle is allowed to sit on "Connecting..." before we
+ * tell the caller something is wrong.
+ *
+ * The agent normally joins within a second or two of the room being
+ * created. Without this timer, a caller whose agent never showed up
+ * (the worker was at its concurrency limit, crashed on this call, or
+ * the RabbitMQ message never arrived) saw nothing but a spinning
+ * circle forever - no error, no hint to hang up and try again.
+ */
+const STUCK_AFTER_MS = 20_000;
 
 const STATE_LABEL = {
   connecting: "Connecting…",
@@ -70,7 +84,11 @@ const STATE_COLOR = {
  * During a handoff the waveform is now built from the ADMIN's audio,
  * and the line below is written by the page itself.
  */
-export default function AgentVisualizer({ handoff = null }) {
+export default function AgentVisualizer({
+  handoff = null,
+  onStuck,
+  onRecovered,
+}) {
   const participants = useRemoteParticipants();
 
   const agent = participants.find((p) => p.identity === AGENT_IDENTITY);
@@ -95,6 +113,37 @@ export default function AgentVisualizer({ handoff = null }) {
     : attributes?.[STATE_KEY] || "connecting";
 
   const waiting = !speaker || !agentTrack;
+
+  /*
+   * A handoff is its own, expected kind of "waiting" - the AI has
+   * left on purpose and the page already says so. Only a caller
+   * stuck waiting for the AI itself, with no handoff in progress,
+   * counts as stuck.
+   */
+  const stuckTimer = useRef(null);
+  const hasFiredStuck = useRef(false);
+
+  useEffect(() => {
+    if (waiting && !handoff && onStuck) {
+      stuckTimer.current = setTimeout(() => {
+        hasFiredStuck.current = true;
+        onStuck();
+      }, STUCK_AFTER_MS);
+    } else if (!waiting && hasFiredStuck.current) {
+      // The agent showed up late, after we already warned the
+      // caller. Let the page clear that warning instead of leaving
+      // a stale "did not join" message next to a working call.
+      hasFiredStuck.current = false;
+      onRecovered?.();
+    }
+
+    return () => {
+      if (stuckTimer.current) {
+        clearTimeout(stuckTimer.current);
+        stuckTimer.current = null;
+      }
+    };
+  }, [waiting, handoff, onStuck, onRecovered]);
 
   // During a handoff the page states the status itself ("Connecting
   // you to a human agent…" / "You are speaking with a human agent"),
