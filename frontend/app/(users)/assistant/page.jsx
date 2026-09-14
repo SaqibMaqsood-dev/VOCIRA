@@ -7,7 +7,7 @@ import {
   Play,
   PhoneOff,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   Room,
@@ -79,6 +79,10 @@ function removeAudioElements() {
     }
   });
 }
+
+const AGENT_STUCK_MESSAGE =
+  "The voice assistant did not join the call. Please tap " +
+  "\"End Call\" and try again.";
 
 export default function AssistantPage() {
   const [room, setRoom] = useState(null);
@@ -964,6 +968,37 @@ ${JSON.stringify(
     };
 
   // ============================================================
+  // AGENT NEVER SHOWED UP
+  // ============================================================
+  //
+  // The room connected fine (the green "Connected" text above is
+  // about that), but AgentVisualizer waited STUCK_AFTER_MS for the
+  // AI to publish a track and it never did - the worker was likely
+  // at its call limit, crashed on this session, or never received
+  // it. Before this there was no feedback at all: the circle just
+  // spun on "Connecting..." forever and the caller had no way to
+  // know the call was actually going nowhere.
+  //
+  // useCallback keeps this function's identity stable across
+  // renders - AgentVisualizer's effect depends on it, and without
+  // this it would re-run (and restart the timer) on every render,
+  // so the timeout would never actually fire.
+  const handleAgentStuck = useCallback(() => {
+    setError(AGENT_STUCK_MESSAGE);
+  }, []);
+
+  // The agent joined after all, just later than expected - drop the
+  // warning above rather than leaving it next to a call that is now
+  // actually working. Only clears OUR OWN message, so an unrelated
+  // error (a microphone failure, say) is never wiped out from under
+  // it.
+  const handleAgentRecovered = useCallback(() => {
+    setError((current) =>
+      current === AGENT_STUCK_MESSAGE ? null : current
+    );
+  }, []);
+
+  // ============================================================
   // END CALL
   // ============================================================
 
@@ -1120,6 +1155,8 @@ ${JSON.stringify(
               <RoomContext.Provider value={room}>
                 <AgentVisualizer
                   handoff={handoff}
+                  onStuck={handleAgentStuck}
+                  onRecovered={handleAgentRecovered}
                 />
               </RoomContext.Provider>
             </div>

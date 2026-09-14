@@ -66,7 +66,7 @@ function Stop-VociraPython {
     }
     $left = @(Get-VociraPython)
     if ($left.Count -gt 0) {
-        Write-Host ("      {0} process abhi bhi zinda hain" -f $left.Count) -ForegroundColor Red
+        Write-Host ("      {0} process(es) still alive" -f $left.Count) -ForegroundColor Red
         return $false
     }
     return $true
@@ -89,7 +89,7 @@ if ($Status) {
             $r = Invoke-WebRequest $c.u -UseBasicParsing -TimeoutSec 5
             Write-Host ("  {0}  HTTP {1}" -f $c.n, $r.StatusCode) -ForegroundColor Green
         } catch {
-            Write-Host ("  {0}  band" -f $c.n) -ForegroundColor DarkGray
+            Write-Host ("  {0}  down" -f $c.n) -ForegroundColor DarkGray
         }
     }
 
@@ -98,20 +98,20 @@ if ($Status) {
         $q = Invoke-RestMethod "http://localhost:15672/api/queues/%2F/vocira_queue" -TimeoutSec 5 `
              -Headers @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest")) }
         $col = if ($q.consumers -ge 1) { "Green" } else { "Red" }
-        Write-Host ("  consumers={0}  qatar mein={1}  chal rahi={2}" -f $q.consumers, $q.messages_ready, $q.messages_unacknowledged) -ForegroundColor $col
-        if ($q.consumers -lt 1) { Write-Host "  worker nahi chal raha - koi call connect nahi hogi" -ForegroundColor Red }
-    } catch { Write-Host "  RabbitMQ tak nahi pohancha" -ForegroundColor DarkGray }
+        Write-Host ("  consumers={0}  queued={1}  running={2}" -f $q.consumers, $q.messages_ready, $q.messages_unacknowledged) -ForegroundColor $col
+        if ($q.consumers -lt 1) { Write-Host "  worker is not running - no call will connect" -ForegroundColor Red }
+    } catch { Write-Host "  Could not reach RabbitMQ" -ForegroundColor DarkGray }
 
     Write-Host "`n--- Cloudflare tunnel ---" -ForegroundColor Cyan
     $cf = @(Get-Process cloudflared -ErrorAction SilentlyContinue)
     if ($cf.Count -eq 0) {
-        Write-Host "  band  (-WithTunnel se chalta hai)" -ForegroundColor DarkGray
+        Write-Host "  down  (starts with -WithTunnel)" -ForegroundColor DarkGray
     } elseif (Test-Path $TUNNEL_URL) {
         $u = (Get-Content $TUNNEL_URL -Raw).Trim()
         Write-Host "  $u" -ForegroundColor Green
-        Write-Host "  ^ yehi Vercel ke NEXT_PUBLIC_API_URL mein honi chahiye" -ForegroundColor DarkGray
+        Write-Host "  ^ this should be Vercel's NEXT_PUBLIC_API_URL" -ForegroundColor DarkGray
     } else {
-        Write-Host "  chal raha hai magar URL nahi mili - .tunnel.log dekhein" -ForegroundColor Yellow
+        Write-Host "  running but the URL was not found - check .tunnel.log" -ForegroundColor Yellow
     }
 
     Write-Host ""
@@ -122,27 +122,27 @@ if ($Status) {
 # STOP
 # ---------------------------------------------------------------------
 if ($Stop) {
-    Write-Host "Python services band kar rahe hain..." -ForegroundColor Yellow
+    Write-Host "Stopping Python services..." -ForegroundColor Yellow
     Stop-VociraPython | Out-Null
 
-    Write-Host "Frontend band kar rahe hain..." -ForegroundColor Yellow
+    Write-Host "Stopping frontend..." -ForegroundColor Yellow
     Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -and $_.CommandLine -like "*VOCIRA-feature-backend*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-    Write-Host "Tunnel band kar rahe hain..." -ForegroundColor Yellow
+    Write-Host "Stopping tunnel..." -ForegroundColor Yellow
     Get-Process cloudflared -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item $TUNNEL_URL -ErrorAction SilentlyContinue
 
-    Write-Host "Infra containers band kar rahe hain..." -ForegroundColor Yellow
+    Write-Host "Stopping infra containers..." -ForegroundColor Yellow
     docker compose -f docker-compose.infra.yml stop | Out-Null
 
     if ($WithErp -or $All) {
-        Write-Host "ERPNext band kar rahe hain..." -ForegroundColor Yellow
+        Write-Host "Stopping ERPNext..." -ForegroundColor Yellow
         Push-Location $ERP; docker compose -f pwd.yml stop | Out-Null; Pop-Location
     }
-    Write-Host "Ho gaya." -ForegroundColor Green
+    Write-Host "Done." -ForegroundColor Green
     return
 }
 
@@ -159,8 +159,8 @@ if ($Stop) {
 # ---------------------------------------------------------------------
 docker info 2>$null | Out-Null
 if (-not $?) {
-    Write-Host "`nDocker Desktop band hai." -ForegroundColor Red
-    Write-Host "  Postgres, RabbitMQ, LiveKit aur ERPNext sab isi par chalte hain."
+    Write-Host "`nDocker Desktop is not running." -ForegroundColor Red
+    Write-Host "  Postgres, RabbitMQ, LiveKit and ERPNext all run on it."
 
     $dockerExe = @(
         "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
@@ -168,7 +168,7 @@ if (-not $?) {
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
     if ($dockerExe) {
-        Write-Host "  Chala rahe hain..." -ForegroundColor Yellow
+        Write-Host "  Starting it..." -ForegroundColor Yellow
         Start-Process $dockerExe
 
         for ($i = 0; $i -lt 90; $i++) {
@@ -179,14 +179,14 @@ if (-not $?) {
 
         docker info 2>$null | Out-Null
         if ($?) {
-            Write-Host "  Docker tayyar." -ForegroundColor Green
+            Write-Host "  Docker is ready." -ForegroundColor Green
         } else {
-            Write-Host "  Docker 3 minute mein tayyar nahi hua." -ForegroundColor Red
-            Write-Host "  Docker Desktop khud khol kar dobara koshish karein."
+            Write-Host "  Docker did not become ready within 3 minutes." -ForegroundColor Red
+            Write-Host "  Open Docker Desktop yourself and try again."
             return
         }
     } else {
-        Write-Host "  Docker Desktop khol kar dobara koshish karein." -ForegroundColor Yellow
+        Write-Host "  Open Docker Desktop and try again." -ForegroundColor Yellow
         return
     }
 }
@@ -200,7 +200,7 @@ if (-not $?) {
 # ---------------------------------------------------------------------
 $old = @(Get-VociraPython)
 if ($old.Count -gt 0) {
-    Write-Host ("`n[0/6] {0} purane process mil gaye - band kar rahe hain..." -f $old.Count) -ForegroundColor Yellow
+    Write-Host ("`n[0/6] Found {0} old process(es) - stopping them..." -f $old.Count) -ForegroundColor Yellow
     Stop-VociraPython | Out-Null
 }
 
@@ -210,15 +210,15 @@ if ($old.Count -gt 0) {
 Write-Host "`n[1/6] Infra containers..." -ForegroundColor Cyan
 docker compose -f docker-compose.infra.yml up -d | Out-Null
 
-Write-Host "      Postgres ka intezaar..." -ForegroundColor DarkGray
+Write-Host "      Waiting for Postgres..." -ForegroundColor DarkGray
 $ok = $false
 for ($i = 0; $i -lt 30; $i++) {
     docker exec vocira-postgres pg_isready -U vocira -d vocira 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) { $ok = $true; break }
     Start-Sleep -Seconds 2
 }
-if ($ok) { Write-Host "      Postgres tayyar." -ForegroundColor Green }
-else     { Write-Host "      Postgres ne jawab nahi diya." -ForegroundColor Red }
+if ($ok) { Write-Host "      Postgres is ready." -ForegroundColor Green }
+else     { Write-Host "      Postgres did not respond." -ForegroundColor Red }
 
 # ---------------------------------------------------------------------
 # 2. PURANI ATKI HUI CALLS SAAF
@@ -227,14 +227,14 @@ else     { Write-Host "      Postgres ne jawab nahi diya." -ForegroundColor Red 
 # baghair) to us ki session "active" reh jati hai aur RabbitMQ message
 # atka reh jata hai - phir worker nayi calls nahi uthata.
 # ---------------------------------------------------------------------
-Write-Host "`n[2/6] Purani atki hui calls saaf..." -ForegroundColor Cyan
+Write-Host "`n[2/6] Clearing stuck old calls..." -ForegroundColor Cyan
 
 # RabbitMQ ko uthne mein 20-30 second lag jate hain. Pehle yahan
 # intezaar nahi tha, is liye purge chup chaap fail ho jata tha - aur
 # yahi wo step hai jo atki hui calls saaf karta hai.
 $rmqAuth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest")) }
 $rmqReady = $false
-Write-Host "      RabbitMQ ka intezaar..." -ForegroundColor DarkGray
+Write-Host "      Waiting for RabbitMQ..." -ForegroundColor DarkGray
 for ($i = 0; $i -lt 60; $i += 3) {
     try {
         Invoke-RestMethod "http://localhost:15672/api/overview" -Headers $rmqAuth -TimeoutSec 3 | Out-Null
@@ -246,18 +246,18 @@ for ($i = 0; $i -lt 60; $i += 3) {
 if ($rmqReady) {
     try {
         Invoke-RestMethod "http://localhost:15672/api/queues/%2F/vocira_queue/contents" -Method Delete -Headers $rmqAuth -TimeoutSec 5 | Out-Null
-        Write-Host "      Queue saaf." -ForegroundColor Green
+        Write-Host "      Queue cleared." -ForegroundColor Green
     } catch {
         # Queue abhi bani hi nahi (pehli baar) - koi masla nahi
-        Write-Host "      Queue abhi maujood nahi - theek hai." -ForegroundColor DarkGray
+        Write-Host "      Queue does not exist yet - that's fine." -ForegroundColor DarkGray
     }
 } else {
-    Write-Host "      RabbitMQ ne jawab nahi diya - atki hui calls saaf nahi hui." -ForegroundColor Red
+    Write-Host "      RabbitMQ did not respond - stuck calls were not cleared." -ForegroundColor Red
 }
 
 try {
     docker exec vocira-postgres psql -U vocira -d vocira -c "UPDATE sessions SET status='closed', end_at=NOW() WHERE status='active';" 2>&1 | Out-Null
-    Write-Host "      Purani sessions band." -ForegroundColor Green
+    Write-Host "      Old sessions closed." -ForegroundColor Green
 } catch { }
 
 # ---------------------------------------------------------------------
@@ -272,7 +272,7 @@ if ($WithErp) {
     Pop-Location
     Write-Host "      http://localhost:8081  (Administrator / admin)" -ForegroundColor Green
 } else {
-    Write-Host "`n[3/6] ERPNext skip (-WithErp ya -All se chalta hai)" -ForegroundColor DarkGray
+    Write-Host "`n[3/6] ERPNext skipped (starts with -WithErp or -All)" -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------
@@ -295,11 +295,11 @@ function Wait-Svc($title, $url, $seconds = 60) {
     for ($i = 0; $i -lt $seconds; $i += 2) {
         try {
             Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 3 | Out-Null
-            Write-Host ("      -> {0} tayyar ({1}s)" -f $title, $i) -ForegroundColor DarkGreen
+            Write-Host ("      -> {0} ready ({1}s)" -f $title, $i) -ForegroundColor DarkGreen
             return $true
         } catch { Start-Sleep -Seconds 2 }
     }
-    Write-Host ("      -> {0} ne {1}s mein jawab nahi diya - us ki window dekhein" -f $title, $seconds) -ForegroundColor Red
+    Write-Host ("      -> {0} did not respond within {1}s - check its window" -f $title, $seconds) -ForegroundColor Red
     return $false
 }
 
@@ -341,7 +341,7 @@ if ($WithTunnel) {
     Write-Host "`n[5/6] Cloudflare tunnel..." -ForegroundColor Cyan
 
     if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
-        Write-Host "      cloudflared install nahi hai - tunnel skip." -ForegroundColor Red
+        Write-Host "      cloudflared is not installed - skipping tunnel." -ForegroundColor Red
     } else {
         # Purani tunnel zinda ho to nayi ke saath do URL chal parti hain
         Get-Process cloudflared -ErrorAction SilentlyContinue |
@@ -366,7 +366,7 @@ if ($WithTunnel) {
             }
 
             if (-not $tunnelUrl) {
-                Write-Host ("      koshish {0} nakaam - dobara..." -f $try) -ForegroundColor DarkGray
+                Write-Host ("      attempt {0} failed - retrying..." -f $try) -ForegroundColor DarkGray
                 Stop-Process -Id $cf.Id -Force -ErrorAction SilentlyContinue
             }
         }
@@ -375,12 +375,12 @@ if ($WithTunnel) {
             Set-Content -Path $TUNNEL_URL -Value $tunnelUrl
             Write-Host "      $tunnelUrl" -ForegroundColor Green
         } else {
-            Write-Host "      Tunnel nahi bani (Cloudflare ka API slow hai)." -ForegroundColor Red
-            Write-Host "      Baad mein: cloudflared tunnel --url http://localhost:9000" -ForegroundColor DarkGray
+            Write-Host "      Tunnel could not be created (Cloudflare's API is slow)." -ForegroundColor Red
+            Write-Host "      Later: cloudflared tunnel --url http://localhost:9000" -ForegroundColor DarkGray
         }
     }
 } else {
-    Write-Host "`n[5/6] Tunnel skip (-WithTunnel se chalta hai)" -ForegroundColor DarkGray
+    Write-Host "`n[5/6] Tunnel skipped (starts with -WithTunnel)" -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------
@@ -389,7 +389,7 @@ if ($WithTunnel) {
 if ($WithFrontend) {
     Write-Host "`n[6/6] Frontend..." -ForegroundColor Cyan
     if (-not (Test-Path (Join-Path $ROOT "frontend\node_modules"))) {
-        Write-Host "      node_modules nahi hai - pehle 'cd frontend ; npm install' chalayein." -ForegroundColor Red
+        Write-Host "      node_modules not found - run 'cd frontend ; npm install' first." -ForegroundColor Red
     } else {
         Start-Process powershell -ArgumentList @(
             "-NoExit", "-Command",
@@ -398,19 +398,19 @@ if ($WithFrontend) {
         Write-Host "      VOCIRA frontend :3000" -ForegroundColor Green
     }
 } else {
-    Write-Host "`n[6/6] Frontend skip (-WithFrontend ya -All se chalta hai)" -ForegroundColor DarkGray
+    Write-Host "`n[6/6] Frontend skipped (starts with -WithFrontend or -All)" -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------
 # HEALTH CHECK
 # ---------------------------------------------------------------------
-Write-Host "`nAgent worker aur frontend ka intezaar..." -ForegroundColor Cyan
+Write-Host "`nWaiting for the agent worker and frontend..." -ForegroundColor Cyan
 Start-Sleep -Seconds 35
 & $PSCommandPath -Status
 
 Write-Host @"
 ---------------------------------------------------------------
-  Frontend  http://localhost:3000    <- yahan se shuru karein
+  Frontend  http://localhost:3000    <- start here
   Gateway   http://localhost:9000/docs
   RabbitMQ  http://localhost:15672   (guest / guest)
 "@ -ForegroundColor Cyan
@@ -418,8 +418,8 @@ if ($WithErp) { Write-Host "  ERPNext   http://localhost:8081     (Administrator
 Write-Host @"
 
   Login     muhmmadahmed763@edu.com / Test@1234
-  Band      .\start-vocira.ps1 -Stop
-  Haal      .\start-vocira.ps1 -Status
+  Stop      .\start-vocira.ps1 -Stop
+  Status    .\start-vocira.ps1 -Status
 ---------------------------------------------------------------
 "@ -ForegroundColor Cyan
 
@@ -429,16 +429,16 @@ if ($tunnelUrl) {
     Write-Host @"
 
 ===============================================================
-  TUNNEL URL (har restart par nayi hoti hai)
+  TUNNEL URL (changes on every restart)
 
   $tunnelUrl
 
   Vercel -> Settings -> Environment Variables
       NEXT_PUBLIC_API_URL  =  $tunnelUrl
-  phir Deployments -> Redeploy
+  then Deployments -> Redeploy
 
-  (agar NEXT_PUBLIC_REALTIME_URL maujood ho to usay delete kar
-   dein - warna admin notifications kaam nahi karengi)
+  (if NEXT_PUBLIC_REALTIME_URL exists, delete it - otherwise
+   admin notifications will not work)
 ===============================================================
 "@ -ForegroundColor Yellow
 }
