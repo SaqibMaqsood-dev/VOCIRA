@@ -208,3 +208,37 @@ class SessionService:
         if session.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this session")
         return await self.session_repo.close_session_by_id(db=db, session_id=session_id)
+
+    # =========================================================
+    # CLOSE SESSION - WORKER (no ownership check)
+    # =========================================================
+    #
+    # The HTTP-facing close above exists to stop one logged-in user
+    # from closing another user's session, so it has to check
+    # session.user_id against the caller's own JWT-derived user_id.
+    #
+    # The LiveKit worker is not that caller. It never had the
+    # guardian's identity to begin with - LivekitRoomServices is
+    # built with user_id=None for every call (make_worker() in
+    # livekit_worker.py) - and it only ever closes the one
+    # session_id RabbitMQ handed it for this call, so there is
+    # nothing to check ownership against in the first place.
+    #
+    # Before this method existed the worker called the same
+    # ownership-checked close() above with user_id=None. Since a
+    # real session's owner is never None, `session.user_id != None`
+    # was always true, the close always raised 403, and every call
+    # ended with the session stuck at status="active" - fixed only
+    # much later when start-vocira.ps1 force-closed it at the next
+    # restart, which is why closed calls could show hours of
+    # "duration".
+    async def close_session_internal(
+        self,
+        session_id: UUID,
+        db: AsyncSession | None = None,
+    ):
+        if db is not None:
+            return await self.session_repo.close_session_by_id(db=db, session_id=session_id)
+
+        async with SessionLocal() as own_db:
+            return await self.session_repo.close_session_by_id(db=own_db, session_id=session_id)

@@ -37,8 +37,16 @@ export default function CallTable({ rows = [] }) {
           Call History
         </h2>
 
+        {/*
+          This used to say "Last 30 days" - but the query behind it
+          (GET /sessions/?limit=20&skip=0) has no date filter at all.
+          It is just the most recent 20 calls, however old they are,
+          so a caller with one call from six months ago would see
+          that label next to it. This says what the page actually
+          does instead.
+        */}
         <p className="text-xs text-text-secondary">
-          Last 30 days
+          Most recent calls
         </p>
       </div>
 

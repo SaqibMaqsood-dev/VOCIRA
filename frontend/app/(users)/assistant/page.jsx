@@ -1055,6 +1055,51 @@ ${JSON.stringify(
         );
 
         // ------------------------------------------------------
+        // Tell the backend this session is over
+        // ------------------------------------------------------
+        //
+        // Leaving the LiveKit room only ends the audio - it does not
+        // touch the session row in the database. Without this the
+        // worker was the only thing that could close it, and only
+        // after its own 10-second grace period, so "My Calls" kept
+        // showing "active" for a while after a call the user had
+        // already ended. This closes it the moment the button is
+        // pressed instead of waiting on the worker.
+        //
+        // Best-effort: if this fails (a dropped connection, say),
+        // the worker's own teardown still closes the session a few
+        // seconds later, so the call does not hang open forever
+        // either way.
+        if (sessionId) {
+          try {
+            const API_BASE_URL =
+              process.env.NEXT_PUBLIC_API_URL ||
+              "http://localhost:9000";
+
+            const accessToken = getAccessToken();
+
+            await fetch(
+              `${API_BASE_URL}/livekit/sessions/${sessionId}/close`,
+              {
+                method: "PATCH",
+                headers: accessToken
+                  ? { Authorization: `Bearer ${accessToken}` }
+                  : {},
+              }
+            );
+
+            console.log(
+              "Session closed on the server."
+            );
+          } catch (closeError) {
+            console.warn(
+              "Could not close the session on the server - the worker will close it shortly:",
+              closeError
+            );
+          }
+        }
+
+        // ------------------------------------------------------
         // Remove audio elements
         // ------------------------------------------------------
 

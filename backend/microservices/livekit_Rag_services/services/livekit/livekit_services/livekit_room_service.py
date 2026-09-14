@@ -867,10 +867,18 @@ class LivekitRoomServices:
 
             try:
 
-                await self.ss_service.close_session_by_id(
+                # close_session_by_id() (the HTTP-facing one) checks
+                # that session.user_id matches the caller - correct
+                # for a real user hitting the API, but self.user_id
+                # is always None here (make_worker() builds this
+                # class with user_id=None), so that check used to
+                # fail every single time and the session never
+                # closed. close_session_internal() skips it: the
+                # worker already knows this session_id is the one
+                # RabbitMQ gave it for this call, nothing else to
+                # verify.
+                await self.ss_service.close_session_internal(
                     session_id=session_id,
-                    user_id=self.user_id
-
                 )
 
             except Exception as error:
