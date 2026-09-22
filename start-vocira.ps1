@@ -271,6 +271,40 @@ if ($WithErp) {
     docker compose -f pwd.yml start | Out-Null
     Pop-Location
     Write-Host "      http://localhost:8081  (Administrator / admin)" -ForegroundColor Green
+
+    # -----------------------------------------------------------------
+    # nginx apne startup par backend container ka IP resolve kar ke
+    # cache kar leta hai. Jab backend container restart hota hai
+    # (jaisa upar 'docker compose start' abhi kar sakta hai), us ka IP
+    # badal jata hai - nginx purana IP par bhejta rehta hai aur har
+    # request 502 deti hai, jab tak nginx khud restart na ho aur naya
+    # IP resolve na kare.
+    #
+    # Isay pehle haath se pakra gaya tha (docker restart
+    # frappe_test-frontend-1). Ab yahan khud check + fix ho jata hai.
+    # -----------------------------------------------------------------
+    Write-Host "      Checking for a stale-IP 502..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds 3
+    $erpOk = $false
+    for ($i = 0; $i -lt 20; $i++) {
+        try {
+            $r = Invoke-WebRequest "http://localhost:8081/api/method/ping" -UseBasicParsing -TimeoutSec 3
+            if ($r.StatusCode -eq 200) { $erpOk = $true; break }
+        } catch {
+            $code = $_.Exception.Response.StatusCode.value__
+            if ($code -eq 502) {
+                Write-Host "      -> 502 (stale nginx IP) - restarting frappe_test-frontend-1..." -ForegroundColor Yellow
+                docker restart frappe_test-frontend-1 | Out-Null
+                Start-Sleep -Seconds 5
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+    if ($erpOk) {
+        Write-Host "      -> ERPNext responding normally" -ForegroundColor DarkGreen
+    } else {
+        Write-Host "      -> ERPNext still not responding - check 'docker logs frappe_test-frontend-1'" -ForegroundColor Red
+    }
 } else {
     Write-Host "`n[3/6] ERPNext skipped (starts with -WithErp or -All)" -ForegroundColor DarkGray
 }
@@ -280,12 +314,23 @@ if ($WithErp) {
 # ---------------------------------------------------------------------
 Write-Host "`n[4/6] Backend services..." -ForegroundColor Cyan
 
-function Start-Svc($title, $cmd) {
+# A crash used to mean the window just closed - or sat there with
+# nothing to check, if -NoExit kept it open. Now every service's
+# output also lands in logs/<name>.log (overwritten fresh each start
+# stopped, not appended forever), so "why did it die" has an answer
+# without needing to have been watching the window at the time.
+$LOG_DIR = Join-Path $ROOT "logs"
+if (-not (Test-Path $LOG_DIR)) {
+    New-Item -ItemType Directory -Path $LOG_DIR | Out-Null
+}
+
+function Start-Svc($title, $cmd, $logName) {
+    $logPath = Join-Path $LOG_DIR "$logName.log"
     Start-Process powershell -ArgumentList @(
         "-NoExit", "-Command",
-        "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; $cmd"
+        "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; & { $cmd } 2>&1 | Tee-Object -FilePath '$logPath'"
     )
-    Write-Host "      $title" -ForegroundColor Green
+    Write-Host "      $title  (log: logs/$logName.log)" -ForegroundColor Green
 }
 
 # Fixed sleep par bharosa na karein - service ke asal mein jawab dene
@@ -304,22 +349,26 @@ function Wait-Svc($title, $url, $seconds = 60) {
 }
 
 Start-Svc "VOCIRA auth :8000" `
-    "uv run --project $AUTH python -u -m uvicorn backend.microservices.auth_services.main.main:app --host 127.0.0.1 --port 8000"
+    "uv run --project $AUTH python -u -m uvicorn backend.microservices.auth_services.main.main:app --host 127.0.0.1 --port 8000" `
+    "auth"
 Wait-Svc "auth" "http://127.0.0.1:8000/docs" 60 | Out-Null
 
 Start-Svc "VOCIRA livekit :8001" `
-    "uv run --project $LK python -u -m uvicorn backend.microservices.livekit_Rag_services.main.main:app --host 127.0.0.1 --port 8001"
+    "uv run --project $LK python -u -m uvicorn backend.microservices.livekit_Rag_services.main.main:app --host 127.0.0.1 --port 8001" `
+    "livekit"
 Wait-Svc "livekit" "http://127.0.0.1:8001/docs" 90 | Out-Null
 
 Start-Svc "VOCIRA gateway :9000" `
-    "uv run --project $LK python -u -m uvicorn backend.microservices.gateway_api.main:app --host 127.0.0.1 --port 9000"
+    "uv run --project $LK python -u -m uvicorn backend.microservices.gateway_api.main:app --host 127.0.0.1 --port 9000" `
+    "gateway"
 Wait-Svc "gateway" "http://127.0.0.1:9000/docs" 60 | Out-Null
 
 # LAZMI: ye RabbitMQ se "session.created" sunta hai aur AI agent ko
 # LiveKit room mein bhejta hai. Iske baghair call to lag jayegi magar
 # koi agent join nahi karega - user akela baitha rahega.
 Start-Svc "VOCIRA agent worker" `
-    "uv run --project $LK python -u -m backend.microservices.livekit_Rag_services.livekit_worker"
+    "uv run --project $LK python -u -m backend.microservices.livekit_Rag_services.livekit_worker" `
+    "agent-worker"
 
 # ---------------------------------------------------------------------
 # 5. CLOUDFLARE TUNNEL  (gateway :9000 ko internet par le aata hai)

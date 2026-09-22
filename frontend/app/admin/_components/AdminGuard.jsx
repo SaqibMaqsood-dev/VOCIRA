@@ -23,8 +23,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { getAccessToken } from "@/lib/session";
+import FullScreenLoader from "@/components/FullScreenLoader";
 
 export default function AdminGuard({ children }) {
   // "checking" -> not known yet, "allowed" -> admin, "denied" -> redirected
@@ -61,20 +62,15 @@ export default function AdminGuard({ children }) {
     return children;
   }
 
+  if (state === "checking") {
+    return <FullScreenLoader label="Checking access…" subLabel="One moment" />;
+  }
+
   return (
     <div className="grid min-h-screen place-items-center text-white">
       <div className="flex items-center gap-3 text-sm text-white/70">
-        {state === "checking" ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Checking access…
-          </>
-        ) : (
-          <>
-            <ShieldAlert className="h-4 w-4 text-amber-300" />
-            Redirecting…
-          </>
-        )}
+        <ShieldAlert className="h-4 w-4 text-amber-300" />
+        Redirecting…
       </div>
     </div>
   );

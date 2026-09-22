@@ -84,30 +84,47 @@ export async function adminFetch(path, options = {}) {
  * One place, rather than rewriting the same useEffect on every
  * page.
  */
-export function useAdminData(path, fallback) {
+export function useAdminData(path, fallback, { pollMs } = {}) {
   const [data, setData] = useState(fallback);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
-      setData(await adminFetch(path));
-    } catch (err) {
-      if (err.code === "NO_TOKEN" || err.code === "UNAUTHORIZED") {
-        window.location.href = "/login";
-        return;
+  // A poll tick is silent: it must never flip `loading` back to true,
+  // or the page's full-screen loader would flash every N seconds over
+  // whatever the admin is doing. A real failure mid-poll is dropped
+  // rather than shown, too - a stale list beats an alarming error for
+  // something that will just try again shortly.
+  const load = useCallback(
+    async ({ silent } = {}) => {
+      try {
+        if (!silent) {
+          setLoading(true);
+          setError("");
+        }
+        const next = await adminFetch(path);
+        setData(next);
+      } catch (err) {
+        if (err.code === "NO_TOKEN" || err.code === "UNAUTHORIZED") {
+          window.location.href = "/login";
+          return;
+        }
+        if (!silent) setError(err.message || "Could not load data.");
+      } finally {
+        if (!silent) setLoading(false);
       }
-      setError(err.message || "Could not load data.");
-    } finally {
-      setLoading(false);
-    }
-  }, [path]);
+    },
+    [path]
+  );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!pollMs) return undefined;
+    const id = setInterval(() => load({ silent: true }), pollMs);
+    return () => clearInterval(id);
+  }, [load, pollMs]);
 
   return { data, loading, error, reload: load };
 }

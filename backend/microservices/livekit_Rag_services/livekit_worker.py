@@ -14,6 +14,21 @@ each call runs in its own asyncio task.
 """
 
 import asyncio
+import sys
+
+# Windows runs this console under cp1252 by default, which cannot
+# encode Urdu (or most other non-English) text at all. Every print()
+# anywhere in the pipeline that ever logs a transcript or an answer -
+# including the one inside speak_text() - crashed the moment
+# STT_LANGUAGE=ur produced real Urdu content, and because that crash
+# happened INSIDE speak_text(), the greeting was never actually
+# spoken and nothing was saved: the call looked "fine" (no error
+# reached the caller) while doing nothing at all. errors="replace"
+# is a second safety net - some future character even UTF-8 logging
+# cannot show should never be allowed to take down a live call over
+# a print() statement.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from backend.microservices.livekit_Rag_services.core.rabitmq import (
     MAX_CALL_SECONDS,

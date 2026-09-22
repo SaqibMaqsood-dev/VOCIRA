@@ -16,10 +16,10 @@ export default function BackgroundGradient() {
     <div className="pointer-events-none fixed inset-0 -z-20">
       <GradFlow
         config={{
-          color1: "#100944",
+          color1: "#0a0850",
           color2: "#000000",
-          color3: "#100944",
-          speed: 0.6,
+          color3: "#0a0850",
+          speed: 1,
           scale: 0.8,
           type: "smoke",
           noise: 0.18

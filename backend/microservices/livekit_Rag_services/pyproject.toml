@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "livekit-rag-services"
 version = "0.1.0"
 description = "LiveKit RAG Services"
@@ -49,3 +49,12 @@ build-backend = "uv_build"
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

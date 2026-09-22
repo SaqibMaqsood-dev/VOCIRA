@@ -993,12 +993,36 @@ async def process_voice_intent(
                 route.get("intent", "RAG")
             ).strip().upper()
 
-            erp_resource = route.get("resource")
-            erp_student = (route.get("student") or "").strip() or None
+            # "items" is the router's current shape - a list, since a
+            # compound question ("Zoya's attendance and has the fee
+            # been paid?") needs more than one {resource, student}
+            # pair answered in the same turn. quick_route's
+            # single-resource fast path (and any older LLM output)
+            # still uses the plain "resource"/"student" keys, so that
+            # shape is normalised into a one-item list here rather
+            # than needing two code paths below.
+            erp_items = route.get("items")
+            if erp_items is None and route.get("resource"):
+                erp_items = [
+                    {"resource": route.get("resource"), "student": route.get("student")}
+                ]
+            erp_items = [
+                {
+                    "resource": item.get("resource"),
+                    "student": (item.get("student") or "").strip() or None,
+                }
+                for item in (erp_items or [])
+                if isinstance(item, dict) and item.get("resource")
+            ]
+
+            # Kept for the two spots below that still log a single
+            # resource/student pair (the stage-tracking print and the
+            # very first item's identity are enough there).
+            erp_resource = erp_items[0]["resource"] if erp_items else None
+            erp_student = erp_items[0]["student"] if erp_items else None
 
             print(
-                f"[Route]: intent={intent} "
-                f"resource={erp_resource} student={erp_student}"
+                f"[Route]: intent={intent} items={erp_items}"
             )
 
             # =================================================
@@ -1017,10 +1041,8 @@ async def process_voice_intent(
 
                 if not user_id:
 
-                    ai_response_text = (
-                        "You must be logged in with "
-                        "an authorized account to "
-                        "contact an admin."
+                    ai_response_text = human_text.system_message(
+                        "admin_requires_login"
                     )
 
                     await message_service.create_message(
@@ -1029,6 +1051,7 @@ async def process_voice_intent(
                         user_id=user_id,
                         usertype=SenderTypeEnum.ai.value,
                         session_id=session_id,
+                        intent="admin_handoff",
                     )
 
                     return
@@ -1129,9 +1152,8 @@ async def process_voice_intent(
                 # caller assumed the system was broken.
                 # -------------------------------------------------
 
-                handoff_text = (
-                    "Please hold on. I am connecting you to "
-                    "a member of our school staff."
+                handoff_text = human_text.system_message(
+                    "connecting_to_staff"
                 )
 
                 await message_service.create_message(
@@ -1140,6 +1162,7 @@ async def process_voice_intent(
                     user_id=user_id,
                     usertype=SenderTypeEnum.ai.value,
                     session_id=session_id,
+                    intent="admin_handoff",
                 )
 
                 await speak_text(
@@ -1174,7 +1197,7 @@ async def process_voice_intent(
             # The router now returns "ERP" (it was "ERP_QUERY").
             # Without a resource, ERP is meaningless - in that case
             # it falls back to RAG so the user is not left empty-handed.
-            elif intent == "ERP" and erp_resource:
+            elif intent == "ERP" and erp_items:
 
                 print(
                     "[Route]: ERP Pipeline"
@@ -1222,10 +1245,8 @@ async def process_voice_intent(
                             "No VOCIRA user_id."
                         )
 
-                        ai_response_text = (
-                            "You are not authorized to access "
-                            "ERP information. Please log in "
-                            "with an authorized account."
+                        ai_response_text = human_text.system_message(
+                            "erp_not_authorized"
                         )
 
                     else:
@@ -1297,9 +1318,8 @@ async def process_voice_intent(
                                 "Auth Service returned no user."
                             )
 
-                            ai_response_text = (
-                                "I could not verify your account. "
-                                "Please log in again."
+                            ai_response_text = human_text.system_message(
+                                "account_not_verified"
                             )
 
                         elif not isinstance(
@@ -1312,9 +1332,8 @@ async def process_voice_intent(
                                 "Unexpected Auth Service response."
                             )
 
-                            ai_response_text = (
-                                "I could not verify your account. "
-                                "Please log in again."
+                            ai_response_text = human_text.system_message(
+                                "account_not_verified"
                             )
 
                         else:
@@ -1343,9 +1362,8 @@ async def process_voice_intent(
                                     f"Returned  : {auth_user_id}"
                                 )
 
-                                ai_response_text = (
-                                    "I could not verify your account. "
-                                    "Please log in again."
+                                ai_response_text = human_text.system_message(
+                                    "account_not_verified"
                                 )
 
                             else:
@@ -1405,9 +1423,8 @@ async def process_voice_intent(
                                         "User role is not authorized."
                                     )
 
-                                    ai_response_text = (
-                                        "You are not authorized "
-                                        "to access ERP information."
+                                    ai_response_text = human_text.system_message(
+                                        "erp_not_authorized_short"
                                     )
 
                                 else:
@@ -1439,9 +1456,8 @@ async def process_voice_intent(
                                             f"{list(auth_user.keys())}"
                                         )
 
-                                        ai_response_text = (
-                                            "Your VOCIRA account is not "
-                                            "linked to an ERP account."
+                                        ai_response_text = human_text.system_message(
+                                            "erp_not_linked"
                                         )
 
                                     else:
@@ -1487,15 +1503,43 @@ async def process_voice_intent(
                                             f"{erp_parent_id}"
                                         )
 
-                                        # The resource already came
+                                        # The resource(s) already came
                                         # from that same router call -
                                         # no second LLM call needed.
-                                        erp_data = (
-                                            await erp_service.fetch(
-                                                resource=erp_resource,
+                                        # A compound question ("Zoya's
+                                        # attendance and has the fee
+                                        # been paid?") has more than
+                                        # one item; each is its own
+                                        # independent ERP lookup
+                                        # (different resource, and
+                                        # sometimes a different named
+                                        # child), so they run
+                                        # concurrently rather than one
+                                        # slow round-trip per item.
+                                        erp_fetches = [
+                                            erp_service.fetch(
+                                                resource=item["resource"],
                                                 erp_parent_id=erp_parent_id,
-                                                student_name=erp_student,
+                                                student_name=item["student"],
+                                                session_id=str(session_id),
                                             )
+                                            for item in erp_items
+                                        ]
+                                        erp_results = await asyncio.gather(
+                                            *erp_fetches
+                                        )
+
+                                        # Single-item questions (the
+                                        # overwhelming majority) keep
+                                        # the exact same shape as
+                                        # before - a lone dict, not a
+                                        # one-element list - so nothing
+                                        # about how that dict reads in
+                                        # the prompt changes for them.
+                                        erp_data = (
+                                            erp_results[0]
+                                            if len(erp_results) == 1
+                                            else list(erp_results)
                                         )
 
                                         print(
@@ -1528,7 +1572,17 @@ async def process_voice_intent(
                                                 # the per-minute budget - while
                                                 # the longest ERP answers
                                                 # measured were 574 tokens.
-                                                max_tokens=640,
+                                                # A compound question needs to
+                                                # cover more ground in one
+                                                # answer, so the budget scales
+                                                # with how many topics were
+                                                # asked about, capped so one
+                                                # oddly long question cannot
+                                                # eat the whole per-minute
+                                                # token budget by itself.
+                                                max_tokens=min(
+                                                    640 * len(erp_items), 1600
+                                                ),
                                             )
                                         )
 
@@ -1568,10 +1622,8 @@ async def process_voice_intent(
                             "failed while composing the answer"
                         )
 
-                        ai_response_text = (
-                            "I found your record, but I am having "
-                            "trouble putting the answer together "
-                            "right now. Please ask me again in a moment."
+                        ai_response_text = human_text.system_message(
+                            "answer_assembly_failed"
                         )
 
                     else:
@@ -1581,9 +1633,8 @@ async def process_voice_intent(
                             "pahunch nahi saki"
                         )
 
-                        ai_response_text = (
-                            "Sorry, I cannot reach the school records "
-                            "system right now. Please try again shortly."
+                        ai_response_text = human_text.system_message(
+                            "erp_unreachable"
                         )
 
                     print(
@@ -1665,12 +1716,32 @@ async def process_voice_intent(
             # SAVE AI MESSAGE
             # =================================================
 
+            # What this exchange was about, for the "My Calls" table's
+            # Topic column. "attendance:Zoya" packs both the resource
+            # and the named child into the one intent field that
+            # already existed - no new column needed. A compound
+            # question joins each item's "resource:student" with "+"
+            # ("attendance:Zoya+fee:Zoya"), which _format_topic() in
+            # session_service.py splits back apart. A cached answer
+            # carries no resource/student (the router never ran for
+            # it), so it falls back to the generic "cached" label.
+            if intent == "ERP" and erp_items:
+                stored_intent = "+".join(
+                    f"{item['resource']}:{item['student']}"
+                    if item["student"]
+                    else item["resource"]
+                    for item in erp_items
+                )
+            else:
+                stored_intent = intent.lower()
+
             await message_service.create_message(
                 db=db,
                 content=ai_response_text,
                 user_id=user_id,
                 usertype=SenderTypeEnum.ai.value,
                 session_id=session_id,
+                intent=stored_intent,
             )
 
         # =====================================================

@@ -11,8 +11,61 @@ from backend.microservices.livekit_Rag_services.models import (
     message_model,
     session_model,
 )
+from backend.microservices.livekit_Rag_services.models.message_model import SenderTypeEnum
 from backend.helper_functions.database.session import SessionLocal
 from backend.microservices.livekit_Rag_services.core.config import settings
+
+
+# Resource keys, as stored in Message.intent, mapped to what a
+# guardian should actually see. Falls back to a title-cased version
+# of the raw key for anything not listed here.
+_TOPIC_LABELS = {
+    "attendance": "Attendance",
+    "assessment": "Marks",
+    "exam": "Upcoming exam",
+    "schedule": "Timetable",
+    "class": "Class",
+    "course": "Subjects",
+    "program_enrollment": "Enrollment",
+    "fee": "Fees",
+    "payment": "Payment",
+    "student": "Profile",
+    "guardian": "My details",
+    "leave": "Leaves",
+    "remarks": "Teacher remarks",
+}
+
+
+def _format_topic(raw: str) -> str:
+    """
+    Turn one stored `Message.intent` value into what shows up in the
+    call table - "Zoya - Attendance" when a child was named,
+    "Attendance" alone otherwise.
+
+    A compound question ("Zoya's attendance and has the fee been
+    paid?") stores more than one resource in a single message, joined
+    with "+" (e.g. "attendance:Zoya+fee:Zoya") - each part is
+    formatted the same way and joined with " & " for one combined
+    topic instead of losing everything but the first part.
+    """
+
+    if not raw:
+        return ""
+
+    if raw == "admin_handoff":
+        return "Escalated to staff"
+
+    if raw in ("rag", "cached"):
+        return "General question"
+
+    if "+" in raw:
+        return " & ".join(_format_topic(part) for part in raw.split("+") if part)
+
+    resource, _, student = raw.partition(":")
+
+    label = _TOPIC_LABELS.get(resource, resource.replace("_", " ").title())
+
+    return f"{student} - {label}" if student else label
 
 
 class SessionService:
@@ -134,6 +187,33 @@ class SessionService:
             .all()
         )
 
+        # What each session was about. One batched query - not one
+        # per session - reading the intent every AI answer already
+        # carries (see voice_pipeline.py's message_service.create_message
+        # calls). No new column: it is the same `Message.intent` field
+        # `handler` above is derived from, just read for its own value
+        # here instead of only checking whether a row exists.
+        topic_rows = (
+            await db.execute(
+                select(
+                    message_model.Message.session_id,
+                    message_model.Message.intent,
+                )
+                .where(
+                    message_model.Message.session_id.in_(ids),
+                    message_model.Message.sender_type == SenderTypeEnum.ai,
+                    message_model.Message.intent.isnot(None),
+                )
+                .order_by(message_model.Message.created_at)
+            )
+        ).all()
+
+        topics_by_session: dict = {}
+        for session_id, raw_intent in topic_rows:
+            seen = topics_by_session.setdefault(session_id, [])
+            if raw_intent and raw_intent not in seen:
+                seen.append(raw_intent)
+
         for row in sessions:
             row.handler = "Human" if row.id in escalated else "AI"
 
@@ -145,6 +225,17 @@ class SessionService:
                 )
             else:
                 row.duration_seconds = None
+
+            raw_topics = topics_by_session.get(row.id, [])
+            formatted = [_format_topic(t) for t in raw_topics]
+            formatted = [t for t in formatted if t]
+
+            if not formatted:
+                row.topic = None
+            elif len(formatted) <= 2:
+                row.topic = ", ".join(formatted)
+            else:
+                row.topic = f"{', '.join(formatted[:2])} +{len(formatted) - 2} more"
 
         return sessions
 

@@ -18,6 +18,7 @@ import {
 import { RoomContext } from "@livekit/components-react";
 
 import AgentVisualizer from "@/components/AgentVisualizer";
+import FullScreenLoader from "@/components/FullScreenLoader";
 
 import {
   HANDOFF_ATTRIBUTE,
@@ -1144,6 +1145,14 @@ ${JSON.stringify(
   // ============================================================
 
   return (
+    <>
+      {isConnecting && (
+        <FullScreenLoader
+          label="Connecting to voice assistant…"
+          subLabel="Setting up your call"
+        />
+      )}
+
     <div className="page-shell !max-w-none !px-0 !py-0">
 
       <section className="relative mx-auto flex min-h-[calc(100vh-4rem-2.5rem)] w-full items-center justify-center overflow-hidden bg-transparent">
@@ -1240,15 +1249,8 @@ ${JSON.stringify(
 
           )}
 
-          {/* ================================================== */}
-          {/* CONNECTING */}
-          {/* ================================================== */}
-
-          {isConnecting && (
-            <p className="mt-5 text-yellow-400">
-              Connecting to voice assistant...
-            </p>
-          )}
+          {/* CONNECTING - now a full-screen overlay above, near the
+              top of this component's return. */}
 
           {/* ================================================== */}
           {/* CALL KHATAM                                        */}
@@ -1396,5 +1398,6 @@ ${JSON.stringify(
       </section>
 
     </div>
+    </>
   );
 }

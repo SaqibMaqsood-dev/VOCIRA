@@ -25,9 +25,16 @@ Read the user's question and reply with ONE line of JSON. Nothing else.
 No markdown, no code fences, no explanation.
 
 Shape:
-{{"intent":"ERP","resource":"<name>","student":"<name or empty>"}}
+{{"intent":"ERP","items":[{{"resource":"<name>","student":"<name or empty>"}}]}}
 {{"intent":"RAG"}}
 {{"intent":"ADMIN_HANDOFF"}}
+
+"items" is a LIST because a question can ask about more than one
+thing at once ("how is Zoya's attendance AND has the fee been
+paid?"). Put ONE entry per distinct thing asked about, in the order
+asked. A plain, single-topic question still uses a list - just with
+one entry in it. Do not invent extra entries for anything not
+actually asked.
 
 === ADMIN_HANDOFF ===
 ONLY when the user EXPLICITLY asks to speak to a human, admin, staff
@@ -49,7 +56,7 @@ Pick exactly one "resource":
   attendance   present/absent, how many days, attendance record
   assessment   marks, grades, results of exams ALREADY TAKEN
   exam         UPCOMING exams: when is the next exam, exam schedule
-  schedule     class timetable: which classes, what time, which teacher
+  schedule     class timetable: which classes, what time, which teacher, which room
   class        which class / section / group the child is in
   course       which subjects the child studies
   program_enrollment   program and academic year
@@ -57,10 +64,20 @@ Pick exactly one "resource":
   payment      whether payment was made, how much remains
   student      child's profile: name, gender, date of birth, email
   guardian     the caller's own details
+  leave        leave / absence applications the child has taken, and why
+  remarks      teacher or staff comments/notes written about the child
 
 "student": if the user names a specific child, put that name.
 Otherwise use an empty string — the app then covers all their children.
 NEVER invent a name.
+
+IMPORTANT - school records store every child's name in ROMAN ENGLISH
+SPELLING ONLY (e.g. "Zoya Khan", "Ahmed Raza"), never in Urdu script.
+If the user says the name in Urdu (spoken or written in Urdu script),
+transliterate it to the Roman English spelling it would have in the
+school's records before putting it in "student". Do not copy the name
+in Urdu script — a name like "زویا" must become "Zoya", not be left
+as-is, otherwise the record can never be found.
 
 === RAG ===
 General school information that is not about a specific child:
@@ -68,14 +85,28 @@ admission policy, school timings, fee structure in general, campuses,
 contact details, rules, facilities, or any general knowledge question.
 
 === Examples ===
-"Have the school fees been paid?"        -> {{"intent":"ERP","resource":"fee","student":""}}
-"How many days was Ahmed present?"       -> {{"intent":"ERP","resource":"attendance","student":"Ahmed"}}
-"What marks did Alisha get?"             -> {{"intent":"ERP","resource":"assessment","student":"Alisha"}}
-"When is the next exam?"                 -> {{"intent":"ERP","resource":"exam","student":""}}
-"What are tomorrow's classes?"           -> {{"intent":"ERP","resource":"schedule","student":""}}
-"Which class is my son in?"              -> {{"intent":"ERP","resource":"class","student":""}}
-"What subjects does my child study?"     -> {{"intent":"ERP","resource":"course","student":""}}
-"Show me my children's names"            -> {{"intent":"ERP","resource":"student","student":""}}
+"Have the school fees been paid?"        -> {{"intent":"ERP","items":[{{"resource":"fee","student":""}}]}}
+"How many days was Ahmed present?"       -> {{"intent":"ERP","items":[{{"resource":"attendance","student":"Ahmed"}}]}}
+"زویا کی حاضری کیسی ہے؟" (Urdu: how is
+ Zoya's attendance?)                     -> {{"intent":"ERP","items":[{{"resource":"attendance","student":"Zoya"}}]}}
+"What marks did Alisha get?"             -> {{"intent":"ERP","items":[{{"resource":"assessment","student":"Alisha"}}]}}
+"When is the next exam?"                 -> {{"intent":"ERP","items":[{{"resource":"exam","student":""}}]}}
+"What are tomorrow's classes?"           -> {{"intent":"ERP","items":[{{"resource":"schedule","student":""}}]}}
+"Which room is my child's class in?"     -> {{"intent":"ERP","items":[{{"resource":"schedule","student":""}}]}}
+"How many leaves has Ahmed taken?"       -> {{"intent":"ERP","items":[{{"resource":"leave","student":"Ahmed"}}]}}
+"What did the teacher say about my son?" -> {{"intent":"ERP","items":[{{"resource":"remarks","student":""}}]}}
+"Which class is my son in?"              -> {{"intent":"ERP","items":[{{"resource":"class","student":""}}]}}
+"What subjects does my child study?"     -> {{"intent":"ERP","items":[{{"resource":"course","student":""}}]}}
+"Show me my children's names"            -> {{"intent":"ERP","items":[{{"resource":"student","student":""}}]}}
+
+Compound questions - one entry per topic asked:
+"How is Zoya's attendance and has     -> {{"intent":"ERP","items":[
+ the fee been paid?"                        {{"resource":"attendance","student":"Zoya"}},
+                                             {{"resource":"fee","student":"Zoya"}}]}}
+"What are Ahmed's marks and which     -> {{"intent":"ERP","items":[
+ class is he in?"                           {{"resource":"assessment","student":"Ahmed"}},
+                                             {{"resource":"class","student":"Ahmed"}}]}}
+
 "What is the admission policy?"          -> {{"intent":"RAG"}}
 "What time does the school open?"        -> {{"intent":"RAG"}}
 "Wow."                                   -> {{"intent":"RAG"}}
@@ -228,15 +259,25 @@ def quick_route(user_query: str) -> dict | None:
             if _has(text, phrase):
                 return {"intent": "RAG"}
 
-    # Hamesha zaati
-    for phrase, resource in _ALWAYS_ERP.items():
-        if _has(text, phrase):
-            return {"intent": "ERP", "resource": resource, "student": ""}
+    # Collect every distinct resource this question touches, rather
+    # than stopping at the first match - a compound question ("is my
+    # fee paid and what is her attendance?") matches more than one of
+    # these, and the fast path here has no way to work out which
+    # phrase belongs to which topic. That parsing needs the LLM, so
+    # more than one distinct resource here means bailing out to it
+    # instead of silently answering only the first one.
+    matched = []
 
-    # Can go either way - only counts alongside "my"
+    for phrase, resource in _ALWAYS_ERP.items():
+        if _has(text, phrase) and resource not in matched:
+            matched.append(resource)
+
     if mine:
         for phrase, resource in _ERP_IF_MINE.items():
-            if _has(text, phrase):
-                return {"intent": "ERP", "resource": resource, "student": ""}
+            if _has(text, phrase) and resource not in matched:
+                matched.append(resource)
+
+    if len(matched) == 1:
+        return {"intent": "ERP", "items": [{"resource": matched[0], "student": ""}]}
 
     return None

@@ -5,6 +5,13 @@ import { motion } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 
 import { clearSession, saveSession } from "@/lib/session";
+import FullScreenLoader from "@/components/FullScreenLoader";
+
+// How long the full-screen loader stays up after a successful login
+// before the redirect actually fires. Long enough to read as a
+// deliberate transition, short enough that it never feels like a
+// delay - the login itself already finished before this starts.
+const REDIRECT_DELAY_MS = 1000;
 
 /**
  * Read the role out of the JWT.
@@ -40,6 +47,12 @@ export default function LoginPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Set only once login has actually succeeded - this is what shows
+  // the full-screen transition and holds the redirect for a moment
+  // instead of jumping straight to the next page.
+  const [redirecting, setRedirecting] = useState(false);
+  const [redirectRole, setRedirectRole] = useState(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -187,8 +200,22 @@ export default function LoginPage() {
         localStorage.setItem("role", role);
       }
 
-      window.location.href =
-        role === "admin" ? "/admin" : "/dashboard";
+      /*
+       * Show the full-screen transition and hold the redirect for a
+       * moment instead of jumping straight to the next page. The
+       * destination itself is unchanged - only when we navigate to
+       * it changes.
+       */
+
+      setRedirectRole(role);
+      setRedirecting(true);
+
+      setTimeout(() => {
+        window.location.href =
+          role === "admin" ? "/admin" : "/dashboard";
+      }, REDIRECT_DELAY_MS);
+
+      return;
 
     } catch (error) {
       /*
@@ -236,6 +263,17 @@ export default function LoginPage() {
   };
 
   return (
+    <>
+      {redirecting && (
+        <FullScreenLoader
+          subLabel={
+            redirectRole === "admin"
+              ? "Taking you to the admin panel"
+              : "Taking you to your calls"
+          }
+        />
+      )}
+
     <div className="page-shell flex items-center">
       <div className="grid h-full items-center gap-8 lg:grid-cols-2">
 
@@ -416,5 +454,6 @@ export default function LoginPage() {
         </motion.div>
       </div>
     </div>
+    </>
   );
 }

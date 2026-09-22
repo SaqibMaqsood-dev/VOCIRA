@@ -178,6 +178,49 @@ ERP_RESOURCES = {
     },
 
     # =====================================================
+    # LEAVE / REMARKS
+    # =====================================================
+
+    "leave": {
+        "endpoint": "/api/resource/Student Leave Application",
+        "authorization": "student",
+        "student_filter_field": "student",
+        "fields": [
+            "name",
+            "student",
+            "student_name",
+            "from_date",
+            "to_date",
+            "total_leave_days",
+            "reason",
+            "student_group",
+        ],
+        "description": (
+            "Leave / absence applications: which dates and why."
+        ),
+    },
+
+    "remarks": {
+        # Student Log is the teacher/staff notebook entry for a
+        # student - general comments, not tied to a specific subject
+        # or exam.
+        "endpoint": "/api/resource/Student Log",
+        "authorization": "student",
+        "student_filter_field": "student",
+        "fields": [
+            "name",
+            "student",
+            "student_name",
+            "type",
+            "date",
+            "log",
+        ],
+        "description": (
+            "Teacher/staff remarks and notes written about the student."
+        ),
+    },
+
+    # =====================================================
     # TIMETABLE
     # =====================================================
 
@@ -187,10 +230,11 @@ ERP_RESOURCES = {
         "endpoint": "/api/resource/Course Schedule",
         "authorization": "student_group",
         "group_filter_field": "student_group",
-        # NOTE: "room" is deliberately left out. Course Schedule only
-        # holds the room's ID (HTL-ROOM-2026-00002), not its name, and
-        # TTS reads that ID out one character at a time. Getting the
-        # room name would need a separate fetch from the Room doctype.
+        # "room" here is still just the Room doctype's ID
+        # (HTL-ROOM-2026-00002) - TTS would read that out one
+        # character at a time. ERPService.enrich_schedule_rooms()
+        # resolves it to the Room's actual name (e.g. "101") right
+        # after the ERP fetch, so it is safe to request here.
         "fields": [
             "name",
             "student_group",
@@ -199,9 +243,10 @@ ERP_RESOURCES = {
             "schedule_date",
             "from_time",
             "to_time",
+            "room",
         ],
         "description": (
-            "Class timetable: subject, teacher, date and time."
+            "Class timetable: subject, teacher, date, time and room."
         ),
     },
 

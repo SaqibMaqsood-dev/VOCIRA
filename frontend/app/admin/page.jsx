@@ -32,6 +32,7 @@ import AreaChart from "@/app/admin/_components/charts/AreaChart";
 import StackedBar from "@/app/admin/_components/charts/StackedBar";
 import StatTile from "@/app/admin/_components/charts/StatTile";
 import { useAdminData, formatTime } from "@/app/admin/useAdminApi";
+import FullScreenLoader from "@/components/FullScreenLoader";
 
 const EMPTY_STATS = {
   today: 0,
@@ -58,6 +59,15 @@ export default function AdminDashboardPage() {
 
   const spark = stats.queriesPerDay.map((d) => d.value);
 
+  if (statsLoading || recentLoading) {
+    return (
+      <FullScreenLoader
+        label="Loading overview…"
+        subLabel="Fetching Vocira's live metrics"
+      />
+    );
+  }
+
   return (
     <div className="space-y-6 pb-4">
       <div>
@@ -82,7 +92,6 @@ export default function AdminDashboardPage() {
           value={stats.today}
           hint="Since midnight"
           icon={MessagesSquare}
-          loading={statsLoading}
         />
         <StatTile
           label="This week"
@@ -90,7 +99,6 @@ export default function AdminDashboardPage() {
           hint="Last 7 days"
           icon={TrendingUp}
           spark={spark}
-          loading={statsLoading}
         />
         <StatTile
           label="Voice calls"
@@ -98,7 +106,6 @@ export default function AdminDashboardPage() {
           hint="Sessions started"
           icon={PhoneCall}
           accent="#199e70"
-          loading={statsLoading}
         />
         <StatTile
           label="Escalated"
@@ -106,7 +113,6 @@ export default function AdminDashboardPage() {
           hint="Waiting for a human"
           icon={AlertTriangle}
           accent="#d95926"
-          loading={statsLoading}
         />
       </div>
 
@@ -142,7 +148,7 @@ export default function AdminDashboardPage() {
               Total questions
             </p>
             <p className="mt-1 text-2xl font-semibold text-white">
-              {statsLoading ? "…" : stats.total}
+              {stats.total}
             </p>
           </div>
         </Card>
@@ -169,18 +175,7 @@ export default function AdminDashboardPage() {
             </TR>
           </THead>
           <TBody>
-            {recentLoading && (
-              <TR>
-                <TD
-                  colSpan={4}
-                  className="py-6 text-center text-xs text-text-secondary"
-                >
-                  Loading…
-                </TD>
-              </TR>
-            )}
-
-            {!recentLoading && recent.length === 0 && !recentError && (
+            {recent.length === 0 && !recentError && (
               <TR>
                 <TD
                   colSpan={4}

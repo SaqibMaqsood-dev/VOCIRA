@@ -13,9 +13,10 @@
  * but reaches no child - so a missing one is shown clearly.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
   Eye,
   EyeOff,
   KeyRound,
@@ -23,6 +24,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -32,19 +34,30 @@ import Button from "@/app/admin/_components/ui/Button";
 import { Card, CardHeader } from "@/app/admin/_components/ui/Card";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
 import { useAdminData, adminFetch, formatTime } from "@/app/admin/useAdminApi";
+import FullScreenLoader from "@/components/FullScreenLoader";
 
 const EMPTY = { users: [], total: 0, linked: 0 };
 const BASE = "/auth/admin/users";
 
+// A new Guardian in ERPNext (added by hand, or by a bulk import) has
+// no way to push a signal to this page, so it polls instead - every
+// 20s is often enough to feel "automatic" without hammering the
+// backend, and the poll is silent (see useAdminData) so it never
+// interrupts whatever the admin is doing.
+const POLL_MS = 20000;
+
 export default function UsersPage() {
-  const { data, loading, error, reload } = useAdminData(BASE, EMPTY);
+  const { data, loading, error, reload } = useAdminData(BASE, EMPTY, { pollMs: POLL_MS });
   const { data: roles } = useAdminData(`${BASE}/roles`, []);
 
-  // ERPNext's guardians - to pick from a list when creating an
-  // account. The Guardian ID used to be typed by hand: one character
-  // out of place and the account reached no child, and the mistake
-  // only surfaced when the parent complained.
-  const { data: guardians } = useAdminData("/livekit/admin/guardians", []);
+  // ERPNext's guardians - every one of them, not just the ones that
+  // already have a Vocira login. The Parents table below is built
+  // from this list so a guardian added in ERPNext shows up here on
+  // its own, with a "Set password" action, instead of staying
+  // invisible until someone remembers to add their account by hand.
+  const { data: guardians } = useAdminData("/livekit/admin/guardians", [], {
+    pollMs: POLL_MS,
+  });
 
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -60,7 +73,36 @@ export default function UsersPage() {
   const [nameTyped, setNameTyped] = useState(null);
   const [pwFor, setPwFor] = useState(null); // password reset ke liye
 
+  // Filters which accounts show, by name or email - each table has
+  // its own search now, since Administrators and Parents are
+  // completely different lists (one person, hundreds of the other) -
+  // one shared box meant a search meant for one table always ran
+  // against the other too.
+  const [adminSearch, setAdminSearch] = useState("");
+  const [parentSearch, setParentSearch] = useState("");
+
+  // Which of the two tables are expanded. Both start open - there
+  // are only two sections here, not the dozens of guardians the
+  // Queries page groups by, so hiding everything by default would
+  // just be an extra click for no real benefit.
+  const [openSections, setOpenSections] = useState(
+    () => new Set(["admins", "parents"])
+  );
+
+  const toggleSection = (key) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const users = data.users || [];
+  const guardianList = guardians || [];
 
   // Admins and parents are two entirely different things - one runs
   // the panel, the other asks about their child's data. Keeping both
@@ -68,15 +110,73 @@ export default function UsersPage() {
   const admins = users.filter((u) => u.role === "admin");
   const parents = users.filter((u) => u.role !== "admin");
 
-  const unlinked = parents.filter((u) => u.role === "guardian" && !u.parent_id);
-
-  const chosen = (guardians || []).find((g) => g.id === picked) || null;
-
   // Each row's ERPNext guardian record - so we can show whether the
   // login email matches it.
-  const guardianById = Object.fromEntries(
-    (guardians || []).map((g) => [g.id, g])
+  const guardianById = Object.fromEntries(guardianList.map((g) => [g.id, g]));
+
+  // The Parents table shows one row per ERPNext guardian - not one
+  // row per Vocira account - so a guardian with no login yet still
+  // appears, with a way to set one up right there instead of needing
+  // "Add account" and picking them out of a dropdown of hundreds.
+  //
+  // An account whose parent_id points at nothing in ERPNext (deleted
+  // guardian, typo, or simply no parent_id at all) has nowhere to
+  // merge into, so it is kept as its own row - otherwise a login that
+  // exists would just vanish from the list.
+  const accountByGuardianId = new Map(
+    parents.filter((u) => u.parent_id).map((u) => [u.parent_id, u])
   );
+  const orphanAccounts = parents.filter(
+    (u) => !u.parent_id || !guardianById[u.parent_id]
+  );
+
+  const parentRows = [
+    ...guardianList.map((g) => {
+      const account = accountByGuardianId.get(g.id) || null;
+      return {
+        key: g.id,
+        user_id: account?.user_id,
+        parent_id: g.id,
+        name: account?.name || g.name,
+        email: account?.email || g.email || "",
+        role: account?.role || "guardian",
+        created_at: account?.created_at || null,
+        hasAccount: Boolean(account),
+        guardianName: g.name,
+      };
+    }),
+    ...orphanAccounts.map((u) => ({ ...u, key: u.user_id, hasAccount: true })),
+  ];
+
+  const adminNeedle = adminSearch.trim().toLowerCase();
+  const parentNeedle = parentSearch.trim().toLowerCase();
+  const matches = (u, needle) =>
+    !needle ||
+    (u.name || "").toLowerCase().includes(needle) ||
+    (u.email || "").toLowerCase().includes(needle);
+
+  const filteredAdmins = useMemo(
+    () => admins.filter((u) => matches(u, adminNeedle)),
+    [admins, adminNeedle]
+  );
+  const filteredParents = useMemo(
+    () => parentRows.filter((u) => matches(u, parentNeedle)),
+    [parentRows, parentNeedle]
+  );
+
+  const withoutLogin = parentRows.filter((r) => !r.hasAccount).length;
+  const unlinked = orphanAccounts.filter((u) => u.role === "guardian");
+
+  const chosen = guardianList.find((g) => g.id === picked) || null;
+
+  function setupLogin(guardianId) {
+    setForm(null);
+    setPwFor(null);
+    setPicked(guardianId);
+    setEmailTyped(null);
+    setNameTyped(null);
+    setForm({ mode: "create", user: null });
+  }
 
   const emailValue =
     emailTyped !== null ? emailTyped : chosen?.email || "";
@@ -171,6 +271,15 @@ export default function UsersPage() {
     }
   }
 
+  if (loading) {
+    return (
+      <FullScreenLoader
+        label="Loading accounts…"
+        subLabel="Fetching admin and parent logins"
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -184,7 +293,7 @@ export default function UsersPage() {
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={reload}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
@@ -219,21 +328,27 @@ export default function UsersPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardHeader title="Parents" />
+          <CardHeader title="Guardians (ERPNext)" />
           <p className="text-2xl font-semibold text-white">
-            {loading ? "…" : parents.length}
+            {loading ? "…" : guardianList.length}
           </p>
         </Card>
         <Card>
-          <CardHeader title="Linked to a guardian" />
+          <CardHeader title="With a login" />
           <p className="text-2xl font-semibold text-white">
-            {loading ? "…" : data.linked}
+            {loading ? "…" : parentRows.filter((r) => r.hasAccount).length}
+          </p>
+        </Card>
+        <Card>
+          <CardHeader title="Without a login" />
+          <p className="text-2xl font-semibold text-white">
+            {loading ? "…" : withoutLogin}
           </p>
           {!loading && unlinked.length > 0 && (
             <p className="mt-1 text-[11px] text-amber-200">
-              {unlinked.length} not linked
+              +{unlinked.length} not linked to any guardian
             </p>
           )}
         </Card>
@@ -295,9 +410,13 @@ export default function UsersPage() {
               </select>
               <input type="hidden" name="parent_id" value={picked} />
 
-              {chosen && (
+              {chosen ? (
                 <span className="mt-1.5 block font-mono text-[11px] text-text-secondary/70">
-                  {chosen.id}
+                  {chosen.id} — this Guardian ID links the login automatically.
+                </span>
+              ) : (
+                <span className="mt-1.5 block text-[11px] leading-4 text-text-secondary/70">
+                  Without a guardian picked, Vocira finds no children for this login.
                 </span>
               )}
             </label>
@@ -390,14 +509,6 @@ export default function UsersPage() {
               />
             )}
 
-            <Field
-              label="Guardian ID (ERPNext)"
-              name="parent_id"
-              defaultValue={form.user?.parent_id || ""}
-              placeholder="EDU-GRD-2026-00002"
-              hint="Links this login to a guardian record. Without it, Vocira finds no children."
-            />
-
             <label className="block">
               <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
                 Role
@@ -470,11 +581,16 @@ export default function UsersPage() {
       <AccountTable
         title="Administrators"
         description="These accounts can open this panel"
-        rows={admins}
-        loading={loading}
+        rows={filteredAdmins}
+        totalCount={admins.length}
         showGuardian={false}
-        emptyText="No administrators."
+        search={adminSearch}
+        onSearchChange={setAdminSearch}
+        searchPlaceholder="Search administrators..."
+        emptyText={adminNeedle ? "No administrators match this search." : "No administrators."}
         busy={busy}
+        isOpen={openSections.has("admins")}
+        onToggle={() => toggleSection("admins")}
         onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(u.email); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
         onPassword={(u) => { setForm(null); setPwFor(u); }}
         onDelete={remove}
@@ -482,15 +598,21 @@ export default function UsersPage() {
 
       <AccountTable
         title="Parents"
-        description="Vocira logins — not the same as ERPNext users"
-        rows={parents}
-        loading={loading}
+        description="One row per ERPNext guardian — new ones appear here on their own"
+        rows={filteredParents}
+        totalCount={parentRows.length}
         showGuardian
         guardianById={guardianById}
-        emptyText="No parent accounts yet."
+        search={parentSearch}
+        onSearchChange={setParentSearch}
+        searchPlaceholder="Search parents..."
+        emptyText={parentNeedle ? "No parents match this search." : "No guardians in ERPNext yet."}
         busy={busy}
+        isOpen={openSections.has("parents")}
+        onToggle={() => toggleSection("parents")}
         onEdit={(u) => { setPwFor(null); setPicked(u.parent_id || ""); setEmailTyped(u.email); setNameTyped(u.name); setForm({ mode: "edit", user: u }); }}
         onPassword={(u) => { setForm(null); setPwFor(u); }}
+        onSetupLogin={(u) => setupLogin(u.parent_id)}
         onDelete={remove}
       />
     </div>
@@ -509,23 +631,78 @@ function AccountTable({
   guardianById,
   description,
   rows,
-  loading,
+  totalCount,
   showGuardian,
+  search,
+  onSearchChange,
+  searchPlaceholder,
   emptyText,
   busy,
+  isOpen,
+  onToggle,
   onEdit,
   onPassword,
+  onSetupLogin,
   onDelete,
 }) {
   const columns = showGuardian ? 6 : 5;
+  const count = totalCount ?? rows.length;
+  const filtering = totalCount !== undefined && totalCount !== rows.length;
 
   return (
     <Card>
-      <CardHeader
-        title={`${title}${loading ? "" : ` (${rows.length})`}`}
-        description={description}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="text-left"
+        >
+          <CardHeader
+            title={`${title} (${filtering ? `${rows.length} of ${count}` : count})`}
+            description={description}
+          />
+        </button>
 
+        <div className="flex items-center gap-2">
+          {/* Its own search - filters only this table, not the other one. */}
+          <div className="relative w-56 shrink-0">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary">
+              <Search className="h-3.5 w-3.5" />
+            </span>
+            <input
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder={searchPlaceholder || "Search name or email..."}
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-8 pr-8 text-xs text-white placeholder:text-text-secondary/70 outline-none transition-colors focus:border-accent-primary/50 focus:bg-white/[0.07] focus:ring-2 focus:ring-accent-primary/40"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => onSearchChange("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-text-secondary transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onToggle}
+            className="shrink-0 rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-white/10 hover:text-white"
+            aria-label={isOpen ? "Collapse" : "Expand"}
+          >
+            <ChevronDown
+              className={`h-4 w-4 transition-transform ${
+                isOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+
+      {isOpen && (
       <Table>
         <THead>
           <TR>
@@ -538,15 +715,7 @@ function AccountTable({
           </TR>
         </THead>
         <TBody>
-          {loading && (
-            <TR>
-              <TD colSpan={columns} className="py-6 text-center text-xs text-text-secondary">
-                Loading…
-              </TD>
-            </TR>
-          )}
-
-          {!loading && rows.length === 0 && (
+          {rows.length === 0 && (
             <TR>
               <TD colSpan={columns} className="py-6 text-center text-xs text-text-secondary">
                 {emptyText}
@@ -555,10 +724,14 @@ function AccountTable({
           )}
 
           {rows.map((u) => (
-            <TR key={u.user_id}>
-              <TD className="text-xs font-medium text-white">{u.name}</TD>
+            <TR key={u.key ?? u.user_id}>
+              <TD className="text-xs font-medium text-white">
+                {u.name || <span className="text-text-secondary/60">—</span>}
+              </TD>
               <TD className="whitespace-nowrap text-[11px] text-text-secondary">
-                {u.email}
+                {u.email || (
+                  <span className="italic text-text-secondary/60">no login yet</span>
+                )}
                 {(() => {
                   // Flag it when the login email differs from the
                   // ERPNext guardian record. It is not a fault -
@@ -578,10 +751,14 @@ function AccountTable({
                 })()}
               </TD>
               <TD>
-                <Badge
-                  label={u.role || "—"}
-                  variant={u.role === "admin" ? "success" : "neutral"}
-                />
+                {u.hasAccount === false ? (
+                  <Badge label="no login yet" variant="warning" />
+                ) : (
+                  <Badge
+                    label={u.role || "—"}
+                    variant={u.role === "admin" ? "success" : "neutral"}
+                  />
+                )}
               </TD>
 
               {showGuardian && (
@@ -600,27 +777,41 @@ function AccountTable({
                 {u.created_at ? formatTime(u.created_at) : "—"}
               </TD>
               <TD className="text-right">
-                <div className="flex justify-end gap-1">
-                  <IconButton title="Edit" onClick={() => onEdit(u)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </IconButton>
-                  <IconButton title="Reset password" onClick={() => onPassword(u)}>
-                    <KeyRound className="h-3.5 w-3.5" />
-                  </IconButton>
-                  <IconButton
-                    title="Delete"
-                    danger
-                    disabled={busy === u.user_id}
-                    onClick={() => onDelete(u)}
+                {u.hasAccount === false ? (
+                  // No account exists yet for this guardian - there is
+                  // nothing to edit, reset, or delete, only to create.
+                  <Button
+                    variant="outline"
+                    onClick={() => onSetupLogin(u)}
+                    className="ml-auto !px-3 !py-1.5 !text-[11px]"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </IconButton>
-                </div>
+                    <KeyRound className="h-3 w-3" />
+                    Set password
+                  </Button>
+                ) : (
+                  <div className="flex justify-end gap-1">
+                    <IconButton title="Edit" onClick={() => onEdit(u)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </IconButton>
+                    <IconButton title="Reset password" onClick={() => onPassword(u)}>
+                      <KeyRound className="h-3.5 w-3.5" />
+                    </IconButton>
+                    <IconButton
+                      title="Delete"
+                      danger
+                      disabled={busy === u.user_id}
+                      onClick={() => onDelete(u)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </IconButton>
+                  </div>
+                )}
               </TD>
             </TR>
           ))}
         </TBody>
       </Table>
+      )}
     </Card>
   );
 }

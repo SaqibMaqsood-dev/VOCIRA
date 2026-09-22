@@ -22,6 +22,31 @@ function StatusBadge({ status }) {
   );
 }
 
+/**
+ * "AI" is the ordinary case - most calls never leave the assistant.
+ * "Human" is the one worth noticing: the call reached a real person,
+ * which is exactly the kind of call a guardian would want to spot at
+ * a glance in a list of 20+ rows.
+ */
+function HandlerBadge({ handler }) {
+  if (!handler) return <span className="text-text-secondary">—</span>;
+
+  const isHuman = handler === "Human";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+        isHuman
+          ? "border-accent-secondary/30 bg-accent-secondary/10 text-accent-secondary"
+          : "border-white/10 bg-white/5 text-text-secondary"
+      )}
+    >
+      {handler}
+    </span>
+  );
+}
+
 export default function CallTable({ rows = [] }) {
   const hasRows = Array.isArray(rows) && rows.length > 0;
 
@@ -55,7 +80,7 @@ export default function CallTable({ rows = [] }) {
       ===================================================== */}
 
       <div className="w-full overflow-x-auto">
-        <table className="min-w-[700px] w-full">
+        <table className="min-w-[820px] w-full">
 
           {/* -------------------------------------------------
               HEADERS
@@ -65,7 +90,11 @@ export default function CallTable({ rows = [] }) {
             <tr className="text-left text-xs font-semibold tracking-wider text-text-secondary">
 
               <th className="whitespace-nowrap px-5 py-3">
-                Call ID
+                Call
+              </th>
+
+              <th className="px-5 py-3">
+                Topic
               </th>
 
               <th className="whitespace-nowrap px-5 py-3">
@@ -100,9 +129,20 @@ export default function CallTable({ rows = [] }) {
                   className="text-sm text-text-primary transition-colors hover:bg-white/[0.03]"
                 >
 
-                  {/* Call ID */}
-                  <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-text-secondary">
-                    {row.id || "—"}
+                  {/* Call # - a raw UUID told a guardian nothing and
+                      no one ever read one out loud. This numbers
+                      calls the same way the list orders them: most
+                      recent first. */}
+                  <td className="whitespace-nowrap px-5 py-4 text-xs text-text-secondary">
+                    Call #{row.number ?? index + 1}
+                  </td>
+
+                  {/* Topic - what the call was actually about, so
+                      this list means something at a glance instead
+                      of being pure metadata. Empty for calls made
+                      before this existed. */}
+                  <td className="px-5 py-4 text-xs text-text-secondary">
+                    {row.topic || "—"}
                   </td>
 
                   {/* Status */}
@@ -116,8 +156,8 @@ export default function CallTable({ rows = [] }) {
                   </td>
 
                   {/* Handler */}
-                  <td className="whitespace-nowrap px-5 py-4 text-text-secondary">
-                    {row.handler || "—"}
+                  <td className="whitespace-nowrap px-5 py-4">
+                    <HandlerBadge handler={row.handler} />
                   </td>
 
                   {/* Time */}
@@ -135,7 +175,11 @@ export default function CallTable({ rows = [] }) {
 
               <tr className="text-sm text-text-secondary">
 
-                <td className="whitespace-nowrap px-5 py-5 font-mono text-xs">
+                <td className="whitespace-nowrap px-5 py-5 text-xs">
+                  —
+                </td>
+
+                <td className="px-5 py-5 text-xs">
                   —
                 </td>
 

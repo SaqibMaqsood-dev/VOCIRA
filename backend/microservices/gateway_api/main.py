@@ -129,10 +129,7 @@ async def forward_request(
         f"{response.status_code}"
     )
 
-    print(
-        f"SERVICE BODY: "
-        f"{response.text}"
-    )
+    print(f"SERVICE BODY: {len(response.content)} bytes")
 
     # Don't forward hop-by-hop headers
     excluded_headers = {
@@ -222,10 +219,10 @@ async def forward_livekit_request(
         f"{response.status_code}"
     )
 
-    print(
-        f"LIVEKIT SERVICE BODY: "
-        f"{response.text}"
-    )
+    # Body is not printed: it carries Urdu text (crashes a cp1252
+    # Windows console -> HTTP 500 on admin queries/escalations) and
+    # private guardian conversations.
+    print(f"LIVEKIT SERVICE BODY: {len(response.content)} bytes")
 
     # Don't forward hop-by-hop headers
     excluded_headers = {

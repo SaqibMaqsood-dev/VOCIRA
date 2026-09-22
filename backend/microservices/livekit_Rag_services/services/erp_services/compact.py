@@ -179,6 +179,12 @@ def compact_records(resource: str, data: dict) -> dict:
                 repeated=("academic_year", "assessment_group", "program"),
             )
 
+        elif resource in ("leave", "remarks"):
+            rows = _group_by_student(
+                rows,
+                repeated=("student_group",),
+            )
+
         return {**data, "data": rows}
 
     except Exception as error:

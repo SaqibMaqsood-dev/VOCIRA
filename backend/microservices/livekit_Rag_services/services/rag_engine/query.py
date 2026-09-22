@@ -16,6 +16,16 @@ from backend.microservices.livekit_Rag_services.services.groq.groq import (
     _model_chain,
 )
 
+# Same language switch used everywhere else in the pipeline (STT,
+# TTS voice, and the ERP answer prompt in human_text.py) - imported
+# rather than redefined here, so there is exactly one place that
+# decides what "ur" means in a prompt instead of two copies that
+# could say different things.
+from backend.microservices.livekit_Rag_services.services.groq.human_text import (
+    _RESPONSE_LANGUAGE,
+    _LANGUAGE_INSTRUCTIONS,
+)
+
 log = logging.getLogger(__name__)
 
 # Dedicated thread pools —Groq and Pinecone calls don't use the default shared pool, so they won't compete with the background sync.
@@ -65,18 +75,33 @@ async def search_knowledge_base(retriever, query: str):
         return "Sorry, I'm having trouble accessing the school records right now.", []
 
 
+_NO_CONTEXT_MESSAGE = {
+    "en": "I'm sorry, I couldn't find any verified information about this in the school records.",
+    "ur": "معذرت، مجھے اسکول کے ریکارڈ میں اس بارے میں کوئی تصدیق شدہ معلومات نہیں ملی۔",
+}
+
+
 async def ask_vocira(retriever, user_query: str):
     """Core RAG logic — async, non-blocking, returns a single string answer."""
     context, _ = await search_knowledge_base(retriever, user_query)
 
     if not context.strip():
-        return "I'm sorry, I couldn't find any verified information about this in the school records."
+        return _NO_CONTEXT_MESSAGE.get(
+            _RESPONSE_LANGUAGE, _NO_CONTEXT_MESSAGE["en"]
+        )
 
     if len(context) > MAX_CONTEXT_CHARS:
         context = context[:MAX_CONTEXT_CHARS] + "\n...[truncated]"
 
+    language_instruction = _LANGUAGE_INSTRUCTIONS.get(
+        _RESPONSE_LANGUAGE, _LANGUAGE_INSTRUCTIONS["en"]
+    )
+
     system_prompt = f"""You are Vocira, the official AI Assistant for 'The Educators'.
 Use the following verified context to answer the user's question.
+
+LANGUAGE:
+{language_instruction}
 
 RULES:
 1. Be concise, helpful, and professional.
@@ -87,7 +112,8 @@ RULES:
 6. THIS ANSWER IS SPOKEN ALOUD. Write exactly how a person would SAY it.
    No markdown, no asterisks, no bullet points, no numbered lists.
 
-7. Write every number, time, amount and code in WORDS, not digits:
+7. Write every number, time, amount and code in WORDS, not digits, IN THE
+   ANSWER LANGUAGE ABOVE. English examples of the idea:
    "8:00 AM to 2:00 PM"   -> "eight in the morning until two in the afternoon"
    "PKR 18,500"           -> "eighteen thousand five hundred rupees"
    "7:55 AM"              -> "five minutes before eight in the morning"

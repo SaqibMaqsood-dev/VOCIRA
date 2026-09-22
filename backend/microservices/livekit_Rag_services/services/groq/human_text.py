@@ -1,4 +1,91 @@
+import os
 from datetime import date
+
+
+# The same switch used by sst_whisper.py (what Whisper listens for)
+# and piper_servies.py (which voice speaks the answer) also decides
+# what language the LLM is told to answer in. One setting for the
+# whole conversation instead of three that could drift apart - an
+# Urdu voice reading an English answer, or vice versa, is exactly
+# the mismatch a caller would notice immediately.
+_RESPONSE_LANGUAGE = os.getenv("STT_LANGUAGE", "en").strip().lower()
+
+_LANGUAGE_INSTRUCTIONS = {
+    "en": "Respond in English.",
+    "ur": (
+        "Respond ONLY in Urdu, written in the Urdu (Nastaliq / "
+        "Perso-Arabic) script - never in English, and never in Roman "
+        "Urdu (Urdu spelled out with English letters). This answer is "
+        "read aloud by an Urdu text-to-speech voice, which can only "
+        "pronounce real Urdu script correctly. All of the RESPONSE "
+        "RULES below still apply in Urdu too - numbers, times and "
+        "amounts must be spelled out as Urdu words, not English ones."
+    ),
+}
+
+
+# Short system messages spoken directly by voice_pipeline.py - login
+# and permission refusals, "the ERP is unreachable" - none of these
+# ever go through the LLM, so switching STT_LANGUAGE alone would not
+# have touched them. Without their own translation an Urdu
+# conversation would suddenly jump to English at exactly the moment
+# something had already gone wrong for the caller, which is the worst
+# possible time for it to be confusing.
+SYSTEM_MESSAGES = {
+    "admin_requires_login": {
+        "en": "You must be logged in with an authorized account to contact an admin.",
+        "ur": "ایڈمن سے رابطہ کرنے کے لیے آپ کو ایک مجاز اکاؤنٹ سے لاگ ان ہونا ضروری ہے۔",
+    },
+    "erp_not_authorized": {
+        "en": "You are not authorized to access ERP information. Please log in with an authorized account.",
+        "ur": "آپ کو ای آر پی کی معلومات تک رسائی کی اجازت نہیں ہے۔ براہ کرم ایک مجاز اکاؤنٹ سے لاگ ان کریں۔",
+    },
+    "erp_not_authorized_short": {
+        "en": "You are not authorized to access ERP information.",
+        "ur": "آپ کو ای آر پی کی معلومات تک رسائی کی اجازت نہیں ہے۔",
+    },
+    "account_not_verified": {
+        "en": "I could not verify your account. Please log in again.",
+        "ur": "میں آپ کے اکاؤنٹ کی تصدیق نہیں کر سکا۔ براہ کرم دوبارہ لاگ ان کریں۔",
+    },
+    "erp_not_linked": {
+        "en": "Your VOCIRA account is not linked to an ERP account.",
+        "ur": "آپ کا ووسیرا اکاؤنٹ کسی ای آر پی اکاؤنٹ سے منسلک نہیں ہے۔",
+    },
+    "answer_assembly_failed": {
+        "en": (
+            "I found your record, but I am having trouble putting "
+            "the answer together right now. Please ask me again in "
+            "a moment."
+        ),
+        "ur": (
+            "مجھے آپ کا ریکارڈ مل گیا، لیکن ابھی جواب تیار کرنے میں "
+            "دشواری ہو رہی ہے۔ براہ کرم تھوڑی دیر بعد دوبارہ پوچھیں۔"
+        ),
+    },
+    "connecting_to_staff": {
+        "en": "Please hold on. I am connecting you to a member of our school staff.",
+        "ur": "براہ کرم انتظار کریں۔ میں آپ کو اسکول کے عملے کے ایک رکن سے ملا رہا ہوں۔",
+    },
+    "erp_unreachable": {
+        "en": (
+            "Sorry, I cannot reach the school records system right "
+            "now. Please try again shortly."
+        ),
+        "ur": (
+            "معذرت، میں ابھی اسکول کے ریکارڈ کے نظام تک نہیں پہنچ "
+            "سکتا۔ براہ کرم تھوڑی دیر بعد دوبارہ کوشش کریں۔"
+        ),
+    },
+}
+
+
+def system_message(key: str) -> str:
+    """A short, non-LLM-written spoken message, in the configured language."""
+
+    entry = SYSTEM_MESSAGES.get(key, {})
+
+    return entry.get(_RESPONSE_LANGUAGE) or entry.get("en", "")
 
 
 # ERPNext's internal IDs - "EDU-ATT-2026-00001",
@@ -42,17 +129,51 @@ def build_response_prompt(
 
     Passing `today` lets questions like "yesterday" or "this week"
     resolve correctly.
+
+    `response` is a single dict for an ordinary, single-topic
+    question - unchanged from before. For a compound question
+    ("Zoya's attendance AND has the fee been paid?") voice_pipeline.py
+    passes a LIST of dicts, one per topic asked about. Left as a bare
+    Python list dumped into the prompt, the model tended to notice
+    only the first dict and silently drop the rest - it was never
+    told there was more than one topic to cover. Numbering each
+    section explicitly fixes that.
     """
 
     today = today or date.today().isoformat()
 
     response = _strip_internal_ids(response)
 
+    multi_topic_instruction = ""
+    if isinstance(response, list) and len(response) > 1:
+        topic_count = len(response)
+        response = "\n\n".join(
+            f"--- Topic {i} of {topic_count} ---\n{part}"
+            for i, part in enumerate(response, start=1)
+        )
+        multi_topic_instruction = (
+            f"\nThis question asked about {topic_count} separate "
+            "topics, numbered below. Address EVERY one of them in "
+            "your answer - do not stop after the first. If one "
+            "topic's information is genuinely missing, say so briefly "
+            "for that topic only and still cover the rest.\n"
+        )
+
+    language_instruction = _LANGUAGE_INSTRUCTIONS.get(
+        _RESPONSE_LANGUAGE, _LANGUAGE_INSTRUCTIONS["en"]
+    )
+
     return f"""
 You are Vocira, a professional AI voice assistant for The Educators.
 
 Your task is to convert the provided information into a clear,
 natural, conversational answer to the user's question.
+
+==================================================
+LANGUAGE
+==================================================
+
+{language_instruction}
 
 ==================================================
 TODAY'S DATE
@@ -72,10 +193,11 @@ USER QUESTION
 ==================================================
 AVAILABLE INFORMATION
 ==================================================
-
+{multi_topic_instruction}
 {response}
 
-The "_about" line, if present, tells you what this information is.
+Each "_about" line, if present, tells you what that section of
+information is.
 
 IMPORTANT CONTEXT:
 

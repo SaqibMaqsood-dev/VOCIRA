@@ -4,10 +4,16 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import StatsCard from "@/components/StatsCard";
 import CallTable from "@/components/CallTable";
+import FullScreenLoader from "@/components/FullScreenLoader";
 
 import { authFetch, clearSession, getAccessToken } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+// How many calls one page of the table holds. The stats card already
+// says the true total; this only controls how many rows arrive per
+// "Load more" click.
+const PAGE_SIZE = 20;
 
 export default function DashboardPage() {
   const [sessions, setSessions] = useState([]);
@@ -19,7 +25,70 @@ export default function DashboardPage() {
   });
 
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+
+  // =========================================================
+  // FETCH ONE PAGE OF SESSIONS
+  //
+  // Shared by the initial load and "Load more" - the only
+  // difference is whether the results replace or extend the list,
+  // and which loading flag they drive.
+  // =========================================================
+
+  const fetchSessions = async (skip) => {
+    const sessionsResponse = await authFetch(
+      `/livekit/sessions/?limit=${PAGE_SIZE}&skip=${skip}`,
+      { method: "GET" }
+    );
+
+    if (sessionsResponse.status === 401) {
+      clearSession();
+      window.location.href = "/login";
+      return null;
+    }
+
+    if (!sessionsResponse.ok) {
+      const errorData = await sessionsResponse.text();
+
+      console.error("Sessions API failed:", {
+        status: sessionsResponse.status,
+        statusText: sessionsResponse.statusText,
+        body: errorData,
+        url: sessionsResponse.url,
+      });
+
+      throw new Error(
+        `Failed to load call history (${sessionsResponse.status})`
+      );
+    }
+
+    const sessionsData = await sessionsResponse.json();
+
+    return Array.isArray(sessionsData) ? sessionsData : [];
+  };
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+
+    try {
+      const nextPage = await fetchSessions(sessions.length);
+      if (nextPage) {
+        setSessions((prev) => [...prev, ...nextPage]);
+      }
+    } catch (err) {
+      console.error("Load more failed:", err);
+      setError(
+        err instanceof TypeError
+          ? "Could not reach the server. Please make sure the API Gateway is running."
+          : err instanceof Error
+            ? err.message
+            : "Failed to load more calls."
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -80,34 +149,7 @@ export default function DashboardPage() {
         // GET USER'S SESSIONS
         // =====================================================
 
-        const sessionsResponse = await authFetch(
-          "/livekit/sessions/?limit=20&skip=0",
-          { method: "GET" }
-        );
-
-        if (sessionsResponse.status === 401) {
-          clearSession();
-
-          window.location.href = "/login";
-          return;
-        }
-
-        if (!sessionsResponse.ok) {
-          const errorData = await sessionsResponse.text();
-
-          console.error("Sessions API failed:", {
-            status: sessionsResponse.status,
-            statusText: sessionsResponse.statusText,
-            body: errorData,
-            url: sessionsResponse.url,
-          });
-
-          throw new Error(
-            `Failed to load call history (${sessionsResponse.status})`
-          );
-        }
-
-        const sessionsData = await sessionsResponse.json();
+        const sessionsData = await fetchSessions(0);
 
         console.log("Sessions response:", sessionsData);
 
@@ -125,11 +167,7 @@ export default function DashboardPage() {
         // SAVE SESSIONS
         // =====================================================
 
-        setSessions(
-          Array.isArray(sessionsData)
-            ? sessionsData
-            : []
-        );
+        setSessions(sessionsData || []);
 
       } catch (err) {
         console.error("Dashboard error:", err);
@@ -166,7 +204,7 @@ export default function DashboardPage() {
   // CONVERT BACKEND SESSIONS → CALL TABLE ROWS
   // =========================================================
 
-  const callRows = sessions.map((session) => {
+  const callRows = sessions.map((session, index) => {
     // =======================================================
     // DURATION
     // =======================================================
@@ -240,7 +278,16 @@ export default function DashboardPage() {
     return {
       id: session.id ?? "—",
 
+      // Most recent first, numbered in that same order - not the
+      // raw UUID, which told a guardian nothing and no one ever
+      // read one out loud.
+      number: index + 1,
+
       title: session.title ?? "Voice Call",
+
+      // What the call was actually about (e.g. "Zoya - Attendance").
+      // Empty for calls made before this was tracked.
+      topic: session.topic || "",
 
       start_at: session.start_at ?? null,
 
@@ -255,6 +302,17 @@ export default function DashboardPage() {
       time,
     };
   });
+
+  const hasMore = sessions.length < stats.total_calls;
+
+  if (loading) {
+    return (
+      <FullScreenLoader
+        label="Loading your calls…"
+        subLabel="Fetching your stats and call history"
+      />
+    );
+  }
 
   return (
     <div className="page-shell flex flex-col justify-center">
@@ -306,19 +364,19 @@ export default function DashboardPage() {
       >
         <StatsCard
           label="Total Calls"
-          value={loading ? "—" : stats.total_calls}
+          value={stats.total_calls}
           accent="primary"
         />
 
         <StatsCard
           label="Today's Calls"
-          value={loading ? "—" : stats.today_calls}
+          value={stats.today_calls}
           accent="secondary"
         />
 
         <StatsCard
           label="This Week"
-          value={loading ? "—" : stats.this_week_calls}
+          value={stats.this_week_calls}
           accent="primary"
         />
       </motion.div>
@@ -338,12 +396,21 @@ export default function DashboardPage() {
         }}
         className="mt-6"
       >
-        {loading ? (
-          <div className="glass p-6 text-sm text-text-secondary">
-            Loading your calls...
+        <CallTable rows={callRows} />
+
+        {hasMore && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="rounded-xl border border-white/10 bg-white/[0.05] px-5 py-2.5 text-sm font-medium text-text-primary transition hover:border-white/20 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingMore
+                ? "Loading…"
+                : `Load more (${sessions.length} of ${stats.total_calls})`}
+            </button>
           </div>
-        ) : (
-          <CallTable rows={callRows} />
         )}
       </motion.div>
 

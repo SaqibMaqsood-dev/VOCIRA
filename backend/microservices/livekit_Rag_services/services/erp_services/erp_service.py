@@ -1,4 +1,5 @@
 import json
+from difflib import SequenceMatcher
 
 from .ERP_client import ERPClient
 from .prompt import build_erp_prompt
@@ -8,6 +9,37 @@ from .compact import compact_records
 # More records than this are of no use to a voice assistant.
 DEFAULT_LIMIT = 20
 
+# ==============================================================
+# LAST-MENTIONED CHILD, PER CALL
+#
+# session_id -> the last ERP student ID this call actually got an
+# answer about. Speech-to-text sometimes mangles a child's name past
+# recognition ("Arham" heard as "Khosaera") - resolve_student_name()
+# then finds nothing, even though the parent clearly meant one
+# specific child (a follow-up like "and what was the total?" makes no
+# sense about anyone else). Falling back to whichever child this same
+# call was just discussing is far more likely correct than either
+# refusing outright or dumping every child's data.
+#
+# Deliberately NOT used when no name was given at all - that case
+# means a genuinely general question ("has the fee been paid?"),
+# which the router already resolves to "all children" on purpose.
+#
+# Kept in Redis, not an in-process dict: the whole service used to
+# lose this the moment it restarted mid-call (which has happened more
+# than once this project - see the crashes that needed manual
+# restarts). A 30-minute TTL is generous for one phone call's worth of
+# follow-up questions and short enough that it never leaks into an
+# unrelated later call reusing the same session_id.
+# ==============================================================
+_LAST_STUDENT_TTL_SECONDS = 1800
+
+
+def _last_student_key(session_id: str) -> str:
+    return f"erp:last_student:{session_id}"
+
+
+from backend.microservices.livekit_Rag_services.core.redis import RedisServices
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
     dataConverter,
 )
@@ -17,6 +49,7 @@ class ERPService:
 
     def __init__(self):
         self.client = ERPClient()
+        self._redis = RedisServices()
 
     # ==========================================================
     # MAIN ERP QUERY
@@ -92,6 +125,7 @@ class ERPService:
         resource: str,
         erp_parent_id: str,
         student_name: str | None = None,
+        session_id: str | None = None,
     ):
         """
         Fetch the data for the given resource.
@@ -221,9 +255,25 @@ class ERPService:
                     )
                 )
 
+                ambiguous = self._ambiguous_match_response(
+                    student_name=student_name,
+                    resolved_student_ids=resolved_student_ids,
+                    parent_students=parent_students,
+                    resource_config=resource_config,
+                )
+                if ambiguous is not None:
+                    return ambiguous
+
+                if not resolved_student_ids:
+                    resolved_student_ids = await self._last_student_fallback(
+                        session_id=session_id,
+                        student_ids=student_ids,
+                    )
+
                 if not resolved_student_ids:
 
-                    # No child by this name in this parent's record.
+                    # No child by this name in this parent's record,
+                    # and no earlier child this call to fall back to.
                     # There are two possible reasons: the name really
                     # is not theirs, or STT misheard the spoken name.
                     #
@@ -271,6 +321,11 @@ class ERPService:
                         == "student_name"
                     )
                 ]
+
+                await self._remember_student(
+                    session_id=session_id,
+                    resolved_student_ids=resolved_student_ids,
+                )
 
             # --------------------------------------------------
             # STEP 4
@@ -372,9 +427,25 @@ class ERPService:
                     )
                 )
 
+                ambiguous = self._ambiguous_match_response(
+                    student_name=student_name,
+                    resolved_student_ids=resolved_student_ids,
+                    parent_students=parent_students,
+                    resource_config=resource_config,
+                )
+                if ambiguous is not None:
+                    return ambiguous
+
+                if not resolved_student_ids:
+                    resolved_student_ids = await self._last_student_fallback(
+                        session_id=session_id,
+                        student_ids=student_ids,
+                    )
+
                 if not resolved_student_ids:
 
-                    # No child by this name in this parent's record.
+                    # No child by this name in this parent's record,
+                    # and no earlier child this call to fall back to.
                     # There are two possible reasons: the name really
                     # is not theirs, or STT misheard the spoken name.
                     #
@@ -415,6 +486,11 @@ class ERPService:
                         == "student_name"
                     )
                 ]
+
+                await self._remember_student(
+                    session_id=session_id,
+                    resolved_student_ids=resolved_student_ids,
+                )
 
             student_groups = (
                 await self.get_student_groups(
@@ -587,6 +663,12 @@ class ERPService:
                 endpoint=endpoint,
             )
 
+        elif resource == "schedule":
+
+            data = await self.enrich_schedule_rooms(
+                data=data,
+            )
+
         # ======================================================
         # 16. FINAL ERP DATA
         # ======================================================
@@ -646,6 +728,100 @@ class ERPService:
                 return value.strip()
 
         return None
+
+    # ==========================================================
+    # AMBIGUOUS NAME MATCH
+    #
+    # resolve_student_name() can legitimately return more than one
+    # ID: two of the SAME parent's own children sharing a first name
+    # (e.g. "Ali Naqvi" and "Ali Baig", both just "Ali" to a parent
+    # asking about "Ali"). Silently picking one and returning its
+    # data risks handing back the WRONG child's attendance/marks/fees
+    # under the right child's name - worse than asking again. Shared
+    # by both call sites (authorization == "student" and
+    # "student_group") since the same ambiguity can arise in either.
+    # ==========================================================
+
+    def _ambiguous_match_response(
+        self,
+        student_name: str,
+        resolved_student_ids: list[str],
+        parent_students: list,
+        resource_config: dict,
+    ) -> dict | None:
+
+        if len(resolved_student_ids) <= 1:
+            return None
+
+        id_to_name = {
+            student["name"]: student.get("student_name")
+            for student in parent_students
+            if isinstance(student, dict) and student.get("name")
+        }
+        matched_names = [
+            id_to_name[sid]
+            for sid in resolved_student_ids
+            if id_to_name.get(sid)
+        ]
+
+        print(
+            f"[ERP] '{student_name}' matched more than one child for "
+            f"this parent: {matched_names}"
+        )
+
+        return {
+            "data": [],
+            "_about": resource_config.get("description") or "",
+            "_note": (
+                f"More than one of this parent's children matched "
+                f"'{student_name}': {', '.join(matched_names)}. Ask "
+                "the parent to say the full name of the one they mean."
+            ),
+        }
+
+    # ==========================================================
+    # LAST-MENTIONED CHILD FALLBACK  (see the Redis note above)
+    # ==========================================================
+
+    async def _last_student_fallback(
+        self,
+        session_id: str | None,
+        student_ids: list[str],
+    ) -> list[str]:
+        """
+        A name was given but matched none of this parent's children -
+        try the child this same call last got an answer about.
+        Returns [] (same shape as "nothing found") when there is no
+        session, no memory, or the remembered child is not even one
+        of THIS parent's own (should not happen, but authorization
+        must never rely on this cache).
+        """
+        if not session_id:
+            return []
+
+        last_id = await self._redis.get_str_data(_last_student_key(session_id))
+        if last_id and last_id in student_ids:
+            print(
+                f"[ERP] name did not match - using last-discussed "
+                f"child for this call instead: {last_id}"
+            )
+            return [last_id]
+
+        return []
+
+    async def _remember_student(
+        self,
+        session_id: str | None,
+        resolved_student_ids: list[str],
+    ) -> None:
+        """Only when exactly one child was resolved - an "all children"
+        answer (empty name) has no single "last child" to remember."""
+        if session_id and len(resolved_student_ids) == 1:
+            await self._redis.set_str_data(
+                _last_student_key(session_id),
+                resolved_student_ids[0],
+                expire=_LAST_STUDENT_TTL_SECONDS,
+            )
 
     # ==========================================================
     # RESOLVE STUDENT NAME
@@ -716,6 +892,12 @@ class ERPService:
 
         matched_ids = []
 
+        # Filled in below as a last-resort fallback: the closest
+        # student by name-similarity, used only if nothing matches
+        # exactly or by first name.
+        best_fuzzy_id = None
+        best_fuzzy_score = 0.0
+
         for student in students:
 
             if not isinstance(
@@ -771,6 +953,38 @@ class ERPService:
                     student_id
                 )
 
+                continue
+
+            # --------------------------------------------------
+            # Fuzzy fallback candidate
+            #
+            # The router-LLM transliterates a spoken (often Urdu)
+            # name into Roman English before it ever reaches here,
+            # and transliteration is not always exact ("Zoya" vs
+            # "Zoia", a dropped trailing vowel, etc). An exact or
+            # first-name match is tried first; this only tracks the
+            # closest name in case both of those come up empty, so
+            # a real child is not endlessly asked for again over a
+            # one-letter spelling difference.
+            # --------------------------------------------------
+
+            score = SequenceMatcher(
+                None, requested_name, first_name
+            ).ratio()
+
+            if score > best_fuzzy_score:
+                best_fuzzy_score = score
+                best_fuzzy_id = student_id
+
+        # --------------------------------------------------
+        # Nothing matched exactly - fall back to the closest name,
+        # but only when it is close enough to be the same name
+        # rather than a different child entirely.
+        # --------------------------------------------------
+
+        if not matched_ids and best_fuzzy_id and best_fuzzy_score >= 0.75:
+            matched_ids.append(best_fuzzy_id)
+
         print("=" * 70)
         print("[STUDENT NAME RESULT]")
         print(
@@ -778,6 +992,9 @@ class ERPService:
         )
         print(
             f"Matched IDs    : {matched_ids}"
+        )
+        print(
+            f"Best Fuzzy     : {best_fuzzy_id} ({best_fuzzy_score:.2f})"
         )
         print("=" * 70)
 
@@ -989,6 +1206,88 @@ class ERPService:
             **data,
             "data": enriched_enrollments,
         }
+
+    # ==========================================================
+    # RESOLVE ROOM IDs -> ROOM NAMES  (Course Schedule)
+    #
+    # Course Schedule only stores the Room doctype's ID
+    # (HTL-ROOM-2026-00002), not its actual name ("101"). Reading
+    # that ID out loud, one character at a time, is useless to a
+    # parent, so every unique room ID in the results is resolved to
+    # its real name in one batched fetch and swapped in.
+    # ==========================================================
+
+    async def enrich_schedule_rooms(
+        self,
+        data: dict,
+    ) -> dict:
+
+        if not isinstance(data, dict):
+            return data
+
+        rows = data.get("data")
+
+        if not isinstance(rows, list) or not rows:
+            return data
+
+        room_ids = sorted(
+            {
+                row.get("room")
+                for row in rows
+                if isinstance(row, dict) and row.get("room")
+            }
+        )
+
+        if not room_ids:
+            return data
+
+        try:
+            room_data = await self.client.get(
+                endpoint="/api/resource/Room",
+                params={
+                    "filters": json.dumps(
+                        [["name", "in", room_ids]]
+                    ),
+                    "fields": json.dumps(
+                        ["name", "room_name"]
+                    ),
+                    "limit_page_length": len(room_ids),
+                },
+            )
+        except Exception as exc:
+
+            print(f"[ERP] Room lookup failed, leaving room IDs as-is: {exc}")
+            return data
+
+        room_names = {
+            room["name"]: room.get("room_name")
+            for room in room_data.get("data", [])
+            if isinstance(room, dict) and room.get("name")
+        }
+
+        updated_rows = []
+
+        for row in rows:
+
+            if not isinstance(row, dict):
+                updated_rows.append(row)
+                continue
+
+            room_id = row.get("room")
+            resolved_name = room_names.get(room_id)
+
+            new_row = {**row}
+
+            if resolved_name:
+                new_row["room"] = resolved_name
+            elif "room" in new_row:
+                # Could not resolve it - drop the raw ID rather than
+                # let the LLM read out an unreadable internal code.
+                new_row.pop("room")
+
+            updated_rows.append(new_row)
+
+        return {**data, "data": updated_rows}
 
     # ==========================================================
     # GET STUDENTS BELONGING TO GUARDIAN

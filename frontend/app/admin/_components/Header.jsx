@@ -16,7 +16,7 @@
  * page, and the profile menu holds logout.
  */
 
-import { Bell, ChevronDown, LogOut, PanelLeftOpen, Search } from "lucide-react";
+import { Bell, ChevronDown, LogOut, PanelLeftOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { adminFetch } from "@/app/admin/useAdminApi";
@@ -29,7 +29,6 @@ export default function Header({ onMenuClick }) {
   const [name, setName] = useState("");
   const [pending, setPending] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [term, setTerm] = useState("");
 
   const menuRef = useRef(null);
 
@@ -75,12 +74,6 @@ export default function Header({ onMenuClick }) {
     window.location.href = "/login";
   };
 
-  const submitSearch = (e) => {
-    e.preventDefault();
-    const q = term.trim();
-    router.push(q ? `/admin/queries?q=${encodeURIComponent(q)}` : "/admin/queries");
-  };
-
   return (
     <header className="sticky top-4 z-30 rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_8px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
       <div className="flex h-16 items-center justify-between gap-3 px-4">
@@ -92,21 +85,6 @@ export default function Header({ onMenuClick }) {
           >
             <PanelLeftOpen className="h-4 w-4" />
           </button>
-
-          <form
-            onSubmit={submitSearch}
-            className="relative hidden w-72 items-center md:flex"
-          >
-            <span className="pointer-events-none absolute left-3 text-text-secondary">
-              <Search className="h-4 w-4" />
-            </span>
-            <input
-              value={term}
-              onChange={(e) => setTerm(e.target.value)}
-              placeholder="Search queries…"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.06] py-2.5 pl-9 pr-3 text-xs text-white placeholder:text-text-secondary/70 outline-none transition-colors focus:border-accent-primary/50 focus:bg-white/[0.09] focus:ring-2 focus:ring-accent-primary/40"
-            />
-          </form>
         </div>
 
         <div className="ml-auto flex items-center gap-3">

@@ -41,6 +41,11 @@ class SessionResponse(BaseModel):
     duration_seconds: Optional[int] = None
     handler: Optional[str] = None
 
+    # What the call was actually about - e.g. "Zoya - Attendance".
+    # Built the same way as handler: no new column, just a join over
+    # each AI message's `intent` field for this session.
+    topic: Optional[str] = None
+
     class Config:
         from_attributes = True
 

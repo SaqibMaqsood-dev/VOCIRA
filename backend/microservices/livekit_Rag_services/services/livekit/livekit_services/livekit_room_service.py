@@ -293,9 +293,23 @@ class LivekitRoomServices:
     # GREETING
     # =========================================================
 
-    GREETING_TEXT = (
-        "Assalam o Alaikum, and welcome to The Educators. "
-        "I am Vocira, your school assistant. How may I help you today?"
+    # Same switch as everywhere else in the pipeline (STT_LANGUAGE) -
+    # this is the one line the AI speaks that was never going through
+    # the LLM at all, so changing the answer-writing prompts alone
+    # would have left the call opening in English no matter what.
+    _GREETINGS = {
+        "en": (
+            "Assalam o Alaikum, and welcome to The Educators. "
+            "I am Vocira, your school assistant. How may I help you today?"
+        ),
+        "ur": (
+            "السلام علیکم، دی ایجوکیٹرز میں خوش آمدید۔ "
+            "میں ووسیرا ہوں، آپ کا اسکول اسسٹنٹ۔ میں آپ کی کس طرح مدد کر سکتا ہوں؟"
+        ),
+    }
+
+    GREETING_TEXT = _GREETINGS.get(
+        os.getenv("STT_LANGUAGE", "en").strip().lower(), _GREETINGS["en"]
     )
 
     async def greet_once(self):
@@ -813,6 +827,29 @@ class LivekitRoomServices:
                 )
 
                 return
+
+            # =================================================
+            # GREETING (backstop)
+            # =================================================
+            #
+            # participant_connected only fires for someone who joins
+            # AFTER this worker's own room.connect() has already
+            # registered its handlers. If the browser's join finishes
+            # first - a real race, not a rare one, and one that got
+            # more likely once loading the extra Urdu voice model
+            # made the worker's own startup a little slower - that
+            # event never fires for them at all, greet_once() is
+            # never called, and the caller sits on "Connecting..."
+            # for the whole call: the agent has a track and is
+            # technically ready, it simply never said anything.
+            #
+            # track_subscribed does not have that race - a track
+            # cannot be subscribed to before both sides are in the
+            # room - so it is used here as a second, reliable trigger.
+            # greet_once() itself is a no-op the second time
+            # (`if self._greeted: return`), so calling it from both
+            # places is safe regardless of which one wins.
+            self._schedule_greeting()
 
             # =================================================
             # VOICE PIPELINE

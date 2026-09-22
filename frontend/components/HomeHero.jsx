@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import VoiceOrb from "@/components/VoiceOrb";
+import RobotBot from "@/components/RobotBot";
 
 export default function HomeHero() {
   return (
@@ -36,7 +36,7 @@ export default function HomeHero() {
           transition={{ duration: 0.6, ease: "easeOut", delay: 0.06 }}
           className="relative"
         >
-          <VoiceOrb className="mx-auto" />
+          <RobotBot className="mx-auto" />
         </motion.div>
       </div>
     </div>

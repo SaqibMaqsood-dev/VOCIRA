@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import Button from "@/app/admin/_components/ui/Button";
 import Badge from "@/app/admin/_components/ui/Badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
 import { useAdminData, adminFetch, formatTime } from "@/app/admin/useAdminApi";
+import FullScreenLoader from "@/components/FullScreenLoader";
+import DateCalendar from "@/app/admin/_components/DateCalendar";
 
 // The backend's EscalationStatus enum - the same values here
 const STATUS_VARIANT = {
@@ -16,14 +18,43 @@ const STATUS_VARIANT = {
   closed: "neutral",
 };
 
+// Escalations mean a parent is waiting on a real answer, so a stale
+// list here matters more than anywhere else in the admin panel - 15s
+// keeps a new one from sitting unseen for long without polling so
+// often it is indistinguishable from spam.
+const POLL_MS = 15000;
+
 export default function EscalationsPage() {
   const { data: escalations, loading, error, reload } = useAdminData(
     "/livekit/admin/escalations?limit=100",
-    []
+    [],
+    { pollMs: POLL_MS }
   );
 
   const [busyId, setBusyId] = useState(null);
   const [actionError, setActionError] = useState("");
+
+  // Which day is picked - null means "every day", the default, since
+  // escalations are rare enough that seeing them all at once is
+  // usually what's wanted. The calendar narrows it down to one day
+  // only when that is actually useful.
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  const dates = useMemo(
+    () =>
+      [...new Set(escalations.map((e) => e.time.slice(0, 10)))].sort(
+        (a, b) => (a < b ? 1 : -1)
+      ),
+    [escalations]
+  );
+
+  const visibleEscalations = useMemo(
+    () =>
+      selectedDate
+        ? escalations.filter((e) => e.time.slice(0, 10) === selectedDate)
+        : escalations,
+    [escalations, selectedDate]
+  );
 
   async function setStatus(id, status) {
     try {
@@ -41,23 +72,47 @@ export default function EscalationsPage() {
     }
   }
 
+  if (loading) {
+    return (
+      <FullScreenLoader
+        label="Loading escalations…"
+        subLabel="Fetching queries that needed human review"
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white">Escalations</h1>
           <p className="mt-1 text-xs text-text-secondary">
             Queries that required human review.
-            {!loading && !error && (
+            {!error && (
               <span className="ml-1 text-text-secondary/70">
-                ({escalations.length})
+                ({selectedDate
+                  ? `${visibleEscalations.length} of ${escalations.length}`
+                  : escalations.length})
               </span>
             )}
           </p>
         </div>
-        <Button variant="outline" onClick={reload}>
-          <RefreshCw className="h-3.5 w-3.5" />
-        </Button>
+
+        <div className="flex items-center gap-2">
+          <DateCalendar
+            availableDates={dates}
+            selected={selectedDate}
+            onSelect={setSelectedDate}
+          />
+          {selectedDate && (
+            <Button variant="outline" onClick={() => setSelectedDate(null)}>
+              All dates
+            </Button>
+          )}
+          <Button variant="outline" onClick={reload}>
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       {(error || actionError) && (
@@ -77,23 +132,17 @@ export default function EscalationsPage() {
           </TR>
         </THead>
         <TBody>
-          {loading && (
+          {visibleEscalations.length === 0 && !error && (
             <TR>
               <TD colSpan={5} className="py-6 text-center text-xs text-text-secondary">
-                Loading…
+                {escalations.length === 0
+                  ? "No escalations — the AI handled every question."
+                  : "No escalations on this day."}
               </TD>
             </TR>
           )}
 
-          {!loading && escalations.length === 0 && !error && (
-            <TR>
-              <TD colSpan={5} className="py-6 text-center text-xs text-text-secondary">
-                No escalations — the AI handled every question.
-              </TD>
-            </TR>
-          )}
-
-          {escalations.map((e) => (
+          {visibleEscalations.map((e) => (
             <TR key={e.id}>
               <TD className="max-w-md text-xs text-white">{e.question}</TD>
               <TD className="whitespace-nowrap font-mono text-[11px] text-text-secondary">

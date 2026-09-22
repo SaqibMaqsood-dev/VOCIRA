@@ -41,6 +41,7 @@ from backend.microservices.livekit_Rag_services.models.message_model import (
     SenderTypeEnum,
 )
 from backend.microservices.livekit_Rag_services.models.session_model import Session
+from backend.microservices.auth_services.models.user_model import Users
 
 
 router = APIRouter(
@@ -185,6 +186,36 @@ async def admin_queries(
     # oldest first, so an answer is easy to find
     rows = list(reversed(rows))
 
+    # -----------------------------------------------------------
+    # WHO ASKED
+    #
+    # Every row just said "Parent" - the admin panel could not tell
+    # one guardian's questions from another's, which is exactly what
+    # grouping by guardian needs. Message.user_id already points at
+    # the same `users` table auth_services owns (Users.extend_existing
+    # keeps both services pointed at one physical table), so this is
+    # a single batched lookup, not a query per row.
+    # -----------------------------------------------------------
+
+    user_ids = {
+        row.user_id
+        for row in rows
+        if row.sender_type is SenderTypeEnum.user and row.user_id
+    }
+
+    users_by_id = {}
+    if user_ids:
+        user_rows = (
+            await db.execute(
+                select(Users.user_id, Users.name, Users.email)
+                .where(Users.user_id.in_(user_ids))
+            )
+        ).all()
+        users_by_id = {
+            uid: {"name": name, "email": email}
+            for uid, name, email in user_rows
+        }
+
     out = []
 
     for index, row in enumerate(rows):
@@ -201,15 +232,23 @@ async def admin_queries(
                 answer = later.content
             break
 
+        if row.sender_type is SenderTypeEnum.guest or not row.user_id:
+            user_key = "guest"
+            user_name = "Guest"
+            user_email = None
+        else:
+            info = users_by_id.get(row.user_id)
+            user_key = str(row.user_id)
+            user_name = (info or {}).get("name") or "Parent"
+            user_email = (info or {}).get("email")
+
         out.append(
             {
                 "id": str(row.id),
                 "sessionId": str(row.session_id),
-                "user": (
-                    "Guest"
-                    if row.sender_type is SenderTypeEnum.guest
-                    else "Parent"
-                ),
+                "userId": user_key,
+                "user": user_name,
+                "userEmail": user_email,
                 "question": row.content,
                 "response": answer or "—",
                 "status": _status_for(row.id, escalated_ids),

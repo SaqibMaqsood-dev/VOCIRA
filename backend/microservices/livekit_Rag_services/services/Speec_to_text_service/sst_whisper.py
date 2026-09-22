@@ -40,12 +40,30 @@ MIN_RMS = 260.0
 # Whisper produces these phrases for silence and noise. They are not
 # real speech - they made the agent answer its own voice and fall into
 # a "Thank you / You're welcome" loop.
+#
+# Both languages are kept here rather than switched on STT_LANGUAGE.
+# Setting STT_LANGUAGE=ur did not make Whisper stop hallucinating on
+# silence - it just made it hallucinate IN URDU instead of English.
+# Caught live: the exact same "background noise" case that used to
+# come back as "music" started coming back as "موسیقی" (the Urdu
+# word for music), which this list did not recognise at all because
+# it only ever held the English spelling - so it went straight
+# through as if it were a real question, and the agent answered
+# noise. A multilingual model can drift into either script no matter
+# which one it was told to expect, so checking for only one language's
+# hallucinations was never going to be enough.
 _HALLUCINATIONS = {
+    # English
     "thank you", "thanks", "thank you.", "thanks for watching",
     "thank you for watching", "thanks for watching!", "bye", "bye.",
     "you", "okay", "ok", "so", "uh", "um", "hmm", "mm", "mhm",
     "subtitles by the amara.org community", "please subscribe",
     "i'm sorry", "silence", "music", "applause",
+    # Urdu - direct equivalents of the same phrases, plus موسیقی
+    # (music), which is the one actually observed live
+    "شکریہ", "بہت شکریہ", "خدا حافظ", "اللہ حافظ", "ٹھیک ہے",
+    "ہاں", "ام", "ہوں", "خاموشی", "موسیقی", "تالیاں", "معذرت",
+    "سبسکرائب کریں", "ترجمہ",
 }
 
 

@@ -39,6 +39,7 @@ import {
   adminUpload,
   formatTime,
 } from "@/app/admin/useAdminApi";
+import FullScreenLoader from "@/components/FullScreenLoader";
 
 const EMPTY = { index: {}, last_sync: { state: "unknown" } };
 const EMPTY_DOCS = { documents: [], total: 0, indexed: 0, chunks: 0 };
@@ -234,6 +235,15 @@ export default function KnowledgePage() {
     }
   }
 
+  if (loading || docsLoading) {
+    return (
+      <FullScreenLoader
+        label="Loading knowledge base…"
+        subLabel="Fetching the index and documents"
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -388,18 +398,7 @@ export default function KnowledgePage() {
             </TR>
           </THead>
           <TBody>
-            {docsLoading && (
-              <TR>
-                <TD
-                  colSpan={6}
-                  className="py-6 text-center text-xs text-text-secondary"
-                >
-                  Loading…
-                </TD>
-              </TR>
-            )}
-
-            {!docsLoading && docs.length === 0 && (
+            {docs.length === 0 && (
               <TR>
                 <TD
                   colSpan={6}
@@ -468,41 +467,26 @@ export default function KnowledgePage() {
             </TR>
           </THead>
           <TBody>
-            {loading && (
-              <TR>
-                <TD
-                  colSpan={2}
-                  className="py-6 text-center text-xs text-text-secondary"
-                >
-                  Loading…
-                </TD>
-              </TR>
-            )}
-
-            {!loading && (
-              <>
-                <Row label="Index name" value={index.index} />
-                <Row label="Namespace" value={index.namespace} />
-                <Row
-                  label="Dimension match"
-                  value={
-                    index.dimension_match === undefined ? null : (
-                      <Badge
-                        label={index.dimension_match ? "OK" : "MISMATCH"}
-                        variant={index.dimension_match ? "success" : "warning"}
-                      />
-                    )
-                  }
-                />
-                <Row label="Dimensions" value={index.embedding_dimension} />
-                <Row label="Retrieval top_k" value={index.top_k} />
-                <Row
-                  label="Last sync at"
-                  value={sync.finished_at ? formatTime(sync.finished_at) : null}
-                />
-                {index.error && <Row label="Error" value={index.error} />}
-              </>
-            )}
+            <Row label="Index name" value={index.index} />
+            <Row label="Namespace" value={index.namespace} />
+            <Row
+              label="Dimension match"
+              value={
+                index.dimension_match === undefined ? null : (
+                  <Badge
+                    label={index.dimension_match ? "OK" : "MISMATCH"}
+                    variant={index.dimension_match ? "success" : "warning"}
+                  />
+                )
+              }
+            />
+            <Row label="Dimensions" value={index.embedding_dimension} />
+            <Row label="Retrieval top_k" value={index.top_k} />
+            <Row
+              label="Last sync at"
+              value={sync.finished_at ? formatTime(sync.finished_at) : null}
+            />
+            {index.error && <Row label="Error" value={index.error} />}
           </TBody>
         </Table>
       </Card>

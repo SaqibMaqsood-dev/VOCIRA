@@ -1,5 +1,14 @@
 import asyncio
 import logging
+import sys
+
+# Same reason as livekit_worker.py: Windows' default console
+# encoding (cp1252) cannot print Urdu text, and this service shares
+# the same groq.py / human_text.py logging as the worker - an admin
+# triggering a RAG query or a knowledge sync that logs Urdu content
+# would otherwise crash the same way.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from contextlib import asynccontextmanager
 
