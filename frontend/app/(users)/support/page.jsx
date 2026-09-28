@@ -155,8 +155,10 @@ export default function SupportPage() {
   };
 
   return (
-    <div className="page-shell flex items-start justify-center py-10">
-      <div className="relative w-full max-w-xl">
+    <div className="page-shell flex items-start justify-center">
+      {/* overflow-hidden because the two blurs below sit outside
+          this box on purpose - without it they widen the page. */}
+      <div className="relative w-full max-w-xl overflow-hidden">
         <div className="pointer-events-none absolute -left-20 top-10 size-56 animate-floaty rounded-full bg-accent-primary/14 blur-3xl" />
         <div className="pointer-events-none absolute -right-20 top-36 size-64 animate-floaty rounded-full bg-accent-secondary/10 blur-3xl [animation-delay:900ms]" />
 
@@ -164,7 +166,7 @@ export default function SupportPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55, ease: "easeOut" }}
-          className="glass relative p-7 sm:p-8"
+          className="glass relative p-5 sm:p-8"
         >
           <h1 className="text-xl font-semibold tracking-tight text-text-primary">
             Support

@@ -183,7 +183,11 @@ class LivekitServices:
     # GUEST LIVEKIT TOKEN
     # ============================================================
 
-    async def create_guest_room_token(self):
+    # Only what the pipeline has every piece for - a Whisper
+    # language, a prompt instruction, a Piper voice and a greeting.
+    SUPPORTED_LANGUAGES = ("en", "ur")
+
+    async def create_guest_room_token(self, language: str | None = None):
 
         async with SessionLocal() as db:
 
@@ -210,6 +214,16 @@ class LivekitServices:
 
             guest_identity = f"guest-{session_id}"
 
+            # A guest has no account to read a preference from, so
+            # their choice travels with the token instead. Anything
+            # unrecognised falls back to the default rather than
+            # being refused - a call is worth more than a strict
+            # error over a query parameter.
+            chosen = (language or "").strip().lower()
+
+            if chosen not in self.SUPPORTED_LANGUAGES:
+                chosen = None
+
             token = (
                 AccessToken(
                     api_key=settings.LIVEKIT_API_KEY,
@@ -228,6 +242,7 @@ class LivekitServices:
                             "role": "guest",
                             "type": "guest",
                             "session_id": session_id,
+                            "language": chosen,
                         }
                     )
                 )

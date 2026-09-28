@@ -14,6 +14,9 @@ from backend.microservices.auth_services.services.router_services.user_service i
 from backend.helper_functions.token_service.access_tokken.get_current_user import (
 current_user
 )
+from backend.helper_functions.token_service.access_tokken.require_admin import (
+    require_admin,
+)
 
 from backend.microservices.auth_services.schema import (
     user_schema,
@@ -30,6 +33,67 @@ router = APIRouter(
 
 user_service = UserServices()
 
+# What a public signup is allowed to become. Never "admin".
+SELF_SIGNUP_ROLE = "guardian"
+
+
+# ---------------- MY CALL LANGUAGE ----------------
+#
+# A guardian picks the language their own calls run in. Keyed on the
+# JWT's user_id only - no id comes from the caller - so this can
+# never reach anyone else's account, and it touches nothing but the
+# one field (a role or parent_id change stays an admin's job).
+
+# Only the languages the pipeline has all the pieces for: a Whisper
+# language code, a prompt instruction, a Piper voice and a greeting.
+SUPPORTED_LANGUAGES = ("en", "ur")
+
+
+@router.get("/me/language")
+async def get_my_language(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user),
+):
+    language = await db.scalar(
+        select(Users.language).where(Users.user_id == current_user.user_id)
+    )
+
+    return {"language": language, "available": list(SUPPORTED_LANGUAGES)}
+
+
+@router.patch("/me/language")
+async def set_my_language(
+    request: user_schema.MyLanguageUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(current_user),
+):
+    language = (request.language or "").strip().lower() or None
+
+    if language is not None and language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Unsupported language '{language}'. "
+                f"Available: {', '.join(SUPPORTED_LANGUAGES)}"
+            ),
+        )
+
+    user = (
+        await db.execute(select(Users).where(Users.user_id == current_user.user_id))
+    ).scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    user.language = language
+    await db.commit()
+
+    return {"language": language}
+
+
 # ---------------- SIGNUP ----------------
 
 @router.post(
@@ -41,6 +105,13 @@ async def signup(
     request: user_schema.User,
     db: AsyncSession = Depends(get_db),
 ):
+    # Signup is public, and `role` used to be taken straight from the
+    # request body - so anyone could POST {"role": "admin"} and get a
+    # real administrator account, with every family's data behind it.
+    # The role is fixed here instead; admin accounts are created only
+    # through /admin/users, which is behind require_admin.
+    request = request.model_copy(update={"role": SELF_SIGNUP_ROLE})
+
     return await user_service.UserCreate(
         request=request,
         db=db,
@@ -57,6 +128,7 @@ async def get_users(
     limit: int = 10,
     skip: int = 0,
     db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin),
 ):
     return await user_service.get_all_users(
         db = db,
@@ -74,8 +146,21 @@ async def get_users(
 async def get_user(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: user_schema.ShowUser = Depends(current_user),
+    caller=Depends(current_user),
 ):
+    # Your own record, or anyone's if you are an admin. It used to be
+    # any logged-in user reading any other account; admin-only was too
+    # far the other way, because the LiveKit service reads the
+    # caller's own record (for the display name on a call) using that
+    # same caller's token.
+    is_admin = (getattr(caller, "role", None) or "").strip().lower() == "admin"
+
+    if not is_admin and str(caller.user_id) != str(id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own account",
+        )
+
     return await user_service.get_user(
         user_id=id,
         db=db,
@@ -90,7 +175,7 @@ async def get_user(
 async def delete_user(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: user_schema.ShowUser = Depends(current_user),
+    _admin=Depends(require_admin),
 ):
     return await user_service.delete_user(
         user_id=id,
@@ -108,7 +193,7 @@ async def update_user(
     id: UUID,
     request: user_schema.UpdateUser,
     db: AsyncSession = Depends(get_db),
-    current_user: user_schema.ShowUser = Depends(current_user),
+    _admin=Depends(require_admin),
 ):
 
     data = {
@@ -140,7 +225,7 @@ async def partial_update(
     id: UUID,
     request: user_schema.UserPartialUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: user_schema.ShowUser = Depends(current_user),
+    _admin=Depends(require_admin),
 ):
     return await user_service.user_partialy_update(
         user_id=id,
@@ -158,7 +243,7 @@ async def partial_update(
 async def search_users(
     keyword: str,
     db: AsyncSession = Depends(get_db),
-    current_user: user_schema.ShowUser = Depends(current_user),
+    _admin=Depends(require_admin),
 ):
     return await user_service.search_users(
         keyword=keyword,
@@ -211,4 +296,7 @@ async def get_internal_user(
         "user_id": user.user_id,
         "parent_id": user.parent_id,
         "role": user.role.name if user.role else None,
+        # The voice pipeline reads this once per call to pick the
+        # caller's language for STT, the LLM prompt and the TTS voice.
+        "language": user.language,
     }

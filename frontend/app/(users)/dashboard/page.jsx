@@ -15,8 +15,20 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 // "Load more" click.
 const PAGE_SIZE = 20;
 
+// A native <option> ignores Tailwind classes in Chrome on Windows -
+// it takes its colours from the OS unless they are set inline, which
+// left the child names white on white. colorScheme on the <select>
+// darkens the popup itself for the same reason.
+const OPTION_STYLE = { backgroundColor: "#100944", color: "#ffffff" };
+
 export default function DashboardPage() {
   const [sessions, setSessions] = useState([]);
+  const [children, setChildren] = useState([]);
+
+  // Which child's calls the table is showing. null = all of them.
+  // A guardian can have ten children at one school, so one list of
+  // everything mixed together is not readable.
+  const [selectedChild, setSelectedChild] = useState(null);
 
   const [stats, setStats] = useState({
     total_calls: 0,
@@ -152,6 +164,28 @@ export default function DashboardPage() {
         const sessionsData = await fetchSessions(0);
 
         console.log("Sessions response:", sessionsData);
+
+        // =====================================================
+        // GET MY CHILDREN
+        //
+        // Best-effort - a guardian with no ERP link yet, or a
+        // hiccup here, should never block the rest of the
+        // dashboard from loading.
+        // =====================================================
+
+        try {
+          const childrenResponse = await authFetch(
+            "/livekit/children/",
+            { method: "GET" }
+          );
+
+          if (childrenResponse.ok) {
+            const childrenData = await childrenResponse.json();
+            setChildren(childrenData?.children || []);
+          }
+        } catch (childErr) {
+          console.error("Children fetch failed:", childErr);
+        }
 
         // =====================================================
         // SAVE STATS
@@ -299,9 +333,31 @@ export default function DashboardPage() {
 
       handler: session.handler || "—",
 
+      // Which children this call was about, as the assistant recorded
+      // them ("Zoya"). Used to filter by child.
+      students: Array.isArray(session.students) ? session.students : [],
+
       time,
     };
   });
+
+  // The assistant records whatever name was spoken ("Amna"), while
+  // ERP holds the full one ("Amna Farooq") - so neither side can be
+  // matched whole, and either may contain the other.
+  const isSameChild = (recorded, fullName) => {
+    const a = String(recorded || "").trim().toLowerCase();
+    const b = String(fullName || "").trim().toLowerCase();
+
+    if (!a || !b) return false;
+
+    return a === b || b.includes(a) || a.includes(b);
+  };
+
+  const visibleRows = selectedChild
+    ? callRows.filter((row) =>
+        row.students.some((name) => isSameChild(name, selectedChild.name))
+      )
+    : callRows;
 
   const hasMore = sessions.length < stats.total_calls;
 
@@ -346,6 +402,69 @@ export default function DashboardPage() {
         <div className="mt-6 rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
+      )}
+
+      {/* =====================================================
+          MY CHILDREN
+      ===================================================== */}
+
+      {children.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{
+            duration: 0.6,
+            ease: "easeOut",
+            delay: 0.03,
+          }}
+          className="mt-8"
+        >
+          <label
+            htmlFor="child-filter"
+            className="text-sm font-medium uppercase tracking-wide text-text-secondary"
+          >
+            My Children
+          </label>
+
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <select
+              id="child-filter"
+              value={selectedChild?.student_id ?? ""}
+              onChange={(event) =>
+                setSelectedChild(
+                  children.find(
+                    (child) => child.student_id === event.target.value
+                  ) ?? null
+                )
+              }
+              style={{ colorScheme: "dark" }}
+              className="min-w-64 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm text-text-primary outline-none transition hover:border-white/20 focus:border-primary/60"
+            >
+              <option value="" style={OPTION_STYLE}>
+                All children ({children.length})
+              </option>
+
+              {children.map((child) => (
+                <option
+                  key={child.student_id}
+                  value={child.student_id}
+                  style={OPTION_STYLE}
+                >
+                  {child.name}
+                  {child.program ? ` — ${child.program}` : ""}
+                </option>
+              ))}
+            </select>
+
+            {selectedChild && (
+              <span className="text-xs text-text-secondary">
+                {selectedChild.academic_year
+                  ? `Academic year ${selectedChild.academic_year}`
+                  : ""}
+              </span>
+            )}
+          </div>
+        </motion.div>
       )}
 
       {/* =====================================================
@@ -396,7 +515,17 @@ export default function DashboardPage() {
         }}
         className="mt-6"
       >
-        <CallTable rows={callRows} />
+        {/* An empty CallTable still draws a row of dashes, which
+            reads as "one unknown call" rather than "nothing here". */}
+        {selectedChild && visibleRows.length === 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-10 text-center">
+            <p className="text-sm text-text-secondary">
+              No calls about {selectedChild.name} yet.
+            </p>
+          </div>
+        ) : (
+          <CallTable rows={visibleRows} />
+        )}
 
         {hasMore && (
           <div className="mt-4 flex justify-center">

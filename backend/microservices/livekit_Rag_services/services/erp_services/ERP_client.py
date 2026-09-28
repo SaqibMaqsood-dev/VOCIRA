@@ -2,6 +2,9 @@ import httpx
 from fastapi import HTTPException, status
 
 from backend.microservices.livekit_Rag_services.core.config import settings
+from backend.microservices.livekit_Rag_services.services.http_retry import (
+    request_with_retry,
+)
 
 
 class ERPClient:
@@ -53,15 +56,14 @@ class ERPClient:
 
         try:
 
-            async with httpx.AsyncClient(
-                timeout=10.0
-            ) as client:
-
-                response = await client.get(
-                    url,
-                    headers=self.headers,
-                    params=params,
-                )
+            response = await request_with_retry(
+                "GET",
+                url,
+                timeout=15.0,
+                label=f"ERP GET {endpoint}",
+                headers=self.headers,
+                params=params,
+            )
 
             response.raise_for_status()
 
@@ -130,18 +132,17 @@ class ERPClient:
 
         try:
 
-            async with httpx.AsyncClient(
-                timeout=20.0
-            ) as client:
-
-                response = await client.post(
-                    url,
-                    headers={
-                        **self.headers,
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
+            response = await request_with_retry(
+                "POST",
+                url,
+                timeout=25.0,
+                label=f"ERP POST {endpoint}",
+                headers={
+                    **self.headers,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
 
             response.raise_for_status()
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -46,34 +47,55 @@ export default function DateCalendar({ availableDates, selected, onSelect }) {
   const available = new Set(availableDates);
 
   const [open, setOpen] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  const [coords, setCoords] = useState(null);
+  const [mounted, setMounted] = useState(false);
   const [viewDate, setViewDate] = useState(() =>
     selected ? new Date(`${selected}T00:00:00`) : new Date()
   );
 
   const boxRef = useRef(null);
+  const popoverRef = useRef(null);
 
-  // The popover is 256px wide (w-64). Opening it left-aligned to the
-  // button - the only option before - ran it off the right edge of
-  // the screen whenever the button itself sat near that edge (the
-  // Escalations page's header, for one). Measuring at open time and
-  // flipping to right-aligned when there is not enough room fixes
-  // that without needing to know in advance where each caller places
-  // the button.
+  // createPortal needs document.body, which does not exist during
+  // server rendering.
+  useEffect(() => setMounted(true), []);
+
+  // The popover used to be an absolutely-positioned child of this
+  // button, which put it inside whatever the caller's layout was -
+  // on the Queries page that meant the chat bubbles below it (plain,
+  // non-positioned content) painted over the calendar instead of
+  // under it, because the accordion row in between them established
+  // its own stacking context. Rendering it into a portal at
+  // document.body sidesteps every ancestor's overflow and stacking
+  // entirely; its position is then computed here from the button's
+  // own screen position instead of coming from CSS layout.
   useEffect(() => {
     if (!open || !boxRef.current) return;
 
-    const rect = boxRef.current.getBoundingClientRect();
     const POPOVER_WIDTH = 256;
-    setAlignRight(rect.left + POPOVER_WIDTH > window.innerWidth - 8);
+    const rect = boxRef.current.getBoundingClientRect();
+    const alignRight = rect.left + POPOVER_WIDTH > window.innerWidth - 8;
+
+    setCoords({
+      top: rect.bottom + 8,
+      left: alignRight ? rect.right - POPOVER_WIDTH : rect.left,
+    });
   }, [open]);
 
-  // Close on an outside click - the usual popover behaviour.
+  // Close on an outside click - the usual popover behaviour. The
+  // popover now lives outside boxRef in the DOM (it's portalled), so
+  // its own ref has to be checked too, or clicking inside it would
+  // register as "outside" and close it immediately.
   useEffect(() => {
     if (!open) return;
 
     const handleClick = (event) => {
-      if (boxRef.current && !boxRef.current.contains(event.target)) {
+      if (
+        boxRef.current &&
+        !boxRef.current.contains(event.target) &&
+        popoverRef.current &&
+        !popoverRef.current.contains(event.target)
+      ) {
         setOpen(false);
       }
     };
@@ -102,23 +124,12 @@ export default function DateCalendar({ availableDates, selected, onSelect }) {
     setViewDate(new Date(year, month + delta, 1));
   };
 
-  return (
-    <div ref={boxRef} className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-white/10"
-      >
-        <Calendar className="h-3.5 w-3.5 text-text-secondary" />
-        {selected ? formatLabel(selected) : "Pick a date"}
-      </button>
-
-      {open && (
-        <div
-          className={`absolute top-full z-20 mt-2 w-64 rounded-xl border border-white/10 bg-[#14122a] p-3 shadow-2xl ${
-            alignRight ? "right-0" : "left-0"
-          }`}
-        >
+  const popover = open && coords && mounted && (
+    <div
+      ref={popoverRef}
+      style={{ position: "fixed", top: coords.top, left: coords.left }}
+      className="z-50 w-64 rounded-xl border border-white/10 bg-[#14122a] p-3 shadow-2xl"
+    >
           <div className="flex items-center justify-between">
             <button
               type="button"
@@ -175,8 +186,21 @@ export default function DateCalendar({ availableDates, selected, onSelect }) {
               );
             })}
           </div>
-        </div>
-      )}
+    </div>
+  );
+
+  return (
+    <div ref={boxRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-white/10"
+      >
+        <Calendar className="h-3.5 w-3.5 text-text-secondary" />
+        {selected ? formatLabel(selected) : "Pick a date"}
+      </button>
+
+      {mounted && popover && createPortal(popover, document.body)}
     </div>
   );
 }

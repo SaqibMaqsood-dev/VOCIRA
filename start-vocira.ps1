@@ -1,4 +1,4 @@
-# =====================================================================
+﻿# =====================================================================
 # VOCIRA - sab kuch chalane ka script
 #
 #   .\start-vocira.ps1                  backend + infra
@@ -136,11 +136,11 @@ if ($Stop) {
     Remove-Item $TUNNEL_URL -ErrorAction SilentlyContinue
 
     Write-Host "Stopping infra containers..." -ForegroundColor Yellow
-    docker compose -f docker-compose.infra.yml stop | Out-Null
+    docker compose -f docker-compose.infra.yml stop 2>$null | Out-Null
 
     if ($WithErp -or $All) {
         Write-Host "Stopping ERPNext..." -ForegroundColor Yellow
-        Push-Location $ERP; docker compose -f pwd.yml stop | Out-Null; Pop-Location
+        Push-Location $ERP; docker compose -f pwd.yml stop 2>$null | Out-Null; Pop-Location
     }
     Write-Host "Done." -ForegroundColor Green
     return
@@ -208,12 +208,16 @@ if ($old.Count -gt 0) {
 # 1. INFRA  (Postgres 5433, Redis 6380, RabbitMQ 5672, LiveKit 7880)
 # ---------------------------------------------------------------------
 Write-Host "`n[1/6] Infra containers..." -ForegroundColor Cyan
-docker compose -f docker-compose.infra.yml up -d | Out-Null
+# 2>$null, not 2>&1: docker writes its progress ("Container X
+# Running") to stderr, and PowerShell turns native stderr into
+# ErrorRecords - which printed a wall of red NativeCommandError at the
+# end of a completely successful start.
+docker compose -f docker-compose.infra.yml up -d 2>$null | Out-Null
 
 Write-Host "      Waiting for Postgres..." -ForegroundColor DarkGray
 $ok = $false
 for ($i = 0; $i -lt 30; $i++) {
-    docker exec vocira-postgres pg_isready -U vocira -d vocira 2>&1 | Out-Null
+    docker exec vocira-postgres pg_isready -U vocira -d vocira 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { $ok = $true; break }
     Start-Sleep -Seconds 2
 }
@@ -256,7 +260,7 @@ if ($rmqReady) {
 }
 
 try {
-    docker exec vocira-postgres psql -U vocira -d vocira -c "UPDATE sessions SET status='closed', end_at=NOW() WHERE status='active';" 2>&1 | Out-Null
+    docker exec vocira-postgres psql -U vocira -d vocira -c "UPDATE sessions SET status='closed', end_at=NOW() WHERE status='active';" 2>$null | Out-Null
     Write-Host "      Old sessions closed." -ForegroundColor Green
 } catch { }
 
@@ -268,7 +272,7 @@ if ($WithErp) {
     Push-Location $ERP
     # NOTE: 'down' KABHI mat chalayein - education app container mein
     #       hai, volume mein nahi. 'stop'/'start' mehfooz hain.
-    docker compose -f pwd.yml start | Out-Null
+    docker compose -f pwd.yml start 2>$null | Out-Null
     Pop-Location
     Write-Host "      http://localhost:8081  (Administrator / admin)" -ForegroundColor Green
 
@@ -294,7 +298,7 @@ if ($WithErp) {
             $code = $_.Exception.Response.StatusCode.value__
             if ($code -eq 502) {
                 Write-Host "      -> 502 (stale nginx IP) - restarting frappe_test-frontend-1..." -ForegroundColor Yellow
-                docker restart frappe_test-frontend-1 | Out-Null
+                docker restart frappe_test-frontend-1 2>$null | Out-Null
                 Start-Sleep -Seconds 5
             }
         }
@@ -324,11 +328,18 @@ if (-not (Test-Path $LOG_DIR)) {
     New-Item -ItemType Directory -Path $LOG_DIR | Out-Null
 }
 
+# NOTE on `cmd /c`: uvicorn writes its normal INFO lines to stderr,
+# not stdout. Merging that with PowerShell's own `2>&1` wraps every
+# one of those lines in an ErrorRecord, so a perfectly healthy start
+# filled the window with red "NativeCommandError" text and the log
+# with the same noise. Letting cmd.exe do the merge means PowerShell
+# only ever sees plain stdout, and the window shows what the service
+# actually said.
 function Start-Svc($title, $cmd, $logName) {
     $logPath = Join-Path $LOG_DIR "$logName.log"
     Start-Process powershell -ArgumentList @(
         "-NoExit", "-Command",
-        "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; & { $cmd } 2>&1 | Tee-Object -FilePath '$logPath'"
+        "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; cmd /c '$cmd 2>&1' | Tee-Object -FilePath '$logPath'"
     )
     Write-Host "      $title  (log: logs/$logName.log)" -ForegroundColor Green
 }
@@ -336,32 +347,80 @@ function Start-Svc($title, $cmd, $logName) {
 # Fixed sleep par bharosa na karein - service ke asal mein jawab dene
 # ka intezaar karein. Pehle auth ko kabhi kabhi der lag jati thi aur
 # script aage barh jati thi, phir health check use "band" batata tha.
+# livekit takes ~40s to boot (heavy ML imports), and this used to
+# print nothing at all until it was done - forty silent seconds look
+# exactly like a hang, which is why "it gets stuck here" was the usual
+# report. It now counts up on one line, so a slow start is visibly a
+# slow start and not a frozen script.
 function Wait-Svc($title, $url, $seconds = 60) {
+    Write-Host ("      waiting for {0}" -f $title) -NoNewline -ForegroundColor DarkGray
+
     for ($i = 0; $i -lt $seconds; $i += 2) {
         try {
             Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 3 | Out-Null
+            Write-Host ""
             Write-Host ("      -> {0} ready ({1}s)" -f $title, $i) -ForegroundColor DarkGreen
             return $true
-        } catch { Start-Sleep -Seconds 2 }
+        } catch {
+            Write-Host "." -NoNewline -ForegroundColor DarkGray
+            Start-Sleep -Seconds 2
+        }
     }
-    Write-Host ("      -> {0} did not respond within {1}s - check its window" -f $title, $seconds) -ForegroundColor Red
+
+    Write-Host ""
+    Write-Host ("      -> {0} did not respond within {1}s" -f $title, $seconds) -ForegroundColor Red
+    Write-Host ("         check logs/{0}.log or its window" -f $title) -ForegroundColor DarkGray
     return $false
 }
 
+# All three are launched back-to-back, THEN waited on - not
+# start-wait-start-wait. They are independent processes on independent
+# ports (gateway proxies to the others over HTTP at request time, not
+# at startup), so there was never a real reason for livekit's process
+# to sit unstarted for up to 60s just because auth hadn't answered yet.
+# Waiting serially added the FULL readiness time of each service on
+# top of the others (up to 60+90+60=210s); starting them together
+# means their startup overlaps, so the total wait is roughly the
+# slowest one (livekit, the heaviest import) instead of the sum of all
+# three.
 Start-Svc "VOCIRA auth :8000" `
     "uv run --project $AUTH python -u -m uvicorn backend.microservices.auth_services.main.main:app --host 127.0.0.1 --port 8000" `
     "auth"
-Wait-Svc "auth" "http://127.0.0.1:8000/docs" 60 | Out-Null
 
 Start-Svc "VOCIRA livekit :8001" `
     "uv run --project $LK python -u -m uvicorn backend.microservices.livekit_Rag_services.main.main:app --host 127.0.0.1 --port 8001" `
     "livekit"
-Wait-Svc "livekit" "http://127.0.0.1:8001/docs" 90 | Out-Null
 
 Start-Svc "VOCIRA gateway :9000" `
     "uv run --project $LK python -u -m uvicorn backend.microservices.gateway_api.main:app --host 127.0.0.1 --port 9000" `
     "gateway"
-Wait-Svc "gateway" "http://127.0.0.1:9000/docs" 60 | Out-Null
+
+# A failed service used to be announced once and then ignored - the
+# script carried on, and the first real sign of trouble was the app
+# saying "Could not reach the server" much later. Now whatever failed
+# is named here, with the end of its own log, while it is still
+# obvious which step it belongs to.
+$svcResults = @{
+    auth    = (Wait-Svc "auth" "http://127.0.0.1:8000/docs" 60)
+    livekit = (Wait-Svc "livekit" "http://127.0.0.1:8001/docs" 120)
+    gateway = (Wait-Svc "gateway" "http://127.0.0.1:9000/docs" 60)
+}
+
+foreach ($name in @("auth", "livekit", "gateway")) {
+    if ($svcResults[$name]) { continue }
+
+    Write-Host ""
+    Write-Host ("      !! {0} did not start - last lines of logs/{1}.log:" -f $name, $name) -ForegroundColor Red
+
+    $svcLog = Join-Path $LOG_DIR "$name.log"
+    if (Test-Path $svcLog) {
+        Get-Content $svcLog -Tail 12 | ForEach-Object {
+            Write-Host "         $_" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "         (no log was written - the window may have closed instantly)" -ForegroundColor DarkGray
+    }
+}
 
 # LAZMI: ye RabbitMQ se "session.created" sunta hai aur AI agent ko
 # LiveKit room mein bhejta hai. Iske baghair call to lag jayegi magar
@@ -454,7 +513,38 @@ if ($WithFrontend) {
 # HEALTH CHECK
 # ---------------------------------------------------------------------
 Write-Host "`nWaiting for the agent worker and frontend..." -ForegroundColor Cyan
-Start-Sleep -Seconds 35
+# Frontend has its own readiness check (bounded at 40s, same idea as
+# Wait-Svc).
+#
+# The worker used to get a flat 5s grace period before -Status read
+# its consumer count. It takes longer than that to register with
+# RabbitMQ, so the summary regularly ended on "worker is not running
+# - no call will connect" about a worker that was starting perfectly
+# well. (Speeding livekit's boot up made it worse: the services were
+# ready sooner, so the worker had even less of a head start.) It has
+# no HTTP endpoint, but its consumer count is the real readiness
+# signal - so poll that instead of guessing with a sleep.
+if ($WithFrontend) {
+    Wait-Svc "frontend" "http://localhost:3000" 40 | Out-Null
+}
+
+Write-Host "      waiting for agent worker" -NoNewline -ForegroundColor DarkGray
+$workerReady = $false
+for ($i = 0; $i -lt 60; $i += 2) {
+    try {
+        $q = Invoke-RestMethod "http://localhost:15672/api/queues/%2F/vocira_queue" -TimeoutSec 3 `
+             -Headers @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest")) }
+        if ($q.consumers -ge 1) { $workerReady = $true; break }
+    } catch { }
+    Write-Host "." -NoNewline -ForegroundColor DarkGray
+    Start-Sleep -Seconds 2
+}
+Write-Host ""
+if ($workerReady) {
+    Write-Host "      -> agent worker connected" -ForegroundColor DarkGreen
+} else {
+    Write-Host "      -> agent worker never registered - see logs/agent-worker.log" -ForegroundColor Red
+}
 & $PSCommandPath -Status
 
 Write-Host @"

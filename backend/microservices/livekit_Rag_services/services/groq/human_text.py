@@ -8,7 +8,9 @@ from datetime import date
 # whole conversation instead of three that could drift apart - an
 # Urdu voice reading an English answer, or vice versa, is exactly
 # the mismatch a caller would notice immediately.
-_RESPONSE_LANGUAGE = os.getenv("STT_LANGUAGE", "en").strip().lower()
+# The default, for callers whose account has not chosen a language.
+# A guardian who HAS chosen gets theirs passed in per call instead.
+_RESPONSE_LANGUAGE = os.getenv("STT_LANGUAGE", "ur").strip().lower()
 
 _LANGUAGE_INSTRUCTIONS = {
     "en": "Respond in English.",
@@ -80,12 +82,14 @@ SYSTEM_MESSAGES = {
 }
 
 
-def system_message(key: str) -> str:
-    """A short, non-LLM-written spoken message, in the configured language."""
+def system_message(key: str, language: str | None = None) -> str:
+    """A short, non-LLM-written spoken message, in the caller's language."""
 
     entry = SYSTEM_MESSAGES.get(key, {})
 
-    return entry.get(_RESPONSE_LANGUAGE) or entry.get("en", "")
+    language = (language or _RESPONSE_LANGUAGE).strip().lower()
+
+    return entry.get(language) or entry.get("en", "")
 
 
 # ERPNext's internal IDs - "EDU-ATT-2026-00001",
@@ -122,6 +126,7 @@ def build_response_prompt(
     user_query: str,
     response: str,
     today: str | None = None,
+    language: str | None = None,
 ) -> str:
     """
     Convert structured ERP/API data into a natural,
@@ -160,7 +165,8 @@ def build_response_prompt(
         )
 
     language_instruction = _LANGUAGE_INSTRUCTIONS.get(
-        _RESPONSE_LANGUAGE, _LANGUAGE_INSTRUCTIONS["en"]
+        (language or _RESPONSE_LANGUAGE).strip().lower(),
+        _LANGUAGE_INSTRUCTIONS["en"],
     )
 
     return f"""

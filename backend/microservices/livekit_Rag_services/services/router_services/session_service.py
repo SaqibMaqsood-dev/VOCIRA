@@ -68,6 +68,26 @@ def _format_topic(raw: str) -> str:
     return f"{student} - {label}" if student else label
 
 
+def _students_in(raw: str) -> list[str]:
+    """
+    The child names inside one stored `Message.intent` value -
+    "attendance:Zoya+fee:Zoya" gives ["Zoya"]. Intents that never
+    named a child ("rag", "admin_handoff") give nothing.
+    """
+
+    if not raw or raw in ("rag", "cached", "admin_handoff"):
+        return []
+
+    names = []
+    for part in raw.split("+"):
+        _, _, student = part.partition(":")
+        student = student.strip()
+        if student and student not in names:
+            names.append(student)
+
+    return names
+
+
 class SessionService:
 
     def __init__(self):
@@ -229,6 +249,13 @@ class SessionService:
             raw_topics = topics_by_session.get(row.id, [])
             formatted = [_format_topic(t) for t in raw_topics]
             formatted = [t for t in formatted if t]
+
+            students: list[str] = []
+            for raw in raw_topics:
+                for name in _students_in(raw):
+                    if name not in students:
+                        students.append(name)
+            row.students = students
 
             if not formatted:
                 row.topic = None

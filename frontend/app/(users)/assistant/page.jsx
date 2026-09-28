@@ -7,7 +7,8 @@ import {
   Play,
   PhoneOff,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { readGuestLanguage } from "@/components/LanguageSelect";
 
 import {
   Room,
@@ -122,6 +123,38 @@ export default function AssistantPage() {
     useState("");
 
   /*
+   * Tell the rest of the app a call is up.
+   *
+   * The navbar's language picker has to close while one is running:
+   * the language is settled once, when the call starts, so changing
+   * it mid-call would silently do nothing until the next one - the
+   * caller would hear Urdu while the control said English.
+   *
+   * A window event, the same way login/logout already reaches the
+   * navbar, because the two live in different parts of the tree.
+   */
+  const callActive = isConnecting || isConnected;
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("vocira-call-state", {
+        detail: { active: callActive },
+      })
+    );
+  }, [callActive]);
+
+  // Leaving the page must not leave the picker stuck disabled.
+  useEffect(() => {
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("vocira-call-state", {
+          detail: { active: false },
+        })
+      );
+    };
+  }, []);
+
+  /*
    * Never move backwards.
    *
    * "connected" arrives when the admin joins the room. After that
@@ -205,11 +238,18 @@ export default function AssistantPage() {
         );
 
       } else {
+        // A guest has no account, so the language they picked in the
+        // navbar is kept in the browser and sent with the token
+        // request - that is the only way it reaches the pipeline.
+        const guestLanguage = readGuestLanguage();
+
         tokenEndpoint =
-          `${API_BASE_URL}/livekit/guest/live_kit/token`;
+          `${API_BASE_URL}/livekit/guest/live_kit/token` +
+          `?language=${encodeURIComponent(guestLanguage)}`;
 
         console.log(
-          "Using guest LiveKit endpoint:"
+          "Using guest LiveKit endpoint, language:",
+          guestLanguage
         );
       }
 
@@ -1318,15 +1358,11 @@ ${JSON.stringify(
                   </p>
                 )}
 
-                <p className="mt-1 text-sm text-text-secondary">
-                  Room: {room.name}
-                </p>
-
-                {sessionId && (
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Session: {sessionId}
-                  </p>
-                )}
+                {/* The room and session ids used to be printed here.
+                    They are internal plumbing - a caller has no use
+                    for two long UUIDs, and they only made the screen
+                    look unfinished. Still logged to the console and
+                    kept in state for debugging. */}
 
                 <div className="mt-5 flex items-center justify-center gap-4">
 

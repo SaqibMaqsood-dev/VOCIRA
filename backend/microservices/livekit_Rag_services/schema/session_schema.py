@@ -46,6 +46,12 @@ class SessionResponse(BaseModel):
     # each AI message's `intent` field for this session.
     topic: Optional[str] = None
 
+    # Which children were discussed, from the same `intent` values
+    # topic is built from ("attendance:Zoya" -> "Zoya"). Lets the
+    # dashboard show one child's calls at a time - a guardian can
+    # have ten children at the same school.
+    students: list[str] = []
+
     class Config:
         from_attributes = True
 

@@ -52,19 +52,33 @@ MIN_RMS = 260.0
 # noise. A multilingual model can drift into either script no matter
 # which one it was told to expect, so checking for only one language's
 # hallucinations was never going to be enough.
+# NOTE: every entry must be written the way _is_noise() normalises -
+# lower case, letters/digits/spaces only. Entries carrying their own
+# punctuation ("thank you.", "i'm sorry", "thanks for watching!")
+# could never match anything, because the text being checked has had
+# that punctuation stripped before it arrives. "I'm sorry." was
+# reaching the assistant as a real question for exactly that reason.
 _HALLUCINATIONS = {
     # English
-    "thank you", "thanks", "thank you.", "thanks for watching",
-    "thank you for watching", "thanks for watching!", "bye", "bye.",
+    "thank you", "thanks", "thanks for watching",
+    "thank you for watching", "bye",
     "you", "okay", "ok", "so", "uh", "um", "hmm", "mm", "mhm",
-    "subtitles by the amara.org community", "please subscribe",
-    "i'm sorry", "silence", "music", "applause",
+    "subtitles by the amaraorg community", "please subscribe",
+    "im sorry", "silence", "music", "applause",
     # Urdu - direct equivalents of the same phrases, plus موسیقی
     # (music), which is the one actually observed live
     "شکریہ", "بہت شکریہ", "خدا حافظ", "اللہ حافظ", "ٹھیک ہے",
     "ہاں", "ام", "ہوں", "خاموشی", "موسیقی", "تالیاں", "معذرت",
     "سبسکرائب کریں", "ترجمہ",
 }
+
+
+# A real question is this many words, OR this many characters if it
+# is a short one ("حاضری بتائیں" is two words but 12 characters).
+# Room noise came back as "اللہ" (1 word, 4 chars) and "ملتا ہے"
+# (2 words, 7 chars) - both fall short of either bar.
+MIN_QUERY_WORDS = 3
+MIN_QUERY_CHARS = 10
 
 
 def _is_noise(text: str) -> bool:
@@ -80,7 +94,35 @@ def _is_noise(text: str) -> bool:
     if len(cleaned.replace(" ", "")) < 3:
         return True
 
-    return cleaned in _HALLUCINATIONS
+    if cleaned in _HALLUCINATIONS:
+        return True
+
+    # ------------------------------------------------------------
+    # Not a phrase we recognise - but is it a question at all?
+    #
+    # The list above can only ever catch hallucinations already seen.
+    # Whisper invents something different every time: a call logged
+    # live produced "اللہ", "لانا" and "ملتا ہے" from room noise -
+    # three disconnected words, none of them in any list, each one
+    # answered with "I don't have information about that".
+    #
+    # Rather than chase every invention, require the opposite: a real
+    # question here is several words, or at least a long one. Noise
+    # comes back as one or two short fragments. This catches
+    # inventions nobody has seen yet, which a blacklist cannot.
+    # ------------------------------------------------------------
+
+    words = cleaned.split()
+
+    # A single word is never a question here, however long it is -
+    # "production." is ten characters and still just noise.
+    if len(words) < 2:
+        return True
+
+    if len(words) < MIN_QUERY_WORDS and len(cleaned) < MIN_QUERY_CHARS:
+        return True
+
+    return False
 
 # whisper-large-v3-turbo is both fast and multilingual, which suits
 # speakers who mix Urdu and English. For English only,
@@ -90,8 +132,11 @@ GROQ_STT_MODEL = os.getenv(
     "whisper-large-v3-turbo",
 )
 
-# Zaban tay kar dein. Urdu chahiye to STT_LANGUAGE=ur karein.
-STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en")
+# The default language, for callers whose account has not chosen one
+# (and for the /ask style paths that have no caller at all). A
+# guardian who HAS chosen gets theirs passed in per call instead -
+# see transcribe_bytes(language=...).
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "ur")
 
 
 class STTWhisper:
@@ -203,13 +248,21 @@ class STTWhisper:
         self,
         audio_bytes: bytes,
         sample_rate: int = 48000,
+        language: str | None = None,
     ) -> str:
         """
         Raw int16 mono PCM ko text mein badlein.
 
         Ye sync function hai - voice_pipeline ise
         asyncio.to_thread() se chalata hai.
+
+        `language` is the caller's own choice ("en" / "ur"), read
+        from their account once when the call starts. Left out, the
+        STT_LANGUAGE default applies - which is what every call used
+        to do.
         """
+
+        language = (language or STT_LANGUAGE).strip().lower()
 
         if not audio_bytes:
             return ""
@@ -254,7 +307,7 @@ class STTWhisper:
                 temperature=0.0,
                 # Without this Whisper guesses the language itself,
                 # and turned noise into Portuguese/Spanish.
-                language=STT_LANGUAGE,
+                language=language,
             )
 
             # With response_format="text" the SDK returns a plain

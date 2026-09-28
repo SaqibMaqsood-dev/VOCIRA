@@ -1,6 +1,10 @@
 import httpx
 from fastapi import Request
 
+from backend.microservices.livekit_Rag_services.services.http_retry import (
+    request_with_retry,
+)
+
 
 class APIServices:
 
@@ -24,11 +28,16 @@ class APIServices:
 
         url = endpoint or self.endpoint
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=headers,
-            )
+        # No timeout at all before this: on a phone's connection a
+        # stalled request could hang the call's own setup with
+        # nothing to time it out.
+        response = await request_with_retry(
+            "GET",
+            url,
+            timeout=15.0,
+            label="AUTH user record",
+            headers=headers,
+        )
 
         response.raise_for_status()
 

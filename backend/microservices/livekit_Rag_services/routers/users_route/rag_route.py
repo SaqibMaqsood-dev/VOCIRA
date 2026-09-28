@@ -20,13 +20,17 @@ from fastapi import APIRouter, Header, HTTPException, status
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
     DATA_DIR,
 )
-from backend.microservices.livekit_Rag_services.services.rag_engine.ingestion import (
-    assemble_knowledge_base,
-)
 from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore import (
     get_index_stats,
     rebuild_vector_store,
 )
+
+# NOTE: ingestion is imported inside _run_sync(), not here. It pulls
+# in langchain's text splitters, which drag in sentence_transformers
+# and torch - about 7 of the ~10 seconds this service spent importing
+# before it could answer anything. A sync runs rarely; every boot paid
+# for it. Loading it at first sync moves that cost off the startup
+# path (embeddings come from Gemini, so torch is never used anyway).
 
 router = APIRouter(prefix="/rag", tags=["RAG Knowledge Base"])
 
@@ -120,6 +124,10 @@ async def _run_sync():
         )
 
         try:
+            from backend.microservices.livekit_Rag_services.services.rag_engine.ingestion import (
+                assemble_knowledge_base,
+            )
+
             print("[RAG Sync] assembling the knowledge base...")
             chunks = await assemble_knowledge_base()
 

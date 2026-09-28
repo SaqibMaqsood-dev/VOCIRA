@@ -230,16 +230,51 @@ async def publish_agent_state(service_handle, state: str) -> None:
         print(f"[Agent State] '{state}' could not send: {error}")
 
 
+async def resolve_call_language(user_id) -> str | None:
+    """
+    The caller's own language choice ("en" / "ur"), or None to use
+    the deployment default.
+
+    It decides what Whisper listens for, what the LLM is told to
+    answer in, which Piper voice speaks and which greeting opens the
+    call - so every one of those reads it from here, and they cannot
+    disagree with each other.
+
+    A guest has no account to ask, and an unreachable auth service is
+    not a reason to refuse a call: both simply mean "default".
+    """
+
+    if not user_id:
+        return None
+
+    try:
+        caller = await auth_client.get_internal_user(
+            vocira_user_id=user_id,
+        )
+        return caller.get("language")
+    except Exception as error:
+        print(f"[Language] Could not read the caller's choice: {error}")
+        return None
+
+
 # =========================================================
 # AGENT KO BULWAYEIN
 # =========================================================
 
-async def speak_text(service_handle, audio_source, text: str) -> bool:
+async def speak_text(
+    service_handle,
+    audio_source,
+    text: str,
+    language: str | None = None,
+) -> bool:
     """
     Have the agent speak a line of text (a greeting, for example).
 
     Uses the same sentence streaming and locking as a real answer,
     so two voices can never overlap.
+
+    `language` picks the Piper voice - the caller's own choice, so a
+    guardian set to Urdu is greeted in an Urdu voice too.
     """
 
     sentences = split_sentences(text)
@@ -280,7 +315,7 @@ async def speak_text(service_handle, audio_source, text: str) -> bool:
             for sentence in sentences:
 
                 audio_bytes = await asyncio.to_thread(
-                    tts_converter, sentence
+                    tts_converter, sentence, language
                 )
 
                 if not audio_bytes:
@@ -408,6 +443,26 @@ async def consume_audio(
     print("=" * 70)
 
     # =====================================================
+    # 2b. CALLER'S LANGUAGE
+    #
+    # Read once here, not per utterance: it decides what Whisper
+    # listens for, what the LLM is told to answer in and which Piper
+    # voice speaks - and those three must agree for the whole call.
+    # A guest, or an account that has never chosen, gets None, which
+    # every one of those three reads as "use the default".
+    # =====================================================
+
+    # A guest has no account to look a preference up in, so theirs
+    # rides along in the participant metadata the token was minted
+    # with. Everyone else's comes from their account.
+    call_language = (
+        await resolve_call_language(user_id)
+        or (metadata or {}).get("language")
+    )
+
+    print(f"Call language        : {call_language or 'default'}")
+
+    # =====================================================
     # 3. VALIDATE AUDIO TRACK
     # =====================================================
 
@@ -463,6 +518,43 @@ async def consume_audio(
     consecutive_speech_frames = 0
 
     barge_in_triggered = False
+
+    # -----------------------------------------------------
+    # NOISE GATE
+    #
+    # VAD alone says "speech" for a door closing, a cough, or a fan
+    # picking up - one 30ms frame was enough to open an utterance,
+    # and whatever followed went to Whisper. Whisper never answers
+    # "I heard nothing": it invents a sentence ("Thank you.",
+    # "Obrigado.", "موسیقی") and the assistant answered the room.
+    #
+    # Checking Whisper's own confidence does not help - measured on
+    # pure noise it returned "موسیقی" with no_speech_prob 0.0, i.e.
+    # completely sure it had heard speech. So the filtering has to
+    # happen here, before the audio is ever sent.
+    #
+    # Real speech holds for a stretch and fills a decent share of
+    # the utterance. A knock does neither.
+    # -----------------------------------------------------
+
+    # ~240ms of unbroken speech (8 x 30ms).
+    MIN_SPEECH_RUN = 8
+
+    # ...and speech has to be at least this much of the whole thing.
+    MIN_SPEECH_RATIO = 0.35
+
+    # After a gap this long, the next sound is far more likely to be
+    # the room than an actual question - the caller has stopped
+    # talking and left the mic open. The bar goes up accordingly.
+    LONG_PAUSE_SECONDS = 25.0
+    LONG_PAUSE_SPEECH_RUN = 14          # ~420ms
+    LONG_PAUSE_SPEECH_RATIO = 0.5
+
+    speech_frames_total = 0
+    utterance_frames_total = 0
+    longest_speech_run = 0
+
+    last_accepted_at = time.monotonic()
 
     MAX_ACCUMULATION_BYTES = (
         32000 * 2 * 15
@@ -606,6 +698,11 @@ async def consume_audio(
 
                     consecutive_speech_frames += 1
 
+                    longest_speech_run = max(
+                        longest_speech_run,
+                        consecutive_speech_frames,
+                    )
+
                     voice_accumulation.extend(
                         audio_chunk
                     )
@@ -614,10 +711,18 @@ async def consume_audio(
 
                         is_speaking = True
 
+                        # A fresh utterance - start counting again.
+                        speech_frames_total = 0
+                        utterance_frames_total = 0
+                        longest_speech_run = 1
+
                         print(
                             f"[Speech Started] "
                             f"{participant.identity}"
                         )
+
+                    speech_frames_total += 1
+                    utterance_frames_total += 1
 
                     # NOTE: barge-in used to live here (the agent
                     # went quiet when the user interrupted). It was
@@ -641,6 +746,8 @@ async def consume_audio(
                     # moments add up into a false barge-in.
                     consecutive_speech_frames = 0
 
+                    utterance_frames_total += 1
+
                     voice_accumulation.extend(
                         audio_chunk
                     )
@@ -660,6 +767,63 @@ async def consume_audio(
                             f"Audio bytes: "
                             f"{len(captured_audio)}"
                         )
+
+                        # -----------------------------------------
+                        # NOISE GATE
+                        # -----------------------------------------
+
+                        quiet_for = (
+                            time.monotonic() - last_accepted_at
+                        )
+
+                        after_long_pause = (
+                            quiet_for >= LONG_PAUSE_SECONDS
+                        )
+
+                        required_run = (
+                            LONG_PAUSE_SPEECH_RUN
+                            if after_long_pause
+                            else MIN_SPEECH_RUN
+                        )
+
+                        required_ratio = (
+                            LONG_PAUSE_SPEECH_RATIO
+                            if after_long_pause
+                            else MIN_SPEECH_RATIO
+                        )
+
+                        speech_ratio = (
+                            speech_frames_total / utterance_frames_total
+                            if utterance_frames_total
+                            else 0.0
+                        )
+
+                        if (
+                            longest_speech_run < required_run
+                            or speech_ratio < required_ratio
+                        ):
+
+                            print(
+                                f"[Noise Gate] dropped - "
+                                f"run={longest_speech_run}"
+                                f"/{required_run} "
+                                f"ratio={speech_ratio:.2f}"
+                                f"/{required_ratio} "
+                                f"(quiet for {quiet_for:.0f}s)"
+                            )
+
+                            voice_accumulation.clear()
+                            silence_frames = 0
+                            is_speaking = False
+                            consecutive_speech_frames = 0
+                            barge_in_triggered = False
+                            speech_frames_total = 0
+                            utterance_frames_total = 0
+                            longest_speech_run = 0
+
+                            continue
+
+                        last_accepted_at = time.monotonic()
 
                         service_handle._speech_generation += 1
 
@@ -681,6 +845,7 @@ async def consume_audio(
                                 audio_source=audio_source,
                                 service_handle=service_handle,
                                 generation=generation_id,
+                                language=call_language,
                             )
                         )
 
@@ -738,6 +903,7 @@ async def process_voice_intent(
     audio_source,
     service_handle,
     generation: int,
+    language: str | None = None,
 ):
     """
     Complete voice processing pipeline.
@@ -790,6 +956,8 @@ async def process_voice_intent(
         user_query = await asyncio.to_thread(
             stt.transcribe_bytes,
             chunk,
+            48000,
+            language,
         )
 
         if not user_query or not user_query.strip():
@@ -1042,7 +1210,8 @@ async def process_voice_intent(
                 if not user_id:
 
                     ai_response_text = human_text.system_message(
-                        "admin_requires_login"
+                        "admin_requires_login",
+                        language,
                     )
 
                     await message_service.create_message(
@@ -1052,6 +1221,19 @@ async def process_voice_intent(
                         usertype=SenderTypeEnum.ai.value,
                         session_id=session_id,
                         intent="admin_handoff",
+                    )
+
+                    # Saying it is the whole point. This used to write
+                    # the refusal to the database and return, and the
+                    # speaking happens at the end of this function -
+                    # so a guest asking for a person heard nothing at
+                    # all and sat on "Thinking..." until they gave up,
+                    # with the explanation sitting unread in a table.
+                    await speak_text(
+                        service_handle=service_handle,
+                        audio_source=audio_source,
+                        text=ai_response_text,
+                        language=language,
                     )
 
                     return
@@ -1153,7 +1335,8 @@ async def process_voice_intent(
                 # -------------------------------------------------
 
                 handoff_text = human_text.system_message(
-                    "connecting_to_staff"
+                    "connecting_to_staff",
+                    language,
                 )
 
                 await message_service.create_message(
@@ -1169,6 +1352,7 @@ async def process_voice_intent(
                     service_handle=service_handle,
                     audio_source=audio_source,
                     text=handoff_text,
+                    language=language,
                 )
 
                 # -------------------------------------------------
@@ -1246,7 +1430,8 @@ async def process_voice_intent(
                         )
 
                         ai_response_text = human_text.system_message(
-                            "erp_not_authorized"
+                            "erp_not_authorized",
+                            language,
                         )
 
                     else:
@@ -1319,7 +1504,8 @@ async def process_voice_intent(
                             )
 
                             ai_response_text = human_text.system_message(
-                                "account_not_verified"
+                                "account_not_verified",
+                                language,
                             )
 
                         elif not isinstance(
@@ -1333,7 +1519,8 @@ async def process_voice_intent(
                             )
 
                             ai_response_text = human_text.system_message(
-                                "account_not_verified"
+                                "account_not_verified",
+                                language,
                             )
 
                         else:
@@ -1363,7 +1550,8 @@ async def process_voice_intent(
                                 )
 
                                 ai_response_text = human_text.system_message(
-                                    "account_not_verified"
+                                    "account_not_verified",
+                                    language,
                                 )
 
                             else:
@@ -1424,7 +1612,8 @@ async def process_voice_intent(
                                     )
 
                                     ai_response_text = human_text.system_message(
-                                        "erp_not_authorized_short"
+                                        "erp_not_authorized_short",
+                                        language,
                                     )
 
                                 else:
@@ -1457,7 +1646,8 @@ async def process_voice_intent(
                                         )
 
                                         ai_response_text = human_text.system_message(
-                                            "erp_not_linked"
+                                            "erp_not_linked",
+                                            language,
                                         )
 
                                     else:
@@ -1560,6 +1750,7 @@ async def process_voice_intent(
                                             human_text.build_response_prompt(
                                                 user_query=user_query,
                                                 response=erp_data,
+                                                language=language,
                                             )
                                         )
 
@@ -1623,7 +1814,8 @@ async def process_voice_intent(
                         )
 
                         ai_response_text = human_text.system_message(
-                            "answer_assembly_failed"
+                            "answer_assembly_failed",
+                            language,
                         )
 
                     else:
@@ -1634,7 +1826,8 @@ async def process_voice_intent(
                         )
 
                         ai_response_text = human_text.system_message(
-                            "erp_unreachable"
+                            "erp_unreachable",
+                            language,
                         )
 
                     print(
@@ -1900,6 +2093,7 @@ async def process_voice_intent(
                     asyncio.to_thread(
                         tts_converter,
                         sentences[0],
+                        language,
                     )
                 )
 
@@ -1912,6 +2106,7 @@ async def process_voice_intent(
                             asyncio.to_thread(
                                 tts_converter,
                                 sentences[index + 1],
+                                language,
                             )
                         )
 

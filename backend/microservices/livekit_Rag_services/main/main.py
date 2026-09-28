@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 
 # Same reason as livekit_worker.py: Windows' default console
@@ -13,7 +14,6 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from huggingface_hub import login
 
 from backend.helper_functions.database import (create_database_engine , Base)
 
@@ -43,6 +43,7 @@ from backend.microservices.livekit_Rag_services.routers.users_route import (
     message_route,
     rag_route,
     support_route,
+    students_route,
 )
 
 from backend.microservices.livekit_Rag_services.routers.users_route.notification_router import (
@@ -86,10 +87,14 @@ async def lifespan(app: FastAPI):
     # HuggingFace
     # -----------------------------------------------------
 
-    if settings.HF_TOKEN:
-        login(
-            token=settings.HF_TOKEN
-        )
+    # HuggingFace needs no login() call here. huggingface_hub already
+    # picks the token up from the HF_TOKEN environment variable - it
+    # said so itself on every boot ("HF_TOKEN is set and is the
+    # current active token independently from the token you've just
+    # configured"). All login() added was a /whoami-v2 round trip on
+    # the startup path, which rate-limits aggressively and once took
+    # the whole service down with it.
+    os.environ.setdefault("HF_TOKEN", settings.HF_TOKEN or "")
 
     # -----------------------------------------------------
     # Database
@@ -231,6 +236,12 @@ app.include_router(
 # The Support page used to be a dead form (there was no fetch at all).
 app.include_router(
     support_route.router,
+    prefix="/livekit",
+)
+
+# The logged-in guardian's own children, for the dashboard card.
+app.include_router(
+    students_route.router,
     prefix="/livekit",
 )
 

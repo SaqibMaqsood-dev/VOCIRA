@@ -13,6 +13,13 @@
 
 body {
   height: 100%;
+  /* Decorative blurs are deliberately positioned past the edges of
+     their cards (-left-20, -right-20). On a wide screen there is
+     room for that; at 390px they pushed the page sideways, so the
+     whole layout could be scrolled right and the last tab in the
+     bottom bar sat off-screen. Nothing in this app scrolls
+     horizontally by design. */
+  overflow-x: hidden;
   color: var(--text-primary);
   font-family: var(--font-body), system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
@@ -56,7 +63,12 @@ input::-ms-clear {
   }
 
   .page-shell {
-    @apply mx-auto max-w-6xl px-4 py-10 sm:py-14 min-h-[calc(100vh-4rem-2.5rem)];
+    /* py-10 was the same on a 390px phone as on a desktop, which
+       pushed short pages into a tall empty column. The min-height
+       also has to leave room for the bottom tab bar now, or every
+       page ends in dead space under the content. */
+    @apply mx-auto max-w-6xl px-4 py-6 sm:py-14
+      min-h-[calc(100vh-4rem-2.5rem-5rem)] lg:min-h-[calc(100vh-4rem-2.5rem)];
   }
 
   .glow-ring {

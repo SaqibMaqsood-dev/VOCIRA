@@ -2,6 +2,10 @@ import os
 
 import httpx
 
+from backend.microservices.livekit_Rag_services.services.http_retry import (
+    request_with_retry,
+)
+
 
 class AuthClient:
 
@@ -32,30 +36,29 @@ class AuthClient:
         print("=" * 70)
 
         try:
-            async with httpx.AsyncClient(
-                timeout=10.0
-            ) as client:
+            response = await request_with_retry(
+                "GET",
+                url,
+                timeout=15.0,
+                label="AUTH internal user",
+                headers={
+                    "X-Internal-Key": self.internal_key,
+                },
+            )
 
-                response = await client.get(
-                    url,
-                    headers={
-                        "X-Internal-Key": self.internal_key,
-                    },
-                )
+            print(
+                f"[AUTH STATUS] : "
+                f"{response.status_code}"
+            )
 
-                print(
-                    f"[AUTH STATUS] : "
-                    f"{response.status_code}"
-                )
+            print(
+                f"[AUTH BODY]   : "
+                f"{response.text}"
+            )
 
-                print(
-                    f"[AUTH BODY]   : "
-                    f"{response.text}"
-                )
+            response.raise_for_status()
 
-                response.raise_for_status()
-
-                data = response.json()
+            data = response.json()
 
         except httpx.TimeoutException as exc:
             raise RuntimeError(

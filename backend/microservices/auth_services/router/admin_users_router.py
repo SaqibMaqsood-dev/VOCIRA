@@ -61,6 +61,7 @@ class UserCreate(BaseModel):
     role: str = Field(default="guardian")
 
 
+
 class UserUpdate(BaseModel):
     # Changing the email changes the login - the old one stops
     # working. This is allowed deliberately: a parent's address can

@@ -142,9 +142,19 @@ class UserPartialUpdate(BaseModel):
     date_birth      : Optional[date] =  None
 
 
+class MyLanguageUpdate(BaseModel):
+    # "en", "ur", or empty/None to go back to the default.
+    language: Optional[str] = None
+
+
 class InternalUserResponse(BaseModel):
     user_id: UUID
     parent_id: Optional[str] = None
     role: Optional[str] = None
+
+    # "en" / "ur", or None for the deployment default. The voice
+    # pipeline reads it once per call to pick the language for STT,
+    # the LLM prompt, the TTS voice and the greeting.
+    language: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

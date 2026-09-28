@@ -24,18 +24,35 @@ from piper.config import SynthesisConfig
 # answer back. One setting turns the whole conversation from English
 # to Urdu instead of three separate ones that could drift out of
 # sync with each other.
-_LANGUAGE = os.getenv("STT_LANGUAGE", "en").strip().lower()
+_LANGUAGE = os.getenv("STT_LANGUAGE", "ur").strip().lower()
 
 _VOICE_FILES = {
     "en": "en_US-lessac-medium.onnx",
     "ur": "ur_PK-fasih-medium.onnx",
 }
 
-_voice_file = _VOICE_FILES.get(_LANGUAGE, _VOICE_FILES["en"])
+_MODEL_DIR = "backend/microservices/livekit_Rag_services/audio_models"
 
-voice = PiperVoice.load(
-    f"backend/microservices/livekit_Rag_services/audio_models/{_voice_file}"
-)
+# One voice used to be loaded at import, because the language was a
+# deployment-wide setting. Now each caller brings their own, so the
+# voices are loaded on first use and kept - loading is the slow part
+# (hundreds of milliseconds), and a guardian would otherwise pay it
+# on every single sentence of every call.
+_voices: dict[str, PiperVoice] = {}
+
+
+def _voice_for(language: str | None) -> PiperVoice:
+    language = (language or _LANGUAGE).strip().lower()
+
+    if language not in _VOICE_FILES:
+        language = "en"
+
+    if language not in _voices:
+        _voices[language] = PiperVoice.load(
+            f"{_MODEL_DIR}/{_VOICE_FILES[language]}"
+        )
+
+    return _voices[language]
 
 _CONFIG = SynthesisConfig(length_scale=1)
 
@@ -78,15 +95,15 @@ def split_sentences(text: str) -> list[str]:
     return merged
 
 
-def _synth(text: str) -> bytes:
+def _synth(text: str, language: str | None = None) -> bytes:
     buffer = io.BytesIO()
-    for chunk in voice.synthesize(text, syn_config=_CONFIG):
+    for chunk in _voice_for(language).synthesize(text, syn_config=_CONFIG):
         buffer.write(chunk.audio_int16_bytes)
     return buffer.getvalue()
 
 
-def tts_converter(text: str) -> bytes:
+def tts_converter(text: str, language: str | None = None) -> bytes:
     """Poore jawab ka audio ek saath (purana behaviour)."""
     if not text or not text.strip():
         return b""
-    return _synth(text.strip())
+    return _synth(text.strip(), language)

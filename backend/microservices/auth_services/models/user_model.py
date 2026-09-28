@@ -26,6 +26,13 @@ class Users(Base):
     email           : Mapped[str | None]  = mapped_column(VARCHAR(200), nullable=True, unique=True)
     password_hashed : Mapped[str | None]  = mapped_column(Text, nullable=True)
     phone_number    : Mapped[str | None]  = mapped_column(VARCHAR(20), nullable=True, unique=True)
+
+    # Which language this guardian's calls run in - "en" or "ur". It
+    # drives all three halves of a call at once (what Whisper listens
+    # for, what the LLM is told to answer in, which Piper voice reads
+    # it out), so they can never drift apart. NULL means "not chosen",
+    # which falls back to the STT_LANGUAGE default.
+    language        : Mapped[str | None]  = mapped_column(VARCHAR(5), nullable=True)
     location        : Mapped[str | None]  = mapped_column(Text, nullable=True)
     address         : Mapped[str | None]  = mapped_column(Text, nullable=True)
     date_birth      : Mapped[date | None] = mapped_column(Date, nullable=True)

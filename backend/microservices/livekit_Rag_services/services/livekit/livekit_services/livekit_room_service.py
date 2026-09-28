@@ -96,6 +96,7 @@ class LivekitRoomServices:
 
         self._background_tasks = set()
         self._disconnect_timer = None
+        self._no_show_timer = None
 
         # =====================================================
         # INTENTIONAL END CALL
@@ -308,22 +309,54 @@ class LivekitRoomServices:
         ),
     }
 
-    GREETING_TEXT = _GREETINGS.get(
-        os.getenv("STT_LANGUAGE", "en").strip().lower(), _GREETINGS["en"]
-    )
+    _DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "ur").strip().lower()
 
-    async def greet_once(self):
+    GREETING_TEXT = _GREETINGS.get(_DEFAULT_LANGUAGE, _GREETINGS["en"])
+
+    async def greet_once(self, participant=None):
         """
         Greet once, as soon as a person joins the room.
 
         There was no greeting at all before - the agent just sat
         there silently and the user could not tell it had connected.
+
+        The greeting follows the caller's own language, the same one
+        the rest of the call uses. Opening in English and then
+        answering in Urdu is exactly the mismatch a caller notices
+        immediately.
         """
 
         if self._greeted:
             return
 
         self._greeted = True
+
+        # Working out the language must never cost the greeting.
+        # This used to sit outside the try below, and after the flag
+        # above was already set: anything it raised took the greeting
+        # with it AND blocked the second trigger from retrying, so
+        # the caller sat on "Connecting..." in silence with nothing
+        # in the log to say why.
+        language = self._DEFAULT_LANGUAGE
+
+        try:
+            if participant is not None:
+                metadata, user_id = (
+                    voice_pipeline.extract_participant_identity(participant)
+                )
+                language = (
+                    await voice_pipeline.resolve_call_language(user_id)
+                    or (metadata or {}).get("language")
+                    or self._DEFAULT_LANGUAGE
+                )
+        except Exception as error:
+            print(
+                f"[Greeting] language lookup failed, using "
+                f"{self._DEFAULT_LANGUAGE}: "
+                f"{type(error).__name__}: {error}"
+            )
+
+        greeting = self._GREETINGS.get(language, self._GREETINGS["en"])
 
         try:
             # speak_text does not raise on every failure - if the
@@ -334,7 +367,8 @@ class LivekitRoomServices:
             spoken = await voice_pipeline.speak_text(
                 service_handle=self,
                 audio_source=self.agent_source,
-                text=self.GREETING_TEXT,
+                text=greeting,
+                language=language,
             )
 
             if not spoken:
@@ -344,6 +378,13 @@ class LivekitRoomServices:
                     "(the [Speak] line above gives the real reason)"
                 )
 
+                # There are two triggers on purpose (a participant
+                # joining, and a track being subscribed) because
+                # either can win the race. Holding the flag after a
+                # failure wasted that second chance - the caller was
+                # left listening to nothing.
+                self._greeted = False
+
         except Exception as error:
             print(
                 f"[Greeting] fail: "
@@ -352,12 +393,14 @@ class LivekitRoomServices:
 
             traceback.print_exc()
 
-    def _schedule_greeting(self):
+            self._greeted = False
+
+    def _schedule_greeting(self, participant=None):
         """
         Greet in a background task - the event handler is sync, so
         it cannot await here.
         """
-        task = asyncio.create_task(self.greet_once())
+        task = asyncio.create_task(self.greet_once(participant))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
@@ -538,6 +581,10 @@ class LivekitRoomServices:
                 # watchdog should no longer fire
                 self._cancel_handoff_timeout()
 
+                if self._no_show_timer:
+                    self._no_show_timer.cancel()
+                    self._no_show_timer = None
+
                 if self._disconnect_timer:
 
                     self._disconnect_timer.cancel()
@@ -581,13 +628,17 @@ class LivekitRoomServices:
 
                 self.human_has_joined = True
 
+                if self._no_show_timer:
+                    self._no_show_timer.cancel()
+                    self._no_show_timer = None
+
                 if self._disconnect_timer:
 
                     self._disconnect_timer.cancel()
 
                     self._disconnect_timer = None
 
-                self._schedule_greeting()
+                self._schedule_greeting(participant)
 
                 return
 
@@ -612,13 +663,17 @@ class LivekitRoomServices:
 
                 self.human_has_joined = True
 
+                if self._no_show_timer:
+                    self._no_show_timer.cancel()
+                    self._no_show_timer = None
+
                 if self._disconnect_timer:
 
                     self._disconnect_timer.cancel()
 
                     self._disconnect_timer = None
 
-                self._schedule_greeting()
+                self._schedule_greeting(participant)
 
                 return
 
@@ -849,7 +904,7 @@ class LivekitRoomServices:
             # greet_once() itself is a no-op the second time
             # (`if self._greeted: return`), so calling it from both
             # places is safe regardless of which one wins.
-            self._schedule_greeting()
+            self._schedule_greeting(participant)
 
             # =================================================
             # VOICE PIPELINE
@@ -887,6 +942,19 @@ class LivekitRoomServices:
             )
 
             await self._publish_agent_voice()
+
+            # A caller who never arrives used to hold this slot for
+            # ever. There is a teardown timer for a human LEAVING,
+            # but none for one who never joins - so a browser tab
+            # closed during "Connecting...", or a room opened by a
+            # health check, kept a worker slot occupied until the
+            # process restarted. Three of those filled every slot,
+            # and real calls then queued behind them with no agent
+            # ever joining: the caller just saw "Connecting..."
+            # while the worker sat in rooms nobody was in.
+            self._no_show_timer = asyncio.create_task(
+                self._teardown_if_nobody_joins()
+            )
 
             await self._shutdown_event.wait()
 
@@ -1393,6 +1461,43 @@ class LivekitRoomServices:
     # DELAYED TEARDOWN
     # =========================================================
 
+    # How long a room waits for its caller before giving the slot
+    # back. Long enough for a slow network to finish connecting,
+    # short enough that a few abandoned rooms cannot starve the
+    # worker.
+    NO_SHOW_SECONDS = 45
+
+    async def _teardown_if_nobody_joins(self):
+        """Free the slot if the caller never actually turns up."""
+
+        try:
+            await asyncio.sleep(self.NO_SHOW_SECONDS)
+
+            if self.human_has_joined:
+                return
+
+            humans = [
+                p
+                for p in self.room.remote_participants.values()
+                if p.identity != "agent"
+            ] if self.room else []
+
+            if humans:
+                # Joined without the event firing - not a no-show.
+                return
+
+            print(
+                f"[Worker] nobody joined within "
+                f"{self.NO_SHOW_SECONDS}s - releasing this slot"
+            )
+
+            self._shutdown_event.set()
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(f"[Worker] no-show watchdog failed: {error}")
+
     async def _delayed_teardown(self):
 
         try:
@@ -1441,6 +1546,12 @@ class LivekitRoomServices:
             self._disconnect_timer.cancel()
 
             self._disconnect_timer = None
+
+        if self._no_show_timer:
+
+            self._no_show_timer.cancel()
+
+            self._no_show_timer = None
 
         current_task = asyncio.current_task()
 

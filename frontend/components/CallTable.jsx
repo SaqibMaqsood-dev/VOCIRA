@@ -94,7 +94,7 @@ export default function CallTable({ rows = [] }) {
               </th>
 
               <th className="px-5 py-3">
-                Topic
+                Regarding
               </th>
 
               <th className="whitespace-nowrap px-5 py-3">
