@@ -19,7 +19,7 @@ Ek LLM call kam, aur ~5,000 tokens ke bajaye ~400.
 
 import re
 
-ROUTER_PROMPT = """You are the router for VOCIRA, a school voice assistant.
+ROUTER_TEMPLATE = """You are the router for VOCIRA, a school voice assistant.
 
 Read the user's question and reply with ONE line of JSON. Nothing else.
 No markdown, no code fences, no explanation.
@@ -74,8 +74,10 @@ Pick exactly one "resource":
 
 Other words for the same thing:
   assessment   performance, progress, how the child is doing in studies,
-               scores, report card, academic record, "padhai kaisi hai"
-  attendance   goes to school regularly, missed school, came to school
+               scores, report card, academic record, "padhai kaisi hai",
+               percentage ("kitni percentage aayi", "پرسنٹیج")
+  attendance   goes to school regularly, missed school, came to school,
+               ATTENDANCE percentage
   fee          dues, challan, voucher, how much is owed or left to pay
   exam         next test, date sheet, paper schedule
   schedule     periods, routine, what the child has tomorrow
@@ -83,17 +85,31 @@ Other words for the same thing:
 "my child", "my son", "my daughter", "my kids", "their", "his", "her"
 when speaking of their own children all mean the caller's children.
 
-"student": if the user names a specific child, put that name.
-Otherwise use an empty string — the app then covers all their children.
-NEVER invent a name.
+"student": which ONE child the question is about - the answer then
+covers only that child. An empty string covers all their children.
 
-IMPORTANT - school records store every child's name in ROMAN ENGLISH
-SPELLING ONLY (e.g. "Zoya Khan", "Ahmed Raza"), never in Urdu script.
-If the user says the name in Urdu (spoken or written in Urdu script),
-transliterate it to the Roman English spelling it would have in the
-school's records before putting it in "student". Do not copy the name
-in Urdu script — a name like "زویا" must become "Zoya", not be left
-as-is, otherwise the record can never be found.
+- The caller names a child: copy that child's name EXACTLY as it is
+  written in "The caller's children" under THIS CALL below. Speech
+  recognition often mishears names, so choose the child whose name
+  SOUNDS closest: "سنک بال", "Sanaa Kabal" or "Sanna" for "Sana Iqbal",
+  "Humza" for "Hamza Iqbal". Only when no children are
+  listed, write the name in Roman English spelling as school records
+  would ("زویا" -> "Zoya"), never in Urdu script.
+- The question names no one but plainly goes on about ONE child -
+  "her", "his", "she", "he", "uski", "uska", "iski", "us ka", "and
+  the fee?", "what percentage did she get?", or it finishes a sentence
+  the caller began just before: use that child from THIS CALL (the one
+  named in what the caller said just before, else the child they were
+  just asking about).
+- A pause can cut one sentence in two. When the question starts in
+  the middle of a sentence ("کہ ...", "اور ...", "that ...", "and
+  ..."), read what the caller said just before and this question as
+  ONE sentence - a child named there ("سنک بال کا جو" sounds like
+  "Sana Iqbal's") is the child this question is about.
+- The caller asks about their children in general - "my children",
+  "kids", "both", "all", "بچوں", "دونوں", "سب" - or asks a fresh
+  question that points at no one child: empty string.
+NEVER invent a name.
 
 === RAG ===
 General school information that is not about a specific child:
@@ -146,14 +162,53 @@ Compound questions - one entry per topic asked:
 "I want to talk to an admin"             -> {{"intent":"ADMIN_HANDOFF"}}
 "Please connect me to a real person"     -> {{"intent":"ADMIN_HANDOFF"}}
 
+With the caller's children "Sana Iqbal, Hamza Iqbal":
+"سنک بال کی فیس کتنی ہے؟"                -> {{"intent":"ERP","items":[{{"resource":"fee","student":"Sana Iqbal"}}]}}
+"Humza's result?"                        -> {{"intent":"ERP","items":[{{"resource":"assessment","student":"Hamza Iqbal"}}]}}
+"میرے بچوں کا رزلٹ؟"                     -> {{"intent":"ERP","items":[{{"resource":"assessment","student":""}}]}}
+Having just asked about Sana Iqbal:
+"اور اس کی کتنی پرسنٹیج آئی؟"            -> {{"intent":"ERP","items":[{{"resource":"assessment","student":"Sana Iqbal"}}]}}
+
+=== THIS CALL ===
+{context}
+
 User question:
 {user_query}
 
 JSON:"""
 
+_NO_CONTEXT = "The caller's children: not known."
 
-# The old name is kept as well so no existing import breaks.
+# The old names still format with user_query alone - the context
+# line then says nothing is known.
+ROUTER_PROMPT = ROUTER_TEMPLATE.replace("{context}", _NO_CONTEXT)
 INTENT_ROUTER_PROMPT = ROUTER_PROMPT
+
+
+def build_router_prompt(
+    user_query: str,
+    children: list[str] | tuple = (),
+    last_child: str | None = None,
+    previous: str | None = None,
+) -> str:
+    """
+    The router prompt with what this call already knows: the caller's
+    own children as the records name them - so a misheard name can
+    still be matched to the right child - and what was just asked, so
+    "and her percentage?" stays about the same child.
+    """
+    # Empty says "not known", not "none": the list is empty also when
+    # it just could not be read, and "none" made the model drop the
+    # name the caller said - which answers about every child.
+    lines = [
+        "The caller's children: "
+        + (", ".join(children) if children else "not known.")
+    ]
+    if last_child:
+        lines.append(f"The child the caller was just asking about: {last_child}")
+    if previous:
+        lines.append(f'What the caller said just before this: "{previous}"')
+    return ROUTER_TEMPLATE.format(user_query=user_query, context="\n".join(lines))
 
 # Room for the "search" restatement - at 80 a long one was cut off,
 # and JSON cut off mid-way does not parse.
@@ -287,6 +342,12 @@ def quick_route(user_query: str) -> dict | None:
     # Kisi bache ka naam ho to LLM nikale
     if _mentions_a_name(user_query):
         return None
+
+    # "her result" means the one child just talked about - only the
+    # LLM, which sees this call's context, can tell which.
+    for word in ("her", "his", "she", "he", "him"):
+        if _has(text, word):
+            return None
 
     mine = any(_has(text, m) for m in _MINE)
 

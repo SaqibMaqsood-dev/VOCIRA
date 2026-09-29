@@ -20,9 +20,28 @@ _LANGUAGE_INSTRUCTIONS = {
         "Urdu (Urdu spelled out with English letters). This answer is "
         "read aloud by an Urdu text-to-speech voice, which can only "
         "pronounce real Urdu script correctly. All of the RESPONSE "
-        "RULES below still apply in Urdu too - numbers, times and "
-        "amounts must be spelled out as Urdu words, not English ones."
+        "RULES below still apply in Urdu too."
     ),
+}
+
+# How numbers are written. English: in words, the model does that
+# well. Urdu: in digits - the model spells Urdu numbers wrong (76 as
+# "ستائیس چھ"), so spoken_text.speak_numbers() spells them instead.
+_NUMBER_RULES = {
+    "en": """8. Convert ALL numbers, times, amounts and codes into spoken words.
+   This is not optional - the answer is read aloud.
+
+   "8:00 AM to 2:00 PM"  ->  "eight in the morning until two in the afternoon"
+   "PKR 18,500"          ->  "eighteen thousand five hundred rupees"
+   "Grades 1 to 5"       ->  "grades one to five"
+   "64.8%"               ->  "sixty-four point eight percent"
+   "042-111-777-800"     ->  "zero four two, one one one, seven seven seven, eight hundred"
+""",
+    "ur": """8. Write EVERY number with digits - marks, percentages, amounts,
+   counts, day numbers and years: 76, 64.8%, 7000 روپے, 7 اگست 2026.
+   Never spell a number out in words - the app turns the digits into
+   correctly spoken Urdu. Write month names in Urdu (اگست, not August).
+""",
 }
 
 
@@ -192,10 +211,12 @@ def build_response_prompt(
             "for that topic only and still cover the rest.\n"
         )
 
+    language_key = (language or _RESPONSE_LANGUAGE).strip().lower()
     language_instruction = _LANGUAGE_INSTRUCTIONS.get(
-        (language or _RESPONSE_LANGUAGE).strip().lower(),
+        language_key,
         _LANGUAGE_INSTRUCTIONS["en"],
     )
+    number_rule = _NUMBER_RULES.get(language_key, _NUMBER_RULES["en"])
 
     return f"""
 You are Vocira, a professional AI voice assistant for The Educators.
@@ -245,6 +266,14 @@ IMPORTANT CONTEXT:
 - If only one child's records are present, the answer is about
   that child.
 
+- Percentages are ALREADY worked out: "percentage" for each subject,
+  "overall_result" / "overall_results" (obtained_marks out of
+  total_marks, and overall_percentage) for a whole exam, and
+  "attendance_percentage". Say those exact figures. NEVER calculate a
+  percentage, total or average yourself. When the caller asks about
+  a result or a percentage, give the overall percentage first, then
+  the subjects.
+
 ==================================================
 RESPONSE RULES
 ==================================================
@@ -281,14 +310,7 @@ RESPONSE RULES
    - ERP systems
    - internal processing
 
-8. Convert ALL numbers, times, amounts and codes into spoken words.
-   This is not optional - the answer is read aloud.
-
-   "8:00 AM to 2:00 PM"  ->  "eight in the morning until two in the afternoon"
-   "PKR 18,500"          ->  "eighteen thousand five hundred rupees"
-   "Grades 1 to 5"       ->  "grades one to five"
-   "042-111-777-800"     ->  "zero four two, one one one, seven seven seven, eight hundred"
-
+{number_rule}
    Never speak a URL or file name such as "site.com/page.php" -
    say "on the school website" instead.
 

@@ -20,11 +20,32 @@ one ("present on July first, July second, July third..."), and now
 gives a count.
 """
 
+import re
 from collections import defaultdict
 
 
 # Internal IDs - not worth speaking aloud, and present in every record
 _DROP = ("name", "student")
+
+# ERP keeps customers unique by numbering them - "Amna Farooq 2" - and
+# the parent heard "Amna Farooq two".
+_CUSTOMER_NUMBER = re.compile(r"\s+\d+$")
+
+
+def _percent(part, whole):
+    """Worked out here - the model got it wrong (attendance of 9 days
+    out of 11 came out as "fifty-eight percent")."""
+    if not whole:
+        return None
+    value = round(100 * part / whole, 1)
+    return int(value) if value == int(value) else value
+
+
+def _plain_number(value):
+    """59.0 -> 59, so the model does not say "fifty-nine point zero"."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 def _who(row: dict) -> str:
@@ -81,6 +102,10 @@ def _compact_attendance(rows: list) -> list:
         # the count first - this is what the LLM should say
         for status, dates in sorted(dates_by_status.items()):
             entry[f"{status.lower()}_days"] = len(dates)
+
+        percentage = _percent(len(dates_by_status.get("Present", [])), len(records))
+        if percentage is not None:
+            entry["attendance_percentage"] = percentage
 
         # Dates only for the statuses that are NOT the common one.
         #
@@ -149,6 +174,45 @@ def _group_by_student(rows: list, repeated: tuple) -> list:
     return out
 
 
+def _add_result_totals(entry: dict) -> None:
+    """
+    Each subject's percentage, and the overall one per exam.
+
+    "Kitni percentage aayi?" is the question parents ask most about a
+    result, and the records hold only marks - so the model did the sum
+    itself, and got it wrong or went round in a loop.
+    """
+
+    totals = defaultdict(lambda: {"obtained_marks": 0, "total_marks": 0, "subjects": 0})
+
+    for item in entry.get("records", []):
+        score, maximum = item.get("total_score"), item.get("maximum_score")
+        if not isinstance(score, (int, float)) or not isinstance(maximum, (int, float)) or maximum <= 0:
+            continue
+        item["percentage"] = _percent(score, maximum)
+        group = item.get("assessment_group") or entry.get("assessment_group") or ""
+        totals[group]["obtained_marks"] += score
+        totals[group]["total_marks"] += maximum
+        totals[group]["subjects"] += 1
+
+    results = []
+    for group, total in totals.items():
+        result = {
+            "obtained_marks": _plain_number(float(total["obtained_marks"])),
+            "total_marks": _plain_number(float(total["total_marks"])),
+            "overall_percentage": _percent(total["obtained_marks"], total["total_marks"]),
+            "subjects": total["subjects"],
+        }
+        if len(totals) > 1 and group:
+            result = {"assessment_group": group, **result}
+        results.append(result)
+
+    if len(results) == 1:
+        entry["overall_result"] = results[0]
+    elif results:
+        entry["overall_results"] = results
+
+
 def compact_records(resource: str, data: dict) -> dict:
     """
     Shrink an ERP response for the LLM.
@@ -165,10 +229,14 @@ def compact_records(resource: str, data: dict) -> dict:
 
         # har record se andaroni IDs nikaal dein
         rows = [
-            {k: v for k, v in row.items() if k not in _DROP}
+            {k: _plain_number(v) for k, v in row.items() if k not in _DROP}
             for row in rows
             if isinstance(row, dict)
         ]
+
+        for row in rows:
+            if isinstance(row.get("customer"), str):
+                row["customer"] = _CUSTOMER_NUMBER.sub("", row["customer"])
 
         if resource == "attendance":
             rows = _compact_attendance(rows)
@@ -178,6 +246,9 @@ def compact_records(resource: str, data: dict) -> dict:
                 rows,
                 repeated=("academic_year", "assessment_group", "program"),
             )
+            if resource == "assessment":
+                for entry in rows:
+                    _add_result_totals(entry)
 
         elif resource in ("leave", "remarks"):
             rows = _group_by_student(

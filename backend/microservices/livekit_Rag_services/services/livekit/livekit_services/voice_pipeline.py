@@ -32,6 +32,7 @@ from backend.microservices.livekit_Rag_services.services.groq import (
     answer_cache,
     human_text,
     intent_prompt,
+    spoken_text,
 )
 
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
@@ -413,6 +414,78 @@ async def resolve_call_language(user_id) -> str | None:
     except Exception as error:
         print(f"[Language] Could not read the caller's choice: {error}")
         return None
+
+
+# =========================================================
+# WHAT THIS CALL ALREADY KNOWS  (for the router)
+#
+# The router used to see the question alone. A misheard name
+# ("Hina Farooq" heard as "ہنف روک") then became "Hanif", matched no
+# child, and the next try lost the name entirely - so the parent got
+# every child's data. With the real names in front of it, the router
+# picks the child whose name sounds closest; with the words said just
+# before, "and her percentage?" stays about the same child.
+# =========================================================
+
+# user_id -> (expires_at, [{"id", "name"}]). Children rarely change;
+# ten minutes spares an auth + ERP round trip on every question.
+_CHILDREN_TTL_SECONDS = 600
+_children_cache: dict[str, tuple[float, list[dict]]] = {}
+
+# session_id -> (said_at, words). Only something said moments ago is
+# context - a sentence cut in half by a pause, or the one "her" means.
+_PREVIOUS_WORDS_SECONDS = 90
+_previous_words: dict[str, tuple[float, str]] = {}
+
+
+async def caller_children(user_id) -> list[dict]:
+    """The caller's own children as the school records name them -
+    [] for a guest, or when they cannot be read right now."""
+
+    if not user_id:
+        return []
+
+    key = str(user_id)
+    cached = _children_cache.get(key)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+
+    try:
+        caller = await auth_client.get_internal_user(vocira_user_id=user_id)
+        parent_id = caller.get("parent_id") if isinstance(caller, dict) else None
+        students = (
+            await erp_service.get_parent_students(erp_parent_id=parent_id)
+            if parent_id else []
+        )
+    except Exception as error:
+        print(f"[Children] could not read the caller's children: {error}")
+        return []
+
+    children = [
+        {"id": s["name"], "name": s["student_name"].strip()}
+        for s in students
+        if isinstance(s, dict) and s.get("name") and s.get("student_name")
+    ]
+    _children_cache[key] = (time.monotonic() + _CHILDREN_TTL_SECONDS, children)
+    return children
+
+
+def take_previous_words(session_id, user_query: str) -> str | None:
+    """What the caller said just before this, if recent - and this is
+    remembered in its place for the next question."""
+
+    now = time.monotonic()
+    for key in [k for k, (at, _) in _previous_words.items()
+                if now - at > _PREVIOUS_WORDS_SECONDS]:
+        del _previous_words[key]
+
+    key = str(session_id)
+    before = _previous_words.get(key)
+    _previous_words[key] = (now, user_query)
+
+    if before and before[1].strip().lower() != user_query.strip().lower():
+        return before[1]
+    return None
 
 
 # =========================================================
@@ -1169,6 +1242,10 @@ async def process_voice_intent(
 
             return
 
+        # Read while the session and message are saved below - it is
+        # cached after the first question, so only that one waits.
+        children_task = asyncio.create_task(caller_children(user_id))
+
         # =====================================================
         # 3. DATABASE
         # =====================================================
@@ -1255,7 +1332,31 @@ async def process_voice_intent(
             # writes the answer. The cache key includes user_id, so
             # one parent's answer never reaches another.
 
-            cached_answer = answer_cache.get(user_id, user_query, language)
+            children = await children_task
+
+            last_child = None
+            if children:
+                last_id = await erp_service.last_student_id(str(session_id))
+                last_child = next(
+                    (c["name"] for c in children if c["id"] == last_id), None
+                )
+
+            previous_words = take_previous_words(session_id, user_query)
+
+            print(
+                f"[Context] children={[c['name'] for c in children]} "
+                f"last_child={last_child!r} previous={previous_words!r}"
+            )
+
+            # "And her result?" means a different child at different
+            # points in a call - an answer that leaned on what came
+            # before is never reused, nor stored to be.
+            use_cache = not (last_child or previous_words)
+
+            cached_answer = (
+                answer_cache.get(user_id, user_query, language)
+                if use_cache else None
+            )
 
             if cached_answer:
 
@@ -1292,6 +1393,17 @@ async def process_voice_intent(
 
                 route = intent_prompt.quick_route(user_query)
 
+                # With more than one child and a conversation under
+                # way, "the result" may mean the child just discussed -
+                # only the LLM sees that.
+                if (
+                    route
+                    and route.get("intent") == "ERP"
+                    and len(children) > 1
+                    and (last_child or previous_words)
+                ):
+                    route = None
+
             if route is not None and route.get("intent") != "CACHED":
 
                 print(
@@ -1301,8 +1413,11 @@ async def process_voice_intent(
             elif route is None:
 
                 router_result = await dataConverter(
-                    intent_prompt.ROUTER_PROMPT.format(
-                        user_query=user_query
+                    intent_prompt.build_router_prompt(
+                        user_query=user_query,
+                        children=[c["name"] for c in children],
+                        last_child=last_child,
+                        previous=previous_words,
                     ),
                     model=GROQ_FAST_MODEL,
                     max_tokens=intent_prompt.ROUTER_MAX_TOKENS,
@@ -1371,6 +1486,11 @@ async def process_voice_intent(
             print(
                 f"[Route]: intent={intent} items={erp_items}"
             )
+
+            if intent == "ERP" and erp_items and not any(
+                item["student"] for item in erp_items
+            ):
+                await erp_service.forget_student(str(session_id))
 
             # =================================================
             # ADMIN HANDOFF
@@ -1935,6 +2055,19 @@ async def process_voice_intent(
                                             .strip()
                                         )
 
+                                        # Loops cut, Urdu numbers
+                                        # spelled from a table, and an
+                                        # answer the token limit cut off
+                                        # ends at its last full sentence.
+                                        ai_response_text = spoken_text.finish_answer(
+                                            ai_response_text,
+                                            language,
+                                            cut_off=(
+                                                converter_response.choices[0].finish_reason
+                                                == "length"
+                                            ),
+                                        )
+
                                         print(
                                             "[ERP AI RESPONSE]"
                                         )
@@ -2052,7 +2185,7 @@ async def process_voice_intent(
 
             # So the same question costs nothing next time.
             # put() rejects error answers on its own.
-            if not cached_answer:
+            if not cached_answer and use_cache:
                 answer_cache.put(
                     user_id=user_id,
                     question=user_query,

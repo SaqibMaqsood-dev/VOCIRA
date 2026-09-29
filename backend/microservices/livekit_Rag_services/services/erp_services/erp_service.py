@@ -809,6 +809,26 @@ class ERPService:
 
         return []
 
+    async def last_student_id(self, session_id: str | None) -> str | None:
+        """The child this call last got an answer about, for the router."""
+        if not session_id:
+            return None
+        try:
+            return await self._redis.get_str_data(_last_student_key(session_id))
+        except Exception as error:
+            print(f"[ERP] could not read the last child: {error}")
+            return None
+
+    async def forget_student(self, session_id: str | None) -> None:
+        """The caller moved on to all their children - "her" no longer
+        points at the child asked about before."""
+        if not session_id:
+            return
+        try:
+            await self._redis.redis_client.delete(_last_student_key(session_id))
+        except Exception as error:
+            print(f"[ERP] could not clear the last child: {error}")
+
     async def _remember_student(
         self,
         session_id: str | None,
