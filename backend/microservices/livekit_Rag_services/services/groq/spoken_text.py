@@ -31,8 +31,9 @@ _UR_MONTHS = (
     "جنوری فروری مارچ اپریل مئی جون جولائی اگست ستمبر اکتوبر نومبر دسمبر"
 ).split()
 
-# The model sometimes writes Urdu digits (۷۶) instead of 76.
-_URDU_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+# The model sometimes writes Urdu digits (۷۶) instead of 76, and the
+# Arabic percent sign (81.8٪) - left as it was, "فیصد" was never said.
+_URDU_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٪", "01234567890123456789%")
 
 _ISO_DATE = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
 _CLOCK = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")

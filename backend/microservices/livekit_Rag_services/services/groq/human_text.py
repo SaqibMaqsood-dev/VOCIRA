@@ -41,6 +41,8 @@ _NUMBER_RULES = {
    counts, day numbers and years: 76, 64.8%, 7000 روپے, 7 اگست 2026.
    Never spell a number out in words - the app turns the digits into
    correctly spoken Urdu. Write month names in Urdu (اگست, not August).
+   Marks out of a total: the TOTAL first - "400 میں سے 259 نمبر"
+   (259 out of 400), never "259 میں سے 400".
 """,
 }
 

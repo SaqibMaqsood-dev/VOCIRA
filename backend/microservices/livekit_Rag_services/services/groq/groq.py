@@ -27,6 +27,7 @@ handful of calls.
 """
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -96,6 +97,22 @@ LLM_FALLBACK_MODELS = [
 ]
 
 
+_OUTPUT_LIMIT = re.compile(r"output tokens per minute \(OTPM\): Limit (\d+)")
+
+
+def _output_limit(error: Exception) -> int | None:
+    """
+    A request asking for more output than the model allows in a minute
+    is refused outright ("Request too large ... OTPM: Limit 1000,
+    Requested 1119"). The limit, when that is what happened.
+    """
+    text = str(error)
+    if "Request too large" not in text:
+        return None
+    match = _OUTPUT_LIMIT.search(text)
+    return int(match.group(1)) if match else None
+
+
 def _is_rate_limited(error: Exception) -> bool:
     """429 / quota khatam - doosre model par jane ke qabil ghalti."""
 
@@ -160,6 +177,25 @@ async def dataConverter(
             response = client.chat.completions.create(**kwargs)
 
         except Exception as exc:
+
+            # qwen takes at most 1000 output tokens a minute, and an
+            # answer about two topics asks for 1280 - so once the
+            # models before it ran out, it refused that answer outright
+            # and nothing was left to try. Asked for what it allows, it
+            # answers.
+            limit = _output_limit(exc)
+            if limit and kwargs["max_tokens"] > limit * 0.9:
+                kwargs["max_tokens"] = max(64, int(limit * 0.9))
+                print(
+                    f"[LLM] {selected_model} allows {limit} output "
+                    f"tokens - asking again for {kwargs['max_tokens']}"
+                )
+                try:
+                    response = client.chat.completions.create(**kwargs)
+                except Exception as retry_exc:
+                    exc = retry_exc
+                else:
+                    return _log_and_return(response, selected_model)
 
             last_error = exc
 

@@ -29,7 +29,7 @@ import {
   HANDOFF_ATTRIBUTE,
   isAdminParticipant,
 } from "@/lib/handoff";
-import { getAccessToken } from "@/lib/session";
+import { authFetch, getAccessToken } from "@/lib/session";
 
 // ============================================================
 // HUMAN HANDOFF
@@ -85,6 +85,45 @@ function removeAudioElements() {
     }
   });
 }
+
+/**
+ * Tell the backend a call is over, so "My Calls" stops showing it as
+ * active straight away instead of after the worker's grace period.
+ *
+ * Best-effort - the worker closes it a few seconds later anyway.
+ * `keepalive` lets the request finish while the page is closing.
+ *
+ * authFetch, not a bare fetch: a login that expired during the call
+ * got 401 here and the session stayed "active". A guest has no login
+ * to close with at all - the worker closes a guest's call itself.
+ */
+async function closeSessionOnServer(sessionId, { keepalive = false } = {}) {
+  if (!sessionId || !getAccessToken()) return;
+
+  try {
+    const response = await authFetch(
+      `/livekit/sessions/${sessionId}/close`,
+      { method: "PATCH", keepalive }
+    );
+
+    if (!response.ok) {
+      console.warn(
+        "The server did not close the session - the worker will close it shortly:",
+        response.status
+      );
+    }
+  } catch (closeError) {
+    console.warn(
+      "Could not close the session on the server - the worker will close it shortly:",
+      closeError
+    );
+  }
+}
+
+// Leaving the page ends the call - the caller is asked first.
+const LEAVE_CALL_MESSAGE =
+  "A call is in progress. Leaving this page will end the call.\n\n" +
+  "کال جاری ہے۔ یہ صفحہ چھوڑنے سے کال ختم ہو جائے گی۔";
 
 const AGENT_STUCK_MESSAGE =
   "The voice assistant did not join the call. Please tap " +
@@ -473,6 +512,95 @@ export default function AssistantPage() {
       );
     };
   }, []);
+
+  /*
+   * Leaving the page ends the call.
+   *
+   * The room lived only in this page's state, and nothing hung up
+   * when the page went away - so after a trip to "My Calls" the call
+   * was still running with no screen to show it (mic open, the agent
+   * still answering, a worker slot held), and coming back offered a
+   * fresh "start" button on top of it.
+   *
+   * Refs, because the cleanup runs after the state is gone.
+   * leftPageRef also stops a call that was still connecting.
+   */
+  const roomRef = useRef(null);
+  const sessionIdRef = useRef(null);
+  const leftPageRef = useRef(false);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    // Development mounts twice - the first cleanup must not count.
+    leftPageRef.current = false;
+
+    const hangUp = () => {
+      const activeRoom = roomRef.current;
+      if (!activeRoom) return;
+      roomRef.current = null;
+
+      activeRoom.localParticipant
+        ?.setMicrophoneEnabled(false)
+        .catch(() => {});
+      activeRoom.disconnect();
+      closeSessionOnServer(sessionIdRef.current, { keepalive: true });
+      removeAudioElements();
+    };
+
+    // Closing the tab or reloading, too.
+    window.addEventListener("pagehide", hangUp);
+
+    return () => {
+      window.removeEventListener("pagehide", hangUp);
+      leftPageRef.current = true;
+      hangUp();
+    };
+  }, []);
+
+  // A link to another page would end the call - ask first, rather
+  // than cutting the caller off by surprise.
+  useEffect(() => {
+    if (!callActive) return;
+
+    const confirmLeave = (event) => {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const link = event.target.closest?.("a[href]");
+      if (!link || link.target === "_blank") return;
+
+      const url = new URL(link.href, window.location.href);
+      if (
+        url.origin !== window.location.origin ||
+        url.pathname === window.location.pathname
+      ) {
+        return;
+      }
+
+      if (window.confirm(LEAVE_CALL_MESSAGE)) return;
+
+      // Capture phase on window: stopped here, the link's own click
+      // handler never runs, so there is no navigation.
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    window.addEventListener("click", confirmLeave, true);
+
+    return () => {
+      window.removeEventListener("click", confirmLeave, true);
+    };
+  }, [callActive]);
 
   /*
    * Never move backwards.
@@ -928,6 +1056,17 @@ ${JSON.stringify(
           },
         });
 
+      roomRef.current = livekitRoom;
+
+      // The caller left while the call was still being set up -
+      // nothing is left behind to run on its own.
+      const abandonIfLeft = () => {
+        if (!leftPageRef.current) return false;
+        livekitRoom.disconnect();
+        closeSessionOnServer(backendSessionId, { keepalive: true });
+        return true;
+      };
+
       // ========================================================
       // 17. PARTICIPANT CONNECTED
       // ========================================================
@@ -1300,6 +1439,10 @@ ${JSON.stringify(
           reconnectingRef.current = false;
           setIsReconnecting(false);
 
+          if (roomRef.current === livekitRoom) {
+            roomRef.current = null;
+          }
+
           stopAgentAudioMeter();
           agentLinesRef.current.clear();
 
@@ -1344,10 +1487,14 @@ ${JSON.stringify(
         livekitToken.length
       );
 
+      if (abandonIfLeft()) return;
+
       await livekitRoom.connect(
         livekitUrl,
         livekitToken
       );
+
+      if (abandonIfLeft()) return;
 
       console.log(
         "Connected to LiveKit room:",
@@ -1599,34 +1746,7 @@ ${JSON.stringify(
         // the worker's own teardown still closes the session a few
         // seconds later, so the call does not hang open forever
         // either way.
-        if (sessionId) {
-          try {
-            const API_BASE_URL =
-              process.env.NEXT_PUBLIC_API_URL ||
-              "http://localhost:9000";
-
-            const accessToken = getAccessToken();
-
-            await fetch(
-              `${API_BASE_URL}/livekit/sessions/${sessionId}/close`,
-              {
-                method: "PATCH",
-                headers: accessToken
-                  ? { Authorization: `Bearer ${accessToken}` }
-                  : {},
-              }
-            );
-
-            console.log(
-              "Session closed on the server."
-            );
-          } catch (closeError) {
-            console.warn(
-              "Could not close the session on the server - the worker will close it shortly:",
-              closeError
-            );
-          }
-        }
+        await closeSessionOnServer(sessionId);
 
         // ------------------------------------------------------
         // Remove audio elements
