@@ -26,8 +26,13 @@ No markdown, no code fences, no explanation.
 
 Shape:
 {{"intent":"ERP","items":[{{"resource":"<name>","student":"<name or empty>"}}]}}
-{{"intent":"RAG"}}
+{{"intent":"RAG","search":"<the question restated in plain English>"}}
 {{"intent":"ADMIN_HANDOFF"}}
+
+Callers rarely use the words the records use. Decide by what the
+question MEANS, never by which words appear in it. The question may
+be English, Urdu, Roman Urdu, casual, or slightly misheard by speech
+recognition.
 
 "items" is a LIST because a question can ask about more than one
 thing at once ("how is Zoya's attendance AND has the fee been
@@ -67,6 +72,17 @@ Pick exactly one "resource":
   leave        leave / absence applications the child has taken, and why
   remarks      teacher or staff comments/notes written about the child
 
+Other words for the same thing:
+  assessment   performance, progress, how the child is doing in studies,
+               scores, report card, academic record, "padhai kaisi hai"
+  attendance   goes to school regularly, missed school, came to school
+  fee          dues, challan, voucher, how much is owed or left to pay
+  exam         next test, date sheet, paper schedule
+  schedule     periods, routine, what the child has tomorrow
+  remarks      teacher's feedback, complaints, behaviour
+"my child", "my son", "my daughter", "my kids", "their", "his", "her"
+when speaking of their own children all mean the caller's children.
+
 "student": if the user names a specific child, put that name.
 Otherwise use an empty string — the app then covers all their children.
 NEVER invent a name.
@@ -82,7 +98,16 @@ as-is, otherwise the record can never be found.
 === RAG ===
 General school information that is not about a specific child:
 admission policy, school timings, fee structure in general, campuses,
-contact details, rules, facilities, or any general knowledge question.
+contact details, rules, facilities, holidays, or any general knowledge
+question - and questions about VOCIRA itself (what it is, what it can
+do, what this system is for).
+
+"search": the same question restated as a short, plain English
+question in the school's own words, so the right document is found:
+"what can this system do" -> "What is the Vocira voice assistant and
+what can it help with?"; "chuttiyan kab hain" -> "When are the school
+holidays?". Keep its meaning exactly - add nothing the caller did not
+ask. For an ERP or ADMIN_HANDOFF answer, leave "search" out.
 
 === Examples ===
 "Have the school fees been paid?"        -> {{"intent":"ERP","items":[{{"resource":"fee","student":""}}]}}
@@ -107,11 +132,17 @@ Compound questions - one entry per topic asked:
  class is he in?"                           {{"resource":"assessment","student":"Ahmed"}},
                                              {{"resource":"class","student":"Ahmed"}}]}}
 
-"What is the admission policy?"          -> {{"intent":"RAG"}}
-"What time does the school open?"        -> {{"intent":"RAG"}}
-"Wow."                                   -> {{"intent":"RAG"}}
-"Okay, all right."                       -> {{"intent":"RAG"}}
-"I'm going to go."                       -> {{"intent":"RAG"}}
+"How is my children's academic performance?" -> {{"intent":"ERP","items":[{{"resource":"assessment","student":""}}]}}
+"Is any challan pending for my kids?"    -> {{"intent":"ERP","items":[{{"resource":"fee","student":""}}]}}
+
+"What is the admission policy?"          -> {{"intent":"RAG","search":"What is the admission policy?"}}
+"What time does the school open?"        -> {{"intent":"RAG","search":"What are the school timings?"}}
+"What does your system exactly do?"      -> {{"intent":"RAG","search":"What is the Vocira voice assistant and what can it help with?"}}
+"گرمیوں کی چھٹیاں کب ہوں گی؟" (Urdu: when
+ are the summer holidays?)               -> {{"intent":"RAG","search":"When are the summer holidays?"}}
+"Wow."                                   -> {{"intent":"RAG","search":"Wow."}}
+"Okay, all right."                       -> {{"intent":"RAG","search":"Okay, all right."}}
+"I'm going to go."                       -> {{"intent":"RAG","search":"I'm going to go."}}
 "I want to talk to an admin"             -> {{"intent":"ADMIN_HANDOFF"}}
 "Please connect me to a real person"     -> {{"intent":"ADMIN_HANDOFF"}}
 
@@ -123,6 +154,10 @@ JSON:"""
 
 # The old name is kept as well so no existing import breaks.
 INTENT_ROUTER_PROMPT = ROUTER_PROMPT
+
+# Room for the "search" restatement - at 80 a long one was cut off,
+# and JSON cut off mid-way does not parse.
+ROUTER_MAX_TOKENS = 160
 
 
 # =========================================================
@@ -172,8 +207,10 @@ _ERP_IF_MINE = {
     "exam": "exam",
     "subjects": "course",
     "courses": "course",
-    "children": "student",
-    "kids": "student",
+    # "children" / "kids" were here, mapped to the child's profile. They
+    # say WHOSE record, not WHICH one - "the academic performance of my
+    # children" or "is a challan pending for my kids" went to the
+    # profile, and the caller heard it had nothing on performance.
 }
 
 # These are always general information - never one child's record

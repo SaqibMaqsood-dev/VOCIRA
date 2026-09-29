@@ -1305,7 +1305,7 @@ async def process_voice_intent(
                         user_query=user_query
                     ),
                     model=GROQ_FAST_MODEL,
-                    max_tokens=80,
+                    max_tokens=intent_prompt.ROUTER_MAX_TOKENS,
                 )
 
                 router_raw = (
@@ -2005,6 +2005,9 @@ async def process_voice_intent(
                         retriever=retriever,
                         user_query=user_query,
                         language=language,
+                        # The router's plain restatement - searched
+                        # alongside the caller's own words.
+                        search_query=route.get("search"),
                     )
 
                 if ai_response_text:

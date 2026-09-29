@@ -49,14 +49,109 @@ def clean_for_tts(text: str) -> str:
     return text.strip()
 
 
-async def search_knowledge_base(retriever, query: str):
-    """Fetch relevant chunks from Pinecone asynchronously with namespace isolation."""
+# A phone number as the context writes it: "042-111-777-800",
+# "0423-8050005", "0423 8050005", "04238050005".
+# A full stop or comma after it ends the sentence - only one followed
+# by another digit ("7,000", "3.5") makes it part of a bigger number.
+_PHONE = re.compile(
+    r"(?<!\d)(?<!\d[,.])"
+    r"(?:0\d{2,4}(?:[-\s]\d{3,8})+|0\d{9,11})"
+    r"(?!\d|[,.]\d)"
+)
+
+_DIGIT_WORDS = {
+    "en": ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+    "ur": ["صفر", "ایک", "دو", "تین", "چار", "پانچ", "چھ", "سات", "آٹھ", "نو"],
+}
+
+
+# "[PHONE_1]", or the same without its brackets. Upper-case only, so a
+# sentence that happens to say "phone 2" is left alone.
+_PLACEHOLDER = re.compile(r"\[\s*PHONE[_\s]?(\d+)\s*\]|\bPHONE_(\d+)\b")
+
+
+def mask_phone_numbers(context: str) -> tuple[str, dict[str, str]]:
+    """
+    Swap every phone number in the context for [PHONE_1], [PHONE_2]...
+
+    Told to copy the digits, the backup model still spelled numbers
+    itself and dropped repeats ("one one" for "one one one"). A short
+    tag is copied reliably; unmask_phone_numbers() puts the real number
+    back, spelled by code.
+    """
+    numbers: dict[str, str] = {}
+
+    def tag(match: re.Match) -> str:
+        number = match.group(0)
+        for key, value in numbers.items():
+            if value == number:
+                return f"[{key}]"
+        key = f"PHONE_{len(numbers) + 1}"
+        numbers[key] = number
+        return f"[{key}]"
+
+    return _PHONE.sub(tag, context), numbers
+
+
+def unmask_phone_numbers(text: str, numbers: dict[str, str], language: str) -> str:
+    """Replace the tags with the numbers, read out digit by digit."""
+
+    def restore(match: re.Match) -> str:
+        number = numbers.get(f"PHONE_{match.group(1) or match.group(2)}")
+        return speak_phone_numbers(number, language) if number else ""
+
+    return _PLACEHOLDER.sub(restore, text)
+
+
+def speak_phone_numbers(text: str, language: str) -> str:
+    """
+    Read every phone number out digit by digit.
+
+    The model used to spell numbers itself and dropped digits from the
+    runs of zeros - the service desk's 0423-8050005 came out as
+    "eight zero five, zero zero five". Here each group is spelled
+    exactly, a short pause (comma) between groups.
+    """
+    words = _DIGIT_WORDS.get(language, _DIGIT_WORDS["en"])
+    sep = "، " if language == "ur" else ", "
+
+    def spell(match: re.Match) -> str:
+        groups = re.split(r"[-\s]+", match.group(0))
+        return sep.join(" ".join(words[int(d)] for d in g) for g in groups)
+
+    return _PHONE.sub(spell, text)
+
+
+async def search_knowledge_base(retriever, query: str, also: str | None = None):
+    """
+    Fetch relevant chunks from Pinecone asynchronously with namespace isolation.
+
+    `also` is the router's plain restatement of the question. Callers
+    rarely use the records' own words - "what does your system do"
+    found nothing about Vocira, while "what is the Vocira voice
+    assistant" finds it at once. Both are searched together, and the
+    results are interleaved so the best of each survive the context cap.
+    """
     try:
         if not retriever:
             return "Retriever is not initialized. Please run /sync-database first.", []
 
         loop = asyncio.get_running_loop()
-        docs = await loop.run_in_executor(_retrieval_executor, retriever.invoke, query)
+        queries = [query]
+        if isinstance(also, str) and also.strip() and also.strip().lower() != query.strip().lower():
+            queries.append(also)
+
+        results = await asyncio.gather(*[
+            loop.run_in_executor(_retrieval_executor, retriever.invoke, q)
+            for q in queries
+        ])
+
+        docs, seen = [], set()
+        for rank in range(max(len(r) for r in results)):
+            for found in results:
+                if rank < len(found) and found[rank].page_content not in seen:
+                    seen.add(found[rank].page_content)
+                    docs.append(found[rank])
 
         if not docs:
             return "", []
@@ -81,14 +176,24 @@ _NO_CONTEXT_MESSAGE = {
 }
 
 
-async def ask_vocira(retriever, user_query: str, language: str | None = None):
-    """Core RAG logic — async, non-blocking, returns a single string answer."""
+async def ask_vocira(
+    retriever,
+    user_query: str,
+    language: str | None = None,
+    search_query: str | None = None,
+):
+    """
+    Core RAG logic — async, non-blocking, returns a single string answer.
+
+    `search_query` is the router's plain-English restatement of the
+    question (it costs no extra call - the router writes it anyway).
+    """
     # The caller's own language, not the deployment default - an
     # English guest was getting Urdu answers read out by the English
     # voice.
     language = (language or _RESPONSE_LANGUAGE).strip().lower()
 
-    context, _ = await search_knowledge_base(retriever, user_query)
+    context, _ = await search_knowledge_base(retriever, user_query, also=search_query)
 
     if not context.strip():
         return _NO_CONTEXT_MESSAGE.get(
@@ -97,6 +202,8 @@ async def ask_vocira(retriever, user_query: str, language: str | None = None):
 
     if len(context) > MAX_CONTEXT_CHARS:
         context = context[:MAX_CONTEXT_CHARS] + "\n...[truncated]"
+
+    context, phone_numbers = mask_phone_numbers(context)
 
     language_instruction = _LANGUAGE_INSTRUCTIONS.get(
         language, _LANGUAGE_INSTRUCTIONS["en"]
@@ -123,11 +230,22 @@ RULES:
    that information and suggest the campus office or school website.
    Repeat what the context states and nothing more: never work a date or
    period out from it. Knowing the term months does NOT tell you when a
-   vacation falls - do not say or suggest when it might be.
-2b. If the question is not about the school, or does not make sense (it
-   may be a sentence that was misheard), say briefly that you did not
-   catch that, and ask the caller to repeat their question about the
-   school.
+   vacation falls - do not say or suggest when it might be, in ANY
+   language. If a question asks WHEN something happens and the context
+   gives no date for that exact thing, name no month and no date for it,
+   and do not hint at one either ("holidays would fall between the
+   terms" is a guess - leave it out).
+2a. The caller may use different words from the context: "holidays" or
+   "chuttiyan" for vacations, "joining" for admission, "cost" for fee,
+   "runs" for owns, "your system" or "you" for Vocira. Match by meaning,
+   and answer from the context whenever it covers what they mean.
+   Questions about Vocira itself - what it is, what it can do, what
+   this system is for - ARE about the school's service: answer them
+   from the context.
+2b. If the question is not about the school or Vocira at all, or does
+   not make sense (it may be a sentence that was misheard), say briefly
+   that you did not catch that, and ask the caller to repeat their
+   question about the school.
 3. Never make up facts - no dates, times, numbers or names that are not
    in the context.
 4. For admission-related questions, always provide complete step-by-step details including requirements, process, and any tests or documents needed.
@@ -141,7 +259,12 @@ RULES:
    "PKR 18,500"           -> "eighteen thousand five hundred rupees"
    "7:55 AM"              -> "five minutes before eight in the morning"
    "Grades 1 to 5"        -> "grades one to five"
-   "042-111-777-800"      -> "zero four two, one one one, seven seven seven, eight hundred"
+   EXCEPT phone numbers: in the context they appear as tags like
+   [PHONE_1] and [PHONE_2]. Each tag IS the number - the caller hears the
+   real digits in its place. So whenever a number helps the caller (how
+   to reach or call the school), DO give it, by writing its tag exactly:
+   "call the UAN on [PHONE_1] or the online service desk on [PHONE_2]".
+   Never leave a number out, and never spell one yourself.
 
 8. Never speak a URL, file name or web address such as
    "www.example.com/contact-us.php". Say "on the school website" instead.
@@ -194,7 +317,14 @@ CONTEXT:
                 ),
                 timeout=15.0
             )
-            return clean_for_tts(response.choices[0].message.content)
+            # Tags first: clean_for_tts strips underscores and would
+            # turn [PHONE_1] into something no longer recognised.
+            answer = unmask_phone_numbers(
+                response.choices[0].message.content or "",
+                phone_numbers,
+                language,
+            )
+            return speak_phone_numbers(clean_for_tts(answer), language)
 
         except asyncio.TimeoutError:
             log.warning(f"{model_name} timed out ({attempt + 1}/{len(chain)}).")
