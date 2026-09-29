@@ -81,20 +81,25 @@ _NO_CONTEXT_MESSAGE = {
 }
 
 
-async def ask_vocira(retriever, user_query: str):
+async def ask_vocira(retriever, user_query: str, language: str | None = None):
     """Core RAG logic — async, non-blocking, returns a single string answer."""
+    # The caller's own language, not the deployment default - an
+    # English guest was getting Urdu answers read out by the English
+    # voice.
+    language = (language or _RESPONSE_LANGUAGE).strip().lower()
+
     context, _ = await search_knowledge_base(retriever, user_query)
 
     if not context.strip():
         return _NO_CONTEXT_MESSAGE.get(
-            _RESPONSE_LANGUAGE, _NO_CONTEXT_MESSAGE["en"]
+            language, _NO_CONTEXT_MESSAGE["en"]
         )
 
     if len(context) > MAX_CONTEXT_CHARS:
         context = context[:MAX_CONTEXT_CHARS] + "\n...[truncated]"
 
     language_instruction = _LANGUAGE_INSTRUCTIONS.get(
-        _RESPONSE_LANGUAGE, _LANGUAGE_INSTRUCTIONS["en"]
+        language, _LANGUAGE_INSTRUCTIONS["en"]
     )
 
     system_prompt = f"""You are Vocira, the official AI Assistant for 'The Educators'.
@@ -105,8 +110,26 @@ LANGUAGE:
 
 RULES:
 1. Be concise, helpful, and professional.
-2. If the context does not contain the answer, politely say you don't have that information.
-3. Never make up facts.
+2. If the context does not contain the exact answer, do NOT just say you
+   don't have the information, and do not open with an apology - on a
+   call, a first word of "sorry" sounds like the assistant failed.
+   Instead, in two or three sentences: FIRST give what the context does
+   say that is closest to the question (for example the academic year
+   and term months when asked about vacations), THEN say plainly that the
+   exact detail is not in the school's records, THEN tell the caller
+   where to get it - their campus office, the school website, or the
+   helpline number if it appears in the context.
+   Only if nothing in the context is related at all, say you don't have
+   that information and suggest the campus office or school website.
+   Repeat what the context states and nothing more: never work a date or
+   period out from it. Knowing the term months does NOT tell you when a
+   vacation falls - do not say or suggest when it might be.
+2b. If the question is not about the school, or does not make sense (it
+   may be a sentence that was misheard), say briefly that you did not
+   catch that, and ask the caller to repeat their question about the
+   school.
+3. Never make up facts - no dates, times, numbers or names that are not
+   in the context.
 4. For admission-related questions, always provide complete step-by-step details including requirements, process, and any tests or documents needed.
 5. Never give a partial answer — if information exists in context, give it fully.
 6. THIS ANSWER IS SPOKEN ALOUD. Write exactly how a person would SAY it.

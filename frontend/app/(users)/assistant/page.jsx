@@ -7,10 +7,11 @@ import {
   Play,
   PhoneOff,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readGuestLanguage } from "@/components/LanguageSelect";
 
 import {
+  DisconnectReason,
   Room,
   RoomEvent,
   Track,
@@ -19,6 +20,8 @@ import {
 import { RoomContext } from "@livekit/components-react";
 
 import AgentVisualizer from "@/components/AgentVisualizer";
+import CallTranscript from "@/components/CallTranscript";
+import { useLiveCaptions } from "@/lib/liveCaptions";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
 import {
@@ -86,6 +89,47 @@ const AGENT_STUCK_MESSAGE =
   "The voice assistant did not join the call. Please tap " +
   "\"End Call\" and try again.";
 
+// ~-80 dBFS. A muted mic measured -107 dBFS; a live one in a quiet
+// room sits well above this even with noise suppression on.
+const MIC_SILENCE_PEAK = 0.0001;
+const MIC_SILENT_AFTER_MS = 8000;
+
+// Must match TRANSCRIPT_TOPIC / CALL_LANGUAGE_ATTRIBUTE in voice_pipeline.py.
+const TRANSCRIPT_TOPIC = "vocira.transcript";
+const AGENT_STATE_KEY = "lk.agent.state";
+const CALL_LANGUAGE_KEY = "vocira.language";
+const MAX_TRANSCRIPT_LINES = 50;
+
+// The caller's words while they are still talking, before Whisper's text
+// replaces them. One at a time: the agent never answers mid-sentence.
+const LIVE_LINE_ID = "live";
+
+// A live line Whisper never confirms - the backend's noise gate or
+// hallucination filter dropped it - is taken down after this long.
+const LIVE_LINE_TIMEOUT_MS = 15000;
+
+// The agent's words carry their times from the moment its audio starts;
+// that moment is taken from the audio as it actually plays here, so the
+// network's delay (a second or more on 4G) never puts text ahead of the
+// voice. Loud enough to count as the voice starting:
+const AGENT_VOICE_RMS = 0.01;
+// ...and if that is never heard (audio blocked, say), start this long
+// after the words arrived - late rather than early.
+const AGENT_VOICE_FALLBACK_MS = 3000;
+const CAPTION_TICK_MS = 50;
+
+function upsertLine(lines, id, patch) {
+  const index = lines.findIndex((line) => line.id === id);
+
+  if (index === -1) {
+    return [...lines, { id, ...patch }].slice(-MAX_TRANSCRIPT_LINES);
+  }
+
+  const next = lines.slice();
+  next[index] = { ...next[index], ...patch };
+  return next;
+}
+
 export default function AssistantPage() {
   const [room, setRoom] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -121,6 +165,269 @@ export default function AssistantPage() {
    */
   const [endedNotice, setEndedNotice] =
     useState("");
+
+  /*
+   * The link to LiveKit dropped and the SDK is trying to get it back.
+   * The call still looked live while this happened, so people kept
+   * asking questions into a line that was carrying nothing.
+   * A ref too: the Disconnected handler is a closure from call start
+   * and would only ever see the initial state.
+   */
+  const [isReconnecting, setIsReconnecting] =
+    useState(false);
+
+  const reconnectingRef = useRef(false);
+
+  const [micSilent, setMicSilent] =
+    useState(false);
+
+  // [{ id, role: "user" | "agent", text, live?, final? }]
+  const [transcript, setTranscript] =
+    useState([]);
+
+  // Both come from attributes the agent publishes.
+  const [agentState, setAgentState] =
+    useState(null);
+
+  const [callLanguage, setCallLanguage] =
+    useState(null);
+
+  const liveLineTimer = useRef(null);
+
+  // id -> { words, starts, end, arrivedAt, sawQuiet, anchor, shown }
+  const agentLinesRef = useRef(new Map());
+
+  // { context, analyser, samples } for the agent's incoming audio
+  const agentAudioRef = useRef(null);
+
+  const stopAgentAudioMeter = () => {
+    agentAudioRef.current?.context.close().catch(() => {});
+    agentAudioRef.current = null;
+  };
+
+  const startAgentAudioMeter = (track) => {
+    stopAgentAudioMeter();
+
+    const AudioCtx =
+      window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioCtx || !track?.mediaStreamTrack) return;
+
+    const context = new AudioCtx();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+
+    context
+      .createMediaStreamSource(new MediaStream([track.mediaStreamTrack]))
+      .connect(analyser);
+
+    context.resume().catch(() => {});
+
+    agentAudioRef.current = {
+      context,
+      analyser,
+      samples: new Float32Array(analyser.fftSize),
+    };
+  };
+
+  const agentVoiceLevel = () => {
+    const meter = agentAudioRef.current;
+
+    if (!meter || meter.context.state !== "running") return null;
+
+    meter.analyser.getFloatTimeDomainData(meter.samples);
+
+    let sum = 0;
+    for (let i = 0; i < meter.samples.length; i++) {
+      sum += meter.samples[i] * meter.samples[i];
+    }
+    return Math.sqrt(sum / meter.samples.length);
+  };
+
+  /*
+   * Reveal each agent line's words in step with its voice.
+   *
+   * A line's clock starts when its audio is heard starting here - the
+   * level rising out of a quiet stretch, so the tail of the previous
+   * line cannot start it early - and a word is shown once the clock
+   * passes its start time. Words after a cut-off point never show.
+   */
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const timer = setInterval(() => {
+      const lines = agentLinesRef.current;
+      if (lines.size === 0) return;
+
+      const now = performance.now();
+      const level = agentVoiceLevel();
+      const updates = [];
+
+      lines.forEach((line, id) => {
+        if (line.anchor === null) {
+          if (level !== null && level < AGENT_VOICE_RMS) {
+            line.sawQuiet = true;
+          } else if (level !== null && line.sawQuiet) {
+            line.anchor = now;
+          }
+
+          if (
+            line.anchor === null &&
+            now - line.arrivedAt > AGENT_VOICE_FALLBACK_MS
+          ) {
+            line.anchor = now;
+          }
+
+          if (line.anchor === null) return;
+        }
+
+        const elapsed = (now - line.anchor) / 1000;
+        const limit =
+          line.end === null ? elapsed : Math.min(elapsed, line.end);
+
+        let count = 0;
+        while (
+          count < line.starts.length &&
+          line.starts[count] <= limit
+        ) {
+          count++;
+        }
+
+        const done =
+          line.end !== null &&
+          (elapsed >= line.end || count === line.words.length);
+
+        if (count !== line.shown || done) {
+          line.shown = count;
+          if (count > 0) {
+            updates.push({
+              id,
+              text: line.words.slice(0, count).join(" "),
+              final: done,
+            });
+          }
+        }
+
+        if (done) lines.delete(id);
+      });
+
+      if (updates.length) {
+        setTranscript((current) =>
+          updates.reduce(
+            (acc, u) =>
+              upsertLine(acc, u.id, {
+                role: "agent",
+                text: u.text,
+                final: u.final,
+              }),
+            current
+          )
+        );
+      }
+    }, CAPTION_TICK_MS);
+
+    return () => clearInterval(timer);
+  }, [isConnected]);
+
+  const showLiveText = useCallback((text) => {
+    setTranscript((current) =>
+      upsertLine(current, LIVE_LINE_ID, {
+        role: "user",
+        text,
+        live: true,
+      })
+    );
+
+    clearTimeout(liveLineTimer.current);
+    liveLineTimer.current = setTimeout(() => {
+      setTranscript((current) =>
+        current.filter((line) => line.id !== LIVE_LINE_ID)
+      );
+    }, LIVE_LINE_TIMEOUT_MS);
+  }, []);
+
+  const liveCaptions = useLiveCaptions({
+    enabled:
+      isConnected && !isPaused && !isReconnecting && !handoff,
+    language: callLanguage,
+    // Before the greeting there is no state yet - nothing to caption.
+    agentSpeaking: agentState !== "listening" && agentState !== "thinking",
+    onText: showLiveText,
+  });
+
+  // The room's handlers are set up once per call, so they reach the
+  // current hook through this.
+  const liveCaptionsRef = useRef(liveCaptions);
+  liveCaptionsRef.current = liveCaptions;
+
+  const readAgentAttributes = (attributes) => {
+    if (!attributes) return;
+    if (attributes[AGENT_STATE_KEY]) setAgentState(attributes[AGENT_STATE_KEY]);
+    if (attributes[CALL_LANGUAGE_KEY]) setCallLanguage(attributes[CALL_LANGUAGE_KEY]);
+  };
+
+  /*
+   * A mic muted in Windows (or by a laptop's mic-mute key) still gives
+   * the browser a working track - it just carries zeros. LiveKit sends
+   * that silence along, the call looks live, and the assistant never
+   * hears a word. Nothing else on screen can tell the difference.
+   */
+  useEffect(() => {
+    setMicSilent(false);
+
+    if (!room || !isConnected || isPaused) return;
+
+    const mediaTrack =
+      room.localParticipant.getTrackPublication(
+        Track.Source.Microphone
+      )?.track?.mediaStreamTrack;
+
+    const AudioCtx =
+      window.AudioContext || window.webkitAudioContext;
+
+    if (!mediaTrack || !AudioCtx) return;
+
+    const context = new AudioCtx();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 2048;
+
+    context
+      .createMediaStreamSource(new MediaStream([mediaTrack]))
+      .connect(analyser);
+
+    context.resume().catch(() => {});
+
+    const samples = new Float32Array(analyser.fftSize);
+    let lastSoundAt = Date.now();
+
+    const timer = setInterval(() => {
+      // A suspended context reads as zeros too - not the mic's fault.
+      if (context.state !== "running") {
+        lastSoundAt = Date.now();
+        return;
+      }
+
+      analyser.getFloatTimeDomainData(samples);
+
+      let peak = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const value = Math.abs(samples[i]);
+        if (value > peak) peak = value;
+      }
+
+      if (peak > MIC_SILENCE_PEAK) {
+        lastSoundAt = Date.now();
+        setMicSilent(false);
+      } else if (Date.now() - lastSoundAt > MIC_SILENT_AFTER_MS) {
+        setMicSilent(true);
+      }
+    }, 500);
+
+    return () => {
+      clearInterval(timer);
+      context.close().catch(() => {});
+    };
+  }, [room, isConnected, isPaused]);
 
   /*
    * Tell the rest of the app a call is up.
@@ -190,6 +497,13 @@ export default function AssistantPage() {
 
     // Nayi call - pichhli call ka natija ab bemani hai
     setEndedNotice("");
+    reconnectingRef.current = false;
+    setIsReconnecting(false);
+    setTranscript([]);
+    setAgentState(null);
+    setCallLanguage(null);
+    clearTimeout(liveLineTimer.current);
+    agentLinesRef.current.clear();
 
     try {
       // ========================================================
@@ -613,6 +927,10 @@ ${JSON.stringify(
             participant.identity
           );
 
+          if (participant.identity === "agent") {
+            readAgentAttributes(participant.attributes);
+          }
+
           // The admin joining the room is the strongest signal
           // that a person is now on the line.
           if (isAdminParticipant(participant)) {
@@ -644,6 +962,10 @@ ${JSON.stringify(
           changed,
           participant
         ) => {
+          if (participant.identity === "agent") {
+            readAgentAttributes(changed);
+          }
+
           const state =
             changed?.[HANDOFF_ATTRIBUTE];
 
@@ -744,6 +1066,10 @@ ${JSON.stringify(
             participant.identity
           );
 
+          if (participant.identity === "agent") {
+            startAgentAudioMeter(track);
+          }
+
           const audioElement =
             track.attach();
 
@@ -815,6 +1141,130 @@ ${JSON.stringify(
       // 22. ROOM DISCONNECTED
       // ========================================================
 
+      // ========================================================
+      // 21a. TRANSCRIPT
+      // ========================================================
+
+      const textDecoder = new TextDecoder();
+
+      livekitRoom.on(
+        RoomEvent.DataReceived,
+        (payload, participant, kind, topic) => {
+          if (topic !== TRANSCRIPT_TOPIC) return;
+
+          let line;
+          try {
+            line = JSON.parse(textDecoder.decode(payload));
+          } catch {
+            return;
+          }
+
+          if (line?.role === "user") {
+            if (!line.text) return;
+
+            // Whisper's text - what the assistant will act on - takes
+            // the place of the live words it was heard as.
+            clearTimeout(liveLineTimer.current);
+
+            setTranscript((current) => {
+              const confirmed = {
+                id: `user-${Date.now()}`,
+                role: "user",
+                text: line.text,
+              };
+              const index = current.findIndex(
+                (l) => l.id === LIVE_LINE_ID
+              );
+
+              if (index === -1) {
+                return [...current, confirmed].slice(
+                  -MAX_TRANSCRIPT_LINES
+                );
+              }
+
+              const next = current.slice();
+              next[index] = confirmed;
+              return next;
+            });
+
+            liveCaptionsRef.current?.reset();
+            return;
+          }
+
+          // The agent's line comes a sentence at a time - its words and
+          // when each is spoken - and then its end; the caption tick
+          // above shows the words as the voice reaches them.
+          if (!line?.id) return;
+
+          const lines = agentLinesRef.current;
+          let entry = lines.get(line.id);
+
+          if (!entry) {
+            entry = {
+              words: [],
+              starts: [],
+              end: null,
+              arrivedAt: performance.now(),
+              sawQuiet: false,
+              anchor: null,
+              shown: 0,
+            };
+            lines.set(line.id, entry);
+
+            // The agent only speaks after Whisper's text for the last
+            // sentence - a live line still unconfirmed now was dropped.
+            clearTimeout(liveLineTimer.current);
+            setTranscript((current) =>
+              current.filter((l) => l.id !== LIVE_LINE_ID)
+            );
+          }
+
+          if (Array.isArray(line.words) && Array.isArray(line.starts)) {
+            entry.words.push(...line.words);
+            entry.starts.push(...line.starts);
+          }
+
+          if (typeof line.end === "number") {
+            entry.end = line.end;
+          }
+        }
+      );
+
+      // ========================================================
+      // 21b. CONNECTION DROPPED / RESTORED
+      // ========================================================
+
+      const startReconnecting = () => {
+        console.warn(
+          "LiveKit connection lost - reconnecting..."
+        );
+
+        reconnectingRef.current = true;
+        setIsReconnecting(true);
+      };
+
+      livekitRoom.on(
+        RoomEvent.Reconnecting,
+        startReconnecting
+      );
+
+      livekitRoom.on(
+        RoomEvent.SignalReconnecting,
+        startReconnecting
+      );
+
+      livekitRoom.on(
+        RoomEvent.Reconnected,
+        () => {
+          console.log(
+            "LiveKit connection restored."
+          );
+
+          reconnectingRef.current = false;
+          setIsReconnecting(false);
+        }
+      );
+
       livekitRoom.on(
         RoomEvent.Disconnected,
         (reason) => {
@@ -822,6 +1272,23 @@ ${JSON.stringify(
             "LiveKit disconnected:",
             reason
           );
+
+          const lostConnection =
+            reconnectingRef.current ||
+            reason ===
+              DisconnectReason.JOIN_FAILURE ||
+            reason ===
+              DisconnectReason.SIGNAL_CLOSE ||
+            reason ===
+              DisconnectReason.CONNECTION_TIMEOUT ||
+            reason ===
+              DisconnectReason.MEDIA_FAILURE;
+
+          reconnectingRef.current = false;
+          setIsReconnecting(false);
+
+          stopAgentAudioMeter();
+          agentLinesRef.current.clear();
 
           // The audio elements go too - otherwise dead <audio> tags
           // pile up on the page.
@@ -834,10 +1301,14 @@ ${JSON.stringify(
           setHandoff(null);
 
           // Whatever ended the call - server, network or admin -
-          // the user must at least know that it is over.
+          // the user must at least know that it is over, and a
+          // dropped connection should not read like a hang-up.
           setEndedNotice(
             (current) =>
-              current || "The call has ended."
+              current ||
+              (lostConnection
+                ? "The call dropped because your internet connection was lost."
+                : "The call has ended.")
           );
         }
       );
@@ -874,6 +1345,10 @@ ${JSON.stringify(
       // for what happens after we join.
       livekitRoom.remoteParticipants.forEach(
         (participant) => {
+          if (participant.identity === "agent") {
+            readAgentAttributes(participant.attributes);
+          }
+
           if (isAdminParticipant(participant)) {
             markHandoff("connected");
           }
@@ -1213,16 +1688,23 @@ ${JSON.stringify(
           className="relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center justify-center px-4 py-0 text-center sm:px-6"
         >
 
-          <h1 className="max-w-5xl text-3xl font-semibold sm:text-5xl">
-            Create the most realistic speech
-            <br />
-            with our AI audio platform
-          </h1>
+          {/* Hidden during a call: the transcript needs the room, and
+              with the heading still up it pushed Pause / End Call off
+              the bottom of the screen. */}
+          {!isConnected && (
+            <>
+              <h1 className="max-w-5xl text-3xl font-semibold sm:text-5xl">
+                Create the most realistic speech
+                <br />
+                with our AI audio platform
+              </h1>
 
-          <p className="mt-4 max-w-3xl text-sm text-text-secondary sm:text-base">
-            Pioneering research in Text to Speech,
-            AI Voice Generator, and more
-          </p>
+              <p className="mt-4 max-w-3xl text-sm text-text-secondary sm:text-base">
+                Pioneering research in Text to Speech,
+                AI Voice Generator, and more
+              </p>
+            </>
+          )}
 
           {/* ================================================== */}
           {/* MICROPHONE */}
@@ -1244,11 +1726,12 @@ ${JSON.stringify(
 
             <div
               id="voice-assistant-demo"
-              className="assistant-speaker-float relative mt-10"
+              className="assistant-speaker-float relative mt-4 sm:mt-10"
             >
               <RoomContext.Provider value={room}>
                 <AgentVisualizer
                   handoff={handoff}
+                  reconnecting={isReconnecting}
                   onStuck={handleAgentStuck}
                   onRecovered={handleAgentRecovered}
                 />
@@ -1332,7 +1815,17 @@ ${JSON.stringify(
                   yet - with nothing on screen the user assumes the
                   call has dropped and hangs up.
                 */}
-                {HANDOFF_TEXT[handoff] ? (
+                {isReconnecting ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-amber-300">
+                      Connection lost - reconnecting…
+                    </p>
+                    <p className="max-w-xs text-xs text-text-secondary">
+                      The assistant can&apos;t hear you right now. Wait
+                      a moment, then ask again.
+                    </p>
+                  </div>
+                ) : HANDOFF_TEXT[handoff] ? (
                   <p
                     className={
                       HANDOFF_TEXT[handoff]
@@ -1357,6 +1850,16 @@ ${JSON.stringify(
                       : "Connected to voice assistant"}
                   </p>
                 )}
+
+                {micSilent && !isReconnecting && (
+                  <p className="mx-auto mt-3 max-w-sm rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                    Your microphone isn&apos;t sending any sound. It may
+                    be muted in Windows or by your laptop&apos;s mic key,
+                    or a different microphone is selected in the browser.
+                  </p>
+                )}
+
+                <CallTranscript lines={transcript} />
 
                 {/* The room and session ids used to be printed here.
                     They are internal plumbing - a caller has no use

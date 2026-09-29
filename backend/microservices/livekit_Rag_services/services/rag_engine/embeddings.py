@@ -32,12 +32,20 @@ _BATCH = 100
 class GeminiEmbeddings(Embeddings):
     """Google Gemini embeddings, REST API ke zariye."""
 
+    # A question and the passage that answers it are worded differently;
+    # Gemini embeds each side for its role when told which one it is.
+    # Both sides must use these together - an index built without them
+    # has to be rebuilt (POST /sync-database) when they change.
+    DOCUMENT_TASK = "RETRIEVAL_DOCUMENT"
+    QUERY_TASK = "RETRIEVAL_QUERY"
+
     def __init__(
         self,
         api_key: str,
         model: str = "gemini-embedding-001",
         dimensions: int = 768,
         timeout: float = 60.0,
+        use_task_types: bool = True,
     ):
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not set")
@@ -46,15 +54,19 @@ class GeminiEmbeddings(Embeddings):
         self.model = model
         self.dimensions = dimensions
         self.timeout = timeout
+        self.use_task_types = use_task_types
 
     # ------------------------------------------------------------------
 
-    def _payload(self, text: str) -> dict:
-        return {
+    def _payload(self, text: str, task: str) -> dict:
+        payload = {
             "model": f"models/{self.model}",
             "content": {"parts": [{"text": text}]},
             "outputDimensionality": self.dimensions,
         }
+        if self.use_task_types:
+            payload["taskType"] = task
+        return payload
 
     def _post(self, path: str, body: dict) -> dict:
         url = f"{GEMINI_BASE}/models/{self.model}:{path}?key={self.api_key}"
@@ -79,7 +91,7 @@ class GeminiEmbeddings(Embeddings):
 
             data = self._post(
                 "batchEmbedContents",
-                {"requests": [self._payload(t) for t in batch]},
+                {"requests": [self._payload(t, self.DOCUMENT_TASK) for t in batch]},
             )
 
             got = [e.get("values", []) for e in data.get("embeddings", [])]
@@ -95,7 +107,7 @@ class GeminiEmbeddings(Embeddings):
         return vectors
 
     def embed_query(self, text: str) -> list[float]:
-        data = self._post("embedContent", self._payload(text))
+        data = self._post("embedContent", self._payload(text, self.QUERY_TASK))
         values = data.get("embedding", {}).get("values", [])
 
         if not values:

@@ -14,6 +14,27 @@ from backend.microservices.livekit_Rag_services.services.rag_engine.fetcher impo
 
 log = logging.getLogger(__name__)
 
+_ERROR_MARKERS = (
+    "404 not found",
+    "403 forbidden",
+    "page not found",
+    "the requested url",
+    "500 internal server error",
+    "502 bad gateway",
+    "503 service unavailable",
+)
+
+# Anything shorter carries no real information.
+_MIN_PAGE_CHARS = 200
+
+
+def _is_error_page(soup: BeautifulSoup, text: str) -> bool:
+    title = (soup.title.get_text(strip=True) if soup.title else "").lower()
+    head = text[:300].lower()
+    if any(marker in title or marker in head for marker in _ERROR_MARKERS):
+        return True
+    return len(text) < _MIN_PAGE_CHARS
+
 
 async def assemble_knowledge_base():
     """Load PDFs, text files, and live web data into chunks."""
@@ -54,6 +75,16 @@ async def assemble_knowledge_base():
                     for tag in soup(["script", "style", "nav", "footer", "header"]):
                         tag.extract()
                     clean_text = soup.get_text(separator="\n", strip=True)
+
+                    # A dead link still returns a page. The scraper cannot
+                    # see the status code, so a "404 Not Found" page went
+                    # into the index - and, being short and generic, it
+                    # came out on top for questions like "where is the
+                    # school?", pushing the real answer down.
+                    if _is_error_page(soup, clean_text):
+                        log.warning("Skipping %s - it is an error page", url)
+                        continue
+
                     all_docs.append(Document(
                         page_content=clean_text,
                         metadata={"source": url, "type": "web_live"}

@@ -335,12 +335,37 @@ if (-not (Test-Path $LOG_DIR)) {
 # with the same noise. Letting cmd.exe do the merge means PowerShell
 # only ever sees plain stdout, and the window shows what the service
 # actually said.
+# A single click inside a service window used to freeze that service.
+# QuickEdit turns the click into a text selection ("Select" in the
+# title), and while it lasts the console stops taking output - the
+# service blocks on its very next log line and answers nothing. It
+# froze the gateway once, so every token request hung. Each window
+# switches QuickEdit off for itself before starting its service.
+$NO_QUICKEDIT = @'
+Add-Type -Name ConsoleMode -Namespace Vocira -MemberDefinition @"
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int handle);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+"@
+$stdin = [Vocira.ConsoleMode]::GetStdHandle(-10)
+$mode = [uint32]0
+if ([Vocira.ConsoleMode]::GetConsoleMode($stdin, [ref]$mode)) {
+    [void][Vocira.ConsoleMode]::SetConsoleMode($stdin, ($mode -band (-bnot [uint32]0x40)) -bor [uint32]0x80)
+}
+'@
+
+# -EncodedCommand, because the QuickEdit snippet needs double quotes
+# that would not survive being passed on a command line.
+function Start-Window($command) {
+    $encoded = [Convert]::ToBase64String(
+        [Text.Encoding]::Unicode.GetBytes("$NO_QUICKEDIT`n$command")
+    )
+    Start-Process powershell -ArgumentList "-NoExit", "-EncodedCommand", $encoded
+}
+
 function Start-Svc($title, $cmd, $logName) {
     $logPath = Join-Path $LOG_DIR "$logName.log"
-    Start-Process powershell -ArgumentList @(
-        "-NoExit", "-Command",
-        "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; cmd /c '$cmd 2>&1' | Tee-Object -FilePath '$logPath'"
-    )
+    Start-Window "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; cmd /c '$cmd 2>&1' | Tee-Object -FilePath '$logPath'"
     Write-Host "      $title  (log: logs/$logName.log)" -ForegroundColor Green
 }
 
@@ -499,10 +524,7 @@ if ($WithFrontend) {
     if (-not (Test-Path (Join-Path $ROOT "frontend\node_modules"))) {
         Write-Host "      node_modules not found - run 'cd frontend ; npm install' first." -ForegroundColor Red
     } else {
-        Start-Process powershell -ArgumentList @(
-            "-NoExit", "-Command",
-            "`$host.UI.RawUI.WindowTitle='VOCIRA frontend :3000'; Set-Location '$ROOT\frontend'; npm run dev"
-        )
+        Start-Window "`$host.UI.RawUI.WindowTitle='VOCIRA frontend :3000'; Set-Location '$ROOT\frontend'; npm run dev"
         Write-Host "      VOCIRA frontend :3000" -ForegroundColor Green
     }
 } else {

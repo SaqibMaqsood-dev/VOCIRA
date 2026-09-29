@@ -94,6 +94,8 @@ async def get_my_children(
         if not current or e.get("academic_year", "") > current.get("academic_year", ""):
             by_student[sid] = e
 
+    class_by_student = await _classes_of(student_ids)
+
     children = []
     for s in students:
         sid = s.get("name")
@@ -104,7 +106,58 @@ async def get_my_children(
                 "name": s.get("student_name"),
                 "program": enr.get("program"),
                 "academic_year": enr.get("academic_year"),
+                "class_name": class_by_student.get(sid),
             }
         )
 
     return {"children": children}
+
+
+async def _classes_of(student_ids: list[str]) -> dict[str, str]:
+    """
+    Each child's class ("Class 2") - its Student Group.
+
+    Asking for the child-table column returns one row per matching
+    student, so the class can be told apart per child. A student can be
+    in more than one group (a club, last year's class): a "Class ..."
+    group wins, then the latest academic year. Best-effort - without it
+    the card still shows the program.
+    """
+    try:
+        groups = (
+            await erp_client.get(
+                endpoint="/api/resource/Student Group",
+                params={
+                    "filters": json.dumps(
+                        [["Student Group Student", "student", "in", student_ids]]
+                    ),
+                    "fields": json.dumps(
+                        [
+                            "student_group_name",
+                            "academic_year",
+                            "`tabStudent Group Student`.student",
+                        ]
+                    ),
+                    "limit_page_length": 0,
+                },
+            )
+        ).get("data", [])
+    except Exception as error:
+        print(f"[Children] class lookup failed: {error}")
+        return {}
+
+    def rank(group: dict) -> tuple:
+        name = (group.get("student_group_name") or "").strip().lower()
+        return (name.startswith("class"), group.get("academic_year") or "")
+
+    best: dict[str, dict] = {}
+    for group in groups:
+        sid = group.get("student")
+        if sid and (sid not in best or rank(group) > rank(best[sid])):
+            best[sid] = group
+
+    return {
+        sid: group.get("student_group_name")
+        for sid, group in best.items()
+        if group.get("student_group_name")
+    }

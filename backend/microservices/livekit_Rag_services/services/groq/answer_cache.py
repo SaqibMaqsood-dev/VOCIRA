@@ -37,7 +37,7 @@ _DO_NOT_CACHE = (
     "connecting you to",
 )
 
-_store: dict[tuple[str, str], tuple[float, str]] = {}
+_store: dict[tuple[str, str, str], tuple[float, str]] = {}
 
 
 def _normalise(question: str) -> str:
@@ -50,18 +50,20 @@ def _normalise(question: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def _key(user_id, question: str) -> tuple[str, str]:
-    # a user_id of None (guest) gets its own bucket
-    return (str(user_id), _normalise(question))
+def _key(user_id, question: str, language: str | None = None) -> tuple[str, str, str]:
+    # a user_id of None (guest) gets its own bucket - shared by every
+    # guest, so the language has to be in the key too, or an Urdu
+    # answer is handed to the next guest who asked in English.
+    return (str(user_id), (language or "").lower(), _normalise(question))
 
 
-def get(user_id, question: str) -> str | None:
+def get(user_id, question: str, language: str | None = None) -> str | None:
     """Return the remembered answer, or None."""
 
     if not question:
         return None
 
-    key = _key(user_id, question)
+    key = _key(user_id, question, language)
     found = _store.get(key)
 
     if not found:
@@ -76,7 +78,7 @@ def get(user_id, question: str) -> str | None:
     return answer
 
 
-def put(user_id, question: str, answer: str) -> bool:
+def put(user_id, question: str, answer: str, language: str | None = None) -> bool:
     """Remember an answer. Reports whether it was stored."""
 
     if not question or not answer:
@@ -93,7 +95,7 @@ def put(user_id, question: str, answer: str) -> bool:
         oldest = min(_store, key=lambda k: _store[k][0])
         _store.pop(oldest, None)
 
-    _store[_key(user_id, question)] = (time.monotonic(), answer)
+    _store[_key(user_id, question, language)] = (time.monotonic(), answer)
     return True
 
 

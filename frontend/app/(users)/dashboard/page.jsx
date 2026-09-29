@@ -25,9 +25,8 @@ export default function DashboardPage() {
   const [sessions, setSessions] = useState([]);
   const [children, setChildren] = useState([]);
 
-  // Which child's calls the table is showing. null = all of them.
-  // A guardian can have ten children at one school, so one list of
-  // everything mixed together is not readable.
+  // The child picked in the "My Children" list. It only shows that
+  // child's details - the calls and stats always cover every child.
   const [selectedChild, setSelectedChild] = useState(null);
 
   const [stats, setStats] = useState({
@@ -333,31 +332,9 @@ export default function DashboardPage() {
 
       handler: session.handler || "—",
 
-      // Which children this call was about, as the assistant recorded
-      // them ("Zoya"). Used to filter by child.
-      students: Array.isArray(session.students) ? session.students : [],
-
       time,
     };
   });
-
-  // The assistant records whatever name was spoken ("Amna"), while
-  // ERP holds the full one ("Amna Farooq") - so neither side can be
-  // matched whole, and either may contain the other.
-  const isSameChild = (recorded, fullName) => {
-    const a = String(recorded || "").trim().toLowerCase();
-    const b = String(fullName || "").trim().toLowerCase();
-
-    if (!a || !b) return false;
-
-    return a === b || b.includes(a) || a.includes(b);
-  };
-
-  const visibleRows = selectedChild
-    ? callRows.filter((row) =>
-        row.students.some((name) => isSameChild(name, selectedChild.name))
-      )
-    : callRows;
 
   const hasMore = sessions.length < stats.total_calls;
 
@@ -451,7 +428,11 @@ export default function DashboardPage() {
                   style={OPTION_STYLE}
                 >
                   {child.name}
-                  {child.program ? ` — ${child.program}` : ""}
+                  {child.class_name
+                    ? ` — ${child.class_name}`
+                    : child.program
+                      ? ` — ${child.program}`
+                      : ""}
                 </option>
               ))}
             </select>
@@ -515,17 +496,7 @@ export default function DashboardPage() {
         }}
         className="mt-6"
       >
-        {/* An empty CallTable still draws a row of dashes, which
-            reads as "one unknown call" rather than "nothing here". */}
-        {selectedChild && visibleRows.length === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-10 text-center">
-            <p className="text-sm text-text-secondary">
-              No calls about {selectedChild.name} yet.
-            </p>
-          </div>
-        ) : (
-          <CallTable rows={visibleRows} />
-        )}
+        <CallTable rows={callRows} />
 
         {hasMore && (
           <div className="mt-4 flex justify-center">

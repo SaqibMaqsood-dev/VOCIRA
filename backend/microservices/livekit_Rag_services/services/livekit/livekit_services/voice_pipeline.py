@@ -1,8 +1,9 @@
 import asyncio
 import json
+import os
 import time
 import traceback
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import webrtcvad
 from livekit import rtc
@@ -60,7 +61,7 @@ from backend.microservices.livekit_Rag_services.services.router_services.session
 
 from backend.microservices.livekit_Rag_services.services.text_speech.piper_servies import (
     split_sentences,
-    tts_converter,
+    synthesize_with_timing,
 )
 
 
@@ -230,6 +231,163 @@ async def publish_agent_state(service_handle, state: str) -> None:
         print(f"[Agent State] '{state}' could not send: {error}")
 
 
+# The caller's screen shows the conversation as text: what Whisper
+# heard them say, and what the agent says back.
+TRANSCRIPT_TOPIC = "vocira.transcript"
+
+
+async def publish_transcript(service_handle, role: str, text: str) -> None:
+    """Send a finished line (what Whisper heard the caller say) to the room."""
+
+    room = getattr(service_handle, "room", None)
+
+    if not text or not room or not room.isconnected():
+        return
+
+    try:
+        await room.local_participant.publish_data(
+            json.dumps({"role": role, "text": text}, ensure_ascii=False),
+            reliable=True,
+            topic=TRANSCRIPT_TOPIC,
+        )
+
+    except Exception as error:
+        print(f"[Transcript] could not send: {error}")
+
+
+# The network and the browser's jitter buffer add some delay before a
+# frame is heard - small on good wifi, a second or more on a 4G link
+# after a reconnect.
+PLAYOUT_MARGIN_SECONDS = 0.25
+
+
+class AgentCaption:
+    """
+    The words of one agent line, with when each is spoken.
+
+    Each sentence is sent to the page just before its first frame is
+    pushed: its words, and when each one starts, counted from the
+    moment the line's audio begins. The page starts that clock when it
+    actually HEARS the agent's audio begin, and shows every word at its
+    own time - so however slow the network is, the text cannot get
+    ahead of the voice. (Timing it here, on the server, put the text a
+    second early on a 4G link: the server cannot see that delay.)
+
+    The play-out clock is kept here rather than read from the SDK:
+    AudioSource.queued_duration goes negative internally after a quiet
+    spell and then reports an empty queue for the whole next answer.
+    """
+
+    def __init__(self, service_handle, audio_source):
+        self._handle = service_handle
+        self._id = uuid4().hex[:12]
+        self._first_plays_at: float | None = None
+        self._plays_until: float | None = None
+        self._pending: set[asyncio.Task] = set()
+
+        # Only one line is ever spoken at a time (the TTS lock), and the
+        # previous one has been heard to the end - anything left in the
+        # source is silence that would hold this line back.
+        audio_source.clear_queue()
+
+    def _publish(self, payload: dict) -> None:
+        # In order, but without holding up the frames being pushed.
+        task = asyncio.create_task(self._send(payload))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def _send(self, payload: dict) -> None:
+        room = getattr(self._handle, "room", None)
+
+        if not room or not room.isconnected():
+            return
+
+        try:
+            await room.local_participant.publish_data(
+                json.dumps(
+                    {"role": "agent", "id": self._id, **payload},
+                    ensure_ascii=False,
+                ),
+                reliable=True,
+                topic=TRANSCRIPT_TOPIC,
+            )
+        except Exception as error:
+            print(f"[Transcript] could not send: {error}")
+
+    def add_sentence(self, words, starts, duration: float) -> None:
+        now = time.monotonic()
+
+        # Sentences play back to back; one that was not ready in time
+        # starts when it is pushed - and the gap is in the timings too.
+        plays_at = max(self._plays_until or now, now)
+        self._plays_until = plays_at + duration
+
+        if self._first_plays_at is None:
+            self._first_plays_at = plays_at
+
+        offset = plays_at - self._first_plays_at
+
+        self._publish(
+            {
+                "words": list(words),
+                "starts": [round(offset + s, 3) for s in starts],
+            }
+        )
+
+    def _elapsed(self, at: float) -> float:
+        return round(max(0.0, at - (self._first_plays_at or at)), 3)
+
+    def finish(self) -> None:
+        """Every sentence has been sent; the line ends with its audio."""
+        if self._plays_until is not None:
+            self._publish({"end": self._elapsed(self._plays_until)})
+
+    def stop(self) -> None:
+        """
+        Playback was cut off. What was already pushed still plays (up to
+        the source's one-second queue); no word after that is shown.
+        """
+        if self._plays_until is not None:
+            cut = min(self._plays_until, time.monotonic() + 1.0)
+            self._publish({"end": self._elapsed(cut)})
+
+    async def wait_until_heard(self) -> None:
+        """
+        The last frame is pushed about a second before it is heard; the
+        agent used to switch to "listening" right then, so the mic
+        cooldown ran out while its own voice was still playing.
+        """
+        if self._plays_until is None:
+            return
+
+        delay = self._plays_until + PLAYOUT_MARGIN_SECONDS - time.monotonic()
+
+        if delay > 0:
+            await asyncio.sleep(min(delay, 30))
+
+
+# The page's own speech recognition (live captions of the caller) has
+# to listen in the same language Whisper does.
+CALL_LANGUAGE_ATTRIBUTE = "vocira.language"
+
+
+async def publish_call_language(service_handle, language: str | None) -> None:
+    room = getattr(service_handle, "room", None)
+
+    if not room or not room.isconnected():
+        return
+
+    effective = (language or os.getenv("STT_LANGUAGE", "ur")).strip().lower()
+
+    try:
+        await room.local_participant.set_attributes(
+            {CALL_LANGUAGE_ATTRIBUTE: effective}
+        )
+
+    except Exception as error:
+        print(f"[Call Language] could not send: {error}")
+
+
 async def resolve_call_language(user_id) -> str | None:
     """
     The caller's own language choice ("en" / "ur"), or None to use
@@ -311,15 +469,24 @@ async def speak_text(
         service_handle._is_agent_speaking = True
         await publish_agent_state(service_handle, "speaking")
 
+        caption = AgentCaption(service_handle, audio_source)
+        finished = False
+
         try:
             for sentence in sentences:
 
-                audio_bytes = await asyncio.to_thread(
-                    tts_converter, sentence, language
+                audio_bytes, starts = await asyncio.to_thread(
+                    synthesize_with_timing, sentence, language
                 )
 
                 if not audio_bytes:
                     continue
+
+                caption.add_sentence(
+                    sentence.split(),
+                    starts,
+                    len(audio_bytes) / bytes_per_sample / sample_rate,
+                )
 
                 for i in range(0, len(audio_bytes), chunk_size):
 
@@ -349,7 +516,15 @@ async def speak_text(
                         print(f"[Speak] Frame fail: {frame_error}")
                         return False
 
+            finished = True
+
         finally:
+            if finished:
+                caption.finish()
+                await caption.wait_until_heard()
+            else:
+                caption.stop()
+
             service_handle._is_agent_speaking = False
             service_handle._agent_speech_ended_at = time.monotonic()
             await publish_agent_state(service_handle, "listening")
@@ -461,6 +636,8 @@ async def consume_audio(
     )
 
     print(f"Call language        : {call_language or 'default'}")
+
+    await publish_call_language(service_handle, call_language)
 
     # =====================================================
     # 3. VALIDATE AUDIO TRACK
@@ -970,6 +1147,8 @@ async def process_voice_intent(
             f"[User]: {user_query}"
         )
 
+        await publish_transcript(service_handle, "user", user_query)
+
         # A question arrived - "thinking" until the answer is ready.
         await publish_agent_state(service_handle, "thinking")
 
@@ -1076,7 +1255,7 @@ async def process_voice_intent(
             # writes the answer. The cache key includes user_id, so
             # one parent's answer never reaches another.
 
-            cached_answer = answer_cache.get(user_id, user_query)
+            cached_answer = answer_cache.get(user_id, user_query, language)
 
             if cached_answer:
 
@@ -1854,6 +2033,7 @@ async def process_voice_intent(
                     ai_response_text = await ask_vocira(
                         retriever=retriever,
                         user_query=user_query,
+                        language=language,
                     )
 
                 if ai_response_text:
@@ -1903,6 +2083,7 @@ async def process_voice_intent(
                     user_id=user_id,
                     question=user_query,
                     answer=ai_response_text,
+                    language=language,
                 )
 
             # =================================================
@@ -2077,6 +2258,12 @@ async def process_voice_intent(
             service_handle._is_agent_speaking = True
             await publish_agent_state(service_handle, "speaking")
 
+            # Created only once the answer is past the stale check, so
+            # a dropped answer never shows up on screen either.
+            caption = AgentCaption(service_handle, audio_source)
+            stop_playback = False
+            finished = False
+
             # This answer is now being spoken - older ones are
             # rejected automatically from here on.
             service_handle._last_played_generation = generation
@@ -2091,7 +2278,7 @@ async def process_voice_intent(
                 # one plays, so there is no gap between sentences.
                 next_audio = asyncio.create_task(
                     asyncio.to_thread(
-                        tts_converter,
+                        synthesize_with_timing,
                         sentences[0],
                         language,
                     )
@@ -2099,12 +2286,12 @@ async def process_voice_intent(
 
                 for index, sentence in enumerate(sentences):
 
-                    audio_bytes = await next_audio
+                    audio_bytes, starts = await next_audio
 
                     if index + 1 < len(sentences):
                         next_audio = asyncio.create_task(
                             asyncio.to_thread(
-                                tts_converter,
+                                synthesize_with_timing,
                                 sentences[index + 1],
                                 language,
                             )
@@ -2117,7 +2304,11 @@ async def process_voice_intent(
                         f"[TTS] jumla {index + 1}/{len(sentences)}"
                     )
 
-                    stop_playback = False
+                    caption.add_sentence(
+                        sentence.split(),
+                        starts,
+                        len(audio_bytes) / bytes_per_sample / sample_rate,
+                    )
 
                     for i in range(
                         0,
@@ -2232,7 +2423,18 @@ async def process_voice_intent(
                     if stop_playback:
                         break
 
+                else:
+                    finished = True
+
             finally:
+
+                if finished:
+                    caption.finish()
+                    await caption.wait_until_heard()
+                else:
+                    # Cut off (handoff, dropped room, an error): the
+                    # words not yet heard are never shown.
+                    caption.stop()
 
                 service_handle._is_agent_speaking = False
 

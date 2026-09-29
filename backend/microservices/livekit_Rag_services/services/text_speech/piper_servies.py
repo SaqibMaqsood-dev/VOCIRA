@@ -107,3 +107,72 @@ def tts_converter(text: str, language: str | None = None) -> bytes:
     if not text or not text.strip():
         return b""
     return _synth(text.strip(), language)
+
+
+# A spoken pause after these, in "phoneme characters" of time.
+_PAUSE_WEIGHT = {",": 3, ";": 3, ":": 3, "،": 3, ".": 5, "!": 5, "?": 5, "۔": 5, "؟": 5}
+_STRESS_MARKS = re.compile(r"[ˈˌ]")
+_TRAILING_PUNCT = ".,;:!?،۔؟\"'”’)"
+
+
+def _word_weight(token: str) -> float:
+    """Roughly how long a word takes to say, relative to its neighbours."""
+    core = _STRESS_MARKS.sub("", token)
+    stripped = core.rstrip(_TRAILING_PUNCT)
+    return len(stripped) + 1 + _PAUSE_WEIGHT.get(core[-1:], 0)
+
+
+def synthesize_with_timing(
+    text: str, language: str | None = None
+) -> tuple[bytes, list[float]]:
+    """
+    Audio for `text`, plus when each of its words starts, in seconds.
+
+    The voices give no alignments, so word times are estimated: within
+    each sentence Piper speaks, a word's share of the time follows its
+    phoneme count (a far better measure of spoken length than letters,
+    and the same for Urdu as for English). Each sentence's real audio
+    length re-anchors the estimate, so any error never builds up past
+    one sentence. The list lines up with text.split().
+    """
+    text = (text or "").strip()
+    words = text.split()
+
+    if not words:
+        return b"", []
+
+    buffer = io.BytesIO()
+    pieces: list[tuple[float, list[str]]] = []
+
+    for chunk in _voice_for(language).synthesize(text, syn_config=_CONFIG):
+        audio = chunk.audio_int16_bytes
+        buffer.write(audio)
+        pieces.append(
+            (len(audio) / 2 / chunk.sample_rate, "".join(chunk.phonemes).split())
+        )
+
+    starts: list[float] = []
+    phoneme_words = [w for _, chunk_words in pieces for w in chunk_words]
+
+    if len(phoneme_words) == len(words):
+        offset = 0.0
+        for duration, chunk_words in pieces:
+            weights = [_word_weight(w) for w in chunk_words]
+            total = sum(weights) or 1.0
+            elapsed = 0.0
+            for weight in weights:
+                starts.append(offset + duration * elapsed / total)
+                elapsed += weight
+            offset += duration
+    else:
+        # Numbers and abbreviations can phonemize into a different number
+        # of words - fall back to spreading the words by their letters.
+        duration = sum(d for d, _ in pieces)
+        weights = [_word_weight(w) for w in words]
+        total = sum(weights) or 1.0
+        elapsed = 0.0
+        for weight in weights:
+            starts.append(duration * elapsed / total)
+            elapsed += weight
+
+    return buffer.getvalue(), starts

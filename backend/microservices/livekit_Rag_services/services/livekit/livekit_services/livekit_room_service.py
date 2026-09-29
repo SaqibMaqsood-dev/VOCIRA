@@ -98,6 +98,11 @@ class LivekitRoomServices:
         self._disconnect_timer = None
         self._no_show_timer = None
 
+        # One audio consumer per caller. A reconnect subscribes the
+        # caller's track again; without this the old consumer kept
+        # running beside the new one.
+        self._audio_consumers = {}
+
         # =====================================================
         # INTENTIONAL END CALL
         # =====================================================
@@ -449,6 +454,8 @@ class LivekitRoomServices:
         self._agent_state = None
         self._agent_speech_ended_at = 0.0
 
+        self._audio_consumers = {}
+
         print(
             f"[Worker] Spin-up initialized "
             f"for room: {self.room_name}"
@@ -481,6 +488,29 @@ class LivekitRoomServices:
                 f"[Worker] Successfully connected "
                 f"to room: {self.room.name}"
             )
+
+        # =====================================================
+        # THE WORKER'S OWN CONNECTION
+        #
+        # The worker reaches LiveKit over the same internet as
+        # everyone else. On a weak link it drops, the SDK retries,
+        # and either gets back in or gives up. Giving up used to go
+        # unnoticed: nobody "left", so no timer ran and the dead
+        # room held a worker slot until the process restarted.
+        # =====================================================
+
+        @self.room.on("reconnecting")
+        def on_reconnecting():
+            print("[Worker] Connection lost - reconnecting...")
+
+        @self.room.on("reconnected")
+        def on_reconnected():
+            print("[Worker] Reconnected to the room.")
+
+        @self.room.on("disconnected")
+        def on_disconnected(reason=None):
+            print(f"[Worker] Room disconnected: {reason}")
+            self._shutdown_event.set()
 
         # =====================================================
         # PARTICIPANT CONNECTED
@@ -775,9 +805,10 @@ class LivekitRoomServices:
             if not humans_in_room:
 
                 print(
-                    "[Worker] "
-                    "Last human left. "
-                    "Starting 10s grace period..."
+                    f"[Worker] "
+                    f"Last human left. "
+                    f"Starting {self.LEFT_GRACE_SECONDS}s "
+                    f"grace period..."
                 )
 
                 if self._disconnect_timer:
@@ -910,6 +941,17 @@ class LivekitRoomServices:
             # VOICE PIPELINE
             # =================================================
 
+            previous = self._audio_consumers.pop(
+                participant.identity, None
+            )
+
+            if previous and not previous.done():
+                print(
+                    f"[Audio] Replacing the old consumer for "
+                    f"{participant.identity} (reconnected)."
+                )
+                previous.cancel()
+
             task = asyncio.create_task(
                 voice_pipeline.consume_audio(
                     stt=stt,
@@ -920,6 +962,8 @@ class LivekitRoomServices:
                     audio_source=self.agent_source,
                 )
             )
+
+            self._audio_consumers[participant.identity] = task
 
             self._background_tasks.add(task)
 
@@ -1498,11 +1542,17 @@ class LivekitRoomServices:
         except Exception as error:
             print(f"[Worker] no-show watchdog failed: {error}")
 
+    # How long the agent stays after the caller drops. On a weak link
+    # the browser needs several seconds to get back in - at 10s the
+    # agent had already gone, and the caller came back to a room with
+    # nobody to answer.
+    LEFT_GRACE_SECONDS = 30
+
     async def _delayed_teardown(self):
 
         try:
 
-            await asyncio.sleep(10)
+            await asyncio.sleep(self.LEFT_GRACE_SECONDS)
 
             print(
                 "[Worker] "

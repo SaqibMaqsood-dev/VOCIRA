@@ -11,6 +11,44 @@ import DateCalendar from "@/app/admin/_components/DateCalendar";
 
 const statusOptions = ["All", "Resolved", "Escalated"];
 
+const URDU_SCRIPT = /[؀-ۿ]/;
+
+// What a call was held in, from what the guardian actually said.
+function callLanguage(rows) {
+  const urdu = rows.filter((q) => URDU_SCRIPT.test(q.question || "")).length;
+  return urdu * 2 >= rows.length ? "Urdu" : "English";
+}
+
+/*
+ * One block per call, the most recent call first.
+ *
+ * A day used to read as one run of questions, oldest first - a guardian
+ * who called in English and later in Urdu had the English call on top,
+ * and the admin had to scroll past it to see what was asked last.
+ * Inside a call the questions keep the order they were asked, so each
+ * call still reads as the conversation it was.
+ *
+ * `chat` is oldest-first.
+ */
+function groupCalls(chat) {
+  const bySession = new Map();
+
+  for (const q of chat) {
+    const key = q.sessionId || q.id;
+    if (!bySession.has(key)) bySession.set(key, []);
+    bySession.get(key).push(q);
+  }
+
+  return [...bySession.entries()]
+    .map(([id, rows]) => ({
+      id,
+      rows,
+      startedAt: rows[0].timestamp,
+      language: callLanguage(rows),
+    }))
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+}
+
 // The header's search sends here with ?q=. useSearchParams requires
 // Suspense, so the real page lives inside it.
 export default function QueriesPage() {
@@ -241,6 +279,7 @@ function QueriesPageInner() {
           // different one.
           const activeDate = selectedDate[group.key] || group.dates[0];
           const dayChat = group.chatByDate[activeDate] || [];
+          const dayCalls = groupCalls(dayChat);
 
           return (
             <div
@@ -292,43 +331,66 @@ function QueriesPageInner() {
                       }
                     />
                     <span className="text-[11px] text-text-secondary">
-                      {dayChat.length} question{dayChat.length === 1 ? "" : "s"} on this day
+                      {dayChat.length} question{dayChat.length === 1 ? "" : "s"} in{" "}
+                      {dayCalls.length} call{dayCalls.length === 1 ? "" : "s"} on this day
                     </span>
                   </div>
 
-                  <div className="space-y-4 px-4 py-4">
-                    {dayChat.map((q) => (
-                      <div key={q.id} className="space-y-1.5">
+                  <div className="space-y-6 px-4 py-4">
+                    {dayCalls.map((call, index) => (
+                      <section key={call.id} className="space-y-4">
 
-                        {/* guardian's question */}
-                        <div className="flex justify-end">
-                          <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-accent-primary/20 px-4 py-2">
-                            <p className="text-sm text-white">{q.question}</p>
-                            <p className="mt-1 text-right text-[10px] text-text-secondary">
-                              {formatTime(q.timestamp)}
-                            </p>
-                          </div>
+                        {/* ---- which call this is ---- */}
+                        <div className="flex items-center gap-2 text-[11px] text-text-secondary">
+                          <span className="h-px flex-1 bg-white/10" />
+                          <span
+                            className={`rounded-full border px-2.5 py-0.5 ${
+                              index === 0
+                                ? "border-accent-primary/40 bg-accent-primary/10 text-text-primary"
+                                : "border-white/10 bg-white/[0.04]"
+                            }`}
+                          >
+                            {index === 0 ? "Latest call" : "Call"} ·{" "}
+                            {formatTime(call.startedAt).slice(11)} · {call.language} ·{" "}
+                            {call.rows.length} question{call.rows.length === 1 ? "" : "s"}
+                          </span>
+                          <span className="h-px flex-1 bg-white/10" />
                         </div>
 
-                        {/* Vocira's answer */}
-                        <div className="flex justify-start">
-                          <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-white/[0.06] px-4 py-2">
-                            <p className="text-sm text-text-primary">
-                              {q.response}
-                            </p>
-                            <div className="mt-1.5 flex items-center gap-2">
-                              <span className="text-[10px] uppercase tracking-wide text-text-secondary">
-                                {q.intent || "—"}
-                              </span>
-                              <Badge
-                                label={q.status}
-                                variant={q.status === "Escalated" ? "warning" : "success"}
-                              />
+                        {call.rows.map((q) => (
+                          <div key={q.id} className="space-y-1.5">
+
+                            {/* guardian's question */}
+                            <div className="flex justify-end">
+                              <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-accent-primary/20 px-4 py-2">
+                                <p dir="auto" className="text-sm text-white">{q.question}</p>
+                                <p className="mt-1 text-right text-[10px] text-text-secondary">
+                                  {formatTime(q.timestamp)}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        </div>
 
-                      </div>
+                            {/* Vocira's answer */}
+                            <div className="flex justify-start">
+                              <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-white/[0.06] px-4 py-2">
+                                <p dir="auto" className="text-sm text-text-primary">
+                                  {q.response}
+                                </p>
+                                <div className="mt-1.5 flex items-center gap-2">
+                                  <span className="text-[10px] uppercase tracking-wide text-text-secondary">
+                                    {q.intent || "—"}
+                                  </span>
+                                  <Badge
+                                    label={q.status}
+                                    variant={q.status === "Escalated" ? "warning" : "success"}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                          </div>
+                        ))}
+                      </section>
                     ))}
                   </div>
                 </div>

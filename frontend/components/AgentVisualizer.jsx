@@ -63,10 +63,12 @@ const STATE_LABEL = {
   listening: "Listening",
   thinking: "Thinking…",
   speaking: "Speaking",
+  reconnecting: "Reconnecting…",
   failed: "Connection failed",
 };
 
 const STATE_COLOR = {
+  reconnecting: "text-amber-300",
   listening: "text-cyan-300",
   thinking: "text-amber-300",
   speaking: "text-emerald-300",
@@ -86,6 +88,7 @@ const STATE_COLOR = {
  */
 export default function AgentVisualizer({
   handoff = null,
+  reconnecting = false,
   onStuck,
   onRecovered,
 }) {
@@ -108,9 +111,13 @@ export default function AgentVisualizer({
 
   // Only the AI publishes "lk.agent.state". For a person the bars
   // follow their real audio, so "speaking" directly.
-  const state = human
-    ? "speaking"
-    : attributes?.[STATE_KEY] || "connecting";
+  // The agent's last attribute says "listening" even after the link
+  // has gone, so the page's own view of the connection wins.
+  const state = reconnecting
+    ? "reconnecting"
+    : human
+      ? "speaking"
+      : attributes?.[STATE_KEY] || "connecting";
 
   const waiting = !speaker || !agentTrack;
 
@@ -152,12 +159,14 @@ export default function AgentVisualizer({
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative grid h-[290px] w-[290px] place-items-center">
-        <div className="absolute h-[250px] w-[250px] rounded-full border border-white/20 bg-white/5 shadow-[0_0_0_20px_rgba(139,233,253,0.08)] backdrop-blur-md" />
+      {/* Smaller on phones so the transcript and the call buttons
+          below still fit on one screen. */}
+      <div className="relative grid h-[210px] w-[210px] place-items-center sm:h-[290px] sm:w-[290px]">
+        <div className="absolute h-[180px] w-[180px] rounded-full border border-white/20 bg-white/5 shadow-[0_0_0_14px_rgba(139,233,253,0.08)] backdrop-blur-md sm:h-[250px] sm:w-[250px] sm:shadow-[0_0_0_20px_rgba(139,233,253,0.08)]" />
 
         {/* Bolte waqt daire ke gird halka sa glow */}
         <div
-          className={`absolute h-[250px] w-[250px] rounded-full transition-all duration-500 ${
+          className={`absolute h-[180px] w-[180px] rounded-full transition-all duration-500 sm:h-[250px] sm:w-[250px] ${
             state === "speaking"
               ? "shadow-[0_0_60px_12px_rgba(139,233,253,0.25)]"
               : state === "listening"
@@ -172,7 +181,7 @@ export default function AgentVisualizer({
           </div>
         ) : (
           <BarVisualizer
-            state={state}
+            state={state === "reconnecting" ? "connecting" : state}
             barCount={7}
             trackRef={agentTrack}
             options={{ minHeight: 8 }}
