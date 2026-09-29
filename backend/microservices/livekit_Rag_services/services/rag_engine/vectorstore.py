@@ -131,9 +131,11 @@ def _rebuild_sync(chunks) -> dict:
     upload_to_pinecone(chunks, get_embeddings(), INDEX_NAME)
 
     # A Pinecone index becomes consistent after a short delay
+    # Checked every second, not every two - the count is usually right
+    # within a few seconds, and this wait is the tail of every sync.
     after = 0
-    for _ in range(15):
-        time.sleep(2)
+    for _ in range(30):
+        time.sleep(1)
         after = (
             index.describe_index_stats()
             .get("namespaces", {})

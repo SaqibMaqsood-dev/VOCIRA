@@ -1383,42 +1383,12 @@ async def process_voice_intent(
                 )
 
                 # -------------------------------------------------
-                # SECURITY
-                # -------------------------------------------------
-
-                if not user_id:
-
-                    ai_response_text = human_text.system_message(
-                        "admin_requires_login",
-                        language,
-                    )
-
-                    await message_service.create_message(
-                        db=db,
-                        content=ai_response_text,
-                        user_id=user_id,
-                        usertype=SenderTypeEnum.ai.value,
-                        session_id=session_id,
-                        intent="admin_handoff",
-                    )
-
-                    # Saying it is the whole point. This used to write
-                    # the refusal to the database and return, and the
-                    # speaking happens at the end of this function -
-                    # so a guest asking for a person heard nothing at
-                    # all and sat on "Thinking..." until they gave up,
-                    # with the explanation sitting unread in a table.
-                    await speak_text(
-                        service_handle=service_handle,
-                        audio_source=audio_source,
-                        text=ai_response_text,
-                        language=language,
-                    )
-
-                    return
-
-                # -------------------------------------------------
                 # CREATE ESCALATION
+                #
+                # Guests too: a parent asking about admissions has no
+                # account yet. Their escalation carries no user_id, and
+                # the admin panel labels it "Guest". Nothing private is
+                # exposed by this - the staff member simply talks.
                 # -------------------------------------------------
 
                 escalation = Escalation(
@@ -1463,8 +1433,8 @@ async def process_voice_intent(
                     "room_name":
                         f"room-{session_id}",
 
-                    "caller_id": str(
-                        user_id
+                    "caller_id": (
+                        str(user_id) if user_id else None
                     ),
 
                     "escalation_id": str(
@@ -1545,6 +1515,7 @@ async def process_voice_intent(
                     user_query=user_query,
                     escalation_id=escalation.id,
                     message_id=user_message.id,
+                    language=language,
                 )
 
                 return

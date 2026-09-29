@@ -8,6 +8,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Tabl
 import { useAdminData, adminFetch, formatTime } from "@/app/admin/useAdminApi";
 import FullScreenLoader from "@/components/FullScreenLoader";
 import DateCalendar from "@/app/admin/_components/DateCalendar";
+import { localDateKey } from "@/lib/time";
 
 // The backend's EscalationStatus enum - the same values here
 const STATUS_VARIANT = {
@@ -42,7 +43,7 @@ export default function EscalationsPage() {
 
   const dates = useMemo(
     () =>
-      [...new Set(escalations.map((e) => e.time.slice(0, 10)))].sort(
+      [...new Set(escalations.map((e) => localDateKey(e.time)))].sort(
         (a, b) => (a < b ? 1 : -1)
       ),
     [escalations]
@@ -51,7 +52,7 @@ export default function EscalationsPage() {
   const visibleEscalations = useMemo(
     () =>
       selectedDate
-        ? escalations.filter((e) => e.time.slice(0, 10) === selectedDate)
+        ? escalations.filter((e) => localDateKey(e.time) === selectedDate)
         : escalations,
     [escalations, selectedDate]
   );

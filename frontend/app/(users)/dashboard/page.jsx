@@ -7,6 +7,7 @@ import CallTable from "@/components/CallTable";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
 import { authFetch, clearSession, getAccessToken } from "@/lib/session";
+import { parseServerTime } from "@/lib/time";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -249,8 +250,8 @@ export default function DashboardPage() {
 
     if (seconds === null || seconds === undefined) {
       if (session.start_at && session.end_at) {
-        const start = new Date(session.start_at);
-        const end = new Date(session.end_at);
+        const start = parseServerTime(session.start_at);
+        const end = parseServerTime(session.end_at);
 
         if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
           seconds = Math.floor((end.getTime() - start.getTime()) / 1000);
@@ -275,7 +276,7 @@ export default function DashboardPage() {
     let time = "—";
 
     if (session.start_at) {
-      const date = new Date(session.start_at);
+      const date = parseServerTime(session.start_at);
 
       if (!Number.isNaN(date.getTime())) {
         time = date.toLocaleString();

@@ -24,6 +24,10 @@ from backend.microservices.livekit_Rag_services.services.livekit.livekit_service
     voice_pipeline,
 )
 
+from backend.microservices.livekit_Rag_services.services.groq import (
+    human_text,
+)
+
 
 stt = STTWhisper()
 
@@ -80,6 +84,7 @@ class LivekitRoomServices:
         self._admin_handoff_user_id = None
         self._admin_handoff_session_id = None
         self._admin_handoff_user_type = None
+        self._admin_handoff_language = None
         self._admin_handoff_message_id = None
         self._escalation_id = None
 
@@ -440,6 +445,7 @@ class LivekitRoomServices:
         self._admin_handoff_user_id = None
         self._admin_handoff_session_id = None
         self._admin_handoff_user_type = None
+        self._admin_handoff_language = None
         self._admin_handoff_message_id = None
         self._escalation_id = None
 
@@ -1102,12 +1108,6 @@ class LivekitRoomServices:
         os.getenv("HANDOFF_ANSWER_TIMEOUT_SECONDS", "60")
     )
 
-    HANDOFF_NO_ANSWER_TEXT = (
-        "I am sorry, no one from our staff is free at the moment. "
-        "Your request has been saved and someone will get back to "
-        "you. In the meantime, I can keep helping you."
-    )
-
     async def _publish_handoff_state(self, state: str) -> None:
 
         if not self.room or not self.room.isconnected():
@@ -1181,12 +1181,22 @@ class LivekitRoomServices:
 
         await self._publish_handoff_state("no_answer")
 
+        # A guest has no account to be called back on.
+        message_key = (
+            "handoff_no_answer"
+            if self._admin_handoff_user_id
+            else "handoff_no_answer_guest"
+        )
+
         try:
 
             await voice_pipeline.speak_text(
                 service_handle=self,
                 audio_source=self.agent_source,
-                text=self.HANDOFF_NO_ANSWER_TEXT,
+                text=human_text.system_message(
+                    message_key, self._admin_handoff_language
+                ),
+                language=self._admin_handoff_language,
             )
 
         except Exception as error:
@@ -1208,6 +1218,7 @@ class LivekitRoomServices:
         user_query,
         escalation_id=None,
         message_id=None,
+        language=None,
     ):
 
         if self._admin_handoff_requested:
@@ -1258,6 +1269,8 @@ class LivekitRoomServices:
         self._admin_handoff_session_id = session_id
 
         self._admin_handoff_user_type = user_type
+
+        self._admin_handoff_language = language
 
         self._admin_handoff_message_id = message_id
 

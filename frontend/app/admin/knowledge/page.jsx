@@ -347,7 +347,7 @@ export default function KnowledgePage() {
       )}
 
       {/* ---- summary ---- */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader title="Documents" />
           <p className="text-2xl font-semibold text-white">
@@ -358,12 +358,6 @@ export default function KnowledgePage() {
           <CardHeader title="Indexed chunks" />
           <p className="text-2xl font-semibold text-white">
             {loading ? "…" : index.vectors ?? "—"}
-          </p>
-        </Card>
-        <Card>
-          <CardHeader title="Embedding model" />
-          <p className="truncate text-sm font-medium text-white">
-            {loading ? "…" : index.embedding_model || "—"}
           </p>
         </Card>
         <Card>

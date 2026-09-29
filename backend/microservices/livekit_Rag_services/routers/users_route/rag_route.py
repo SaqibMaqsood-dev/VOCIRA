@@ -13,6 +13,7 @@ by X-Internal-Key rather than JWT (the same one /users/internal uses).
 import asyncio
 import json
 import os
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -129,7 +130,9 @@ async def _run_sync():
             )
 
             print("[RAG Sync] assembling the knowledge base...")
+            started = time.monotonic()
             chunks = await assemble_knowledge_base()
+            print(f"[RAG Sync] assembled in {time.monotonic() - started:.1f}s")
 
             if not chunks:
                 raise RuntimeError(
@@ -138,7 +141,9 @@ async def _run_sync():
                 )
 
             print(f"[RAG Sync] {len(chunks)} chunks -> Pinecone")
+            uploading = time.monotonic()
             result = await rebuild_vector_store(chunks)
+            print(f"[RAG Sync] uploaded in {time.monotonic() - uploading:.1f}s")
 
             # How many chunks came from each file - the admin panel
             # displays this. Asking Pinecone for the counts is

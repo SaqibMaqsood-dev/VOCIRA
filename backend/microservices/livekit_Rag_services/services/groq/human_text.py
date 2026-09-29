@@ -34,9 +34,37 @@ _LANGUAGE_INSTRUCTIONS = {
 # something had already gone wrong for the caller, which is the worst
 # possible time for it to be confusing.
 SYSTEM_MESSAGES = {
-    "admin_requires_login": {
-        "en": "You must be logged in with an authorized account to contact an admin.",
-        "ur": "ایڈمن سے رابطہ کرنے کے لیے آپ کو ایک مجاز اکاؤنٹ سے لاگ ان ہونا ضروری ہے۔",
+    # Nobody on the staff answered a handoff in time.
+    "handoff_no_answer": {
+        "en": (
+            "I am sorry, no one from our staff is free at the moment. "
+            "Your request has been saved and someone will get back to "
+            "you. In the meantime, I can keep helping you."
+        ),
+        "ur": (
+            "معذرت، اس وقت ہمارے عملے میں سے کوئی دستیاب نہیں ہے۔ آپ کی "
+            "درخواست محفوظ کر لی گئی ہے اور کوئی آپ سے رابطہ کرے گا۔ تب "
+            "تک میں آپ کی مدد کرتا رہوں گا۔"
+        ),
+    },
+    # The same, for a guest - with no account there is no way to get
+    # back to them, so they are told where to reach the school instead.
+    "handoff_no_answer_guest": {
+        "en": (
+            "I am sorry, no one from our staff is free at the moment. "
+            "Since you are not logged in, we have no way to call you "
+            "back, so please call the school helpline on zero four two, "
+            "one one one, seven seven seven, eight hundred, or send a "
+            "request from the Support page. In the meantime, I can keep "
+            "helping you."
+        ),
+        "ur": (
+            "معذرت، اس وقت ہمارے عملے میں سے کوئی دستیاب نہیں ہے۔ آپ لاگ "
+            "ان نہیں ہیں، اس لیے ہم آپ سے دوبارہ رابطہ نہیں کر سکتے۔ براہ "
+            "کرم اسکول کی ہیلپ لائن صفر چار دو، ایک ایک ایک، سات سات سات، "
+            "آٹھ سو پر کال کریں یا سپورٹ پیج سے درخواست بھیجیں۔ تب تک میں "
+            "آپ کی مدد کرتا رہوں گا۔"
+        ),
     },
     "erp_not_authorized": {
         "en": "You are not authorized to access ERP information. Please log in with an authorized account.",

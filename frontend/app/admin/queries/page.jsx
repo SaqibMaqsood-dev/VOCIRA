@@ -5,9 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { Search, Filter, RefreshCw, ChevronDown } from "lucide-react";
 import Button from "@/app/admin/_components/ui/Button";
 import Badge from "@/app/admin/_components/ui/Badge";
-import { useAdminData, formatTime } from "@/app/admin/useAdminApi";
+import { useAdminData, formatClock, formatTime } from "@/app/admin/useAdminApi";
 import FullScreenLoader from "@/components/FullScreenLoader";
 import DateCalendar from "@/app/admin/_components/DateCalendar";
+import { localDateKey } from "@/lib/time";
 
 const statusOptions = ["All", "Resolved", "Escalated"];
 
@@ -168,7 +169,7 @@ function QueriesPageInner() {
       // that happened on it.
       const byDate = new Map();
       for (const q of g.chat) {
-        const dateKey = q.timestamp.slice(0, 10); // "2026-09-15"
+        const dateKey = localDateKey(q.timestamp); // "2026-09-15"
         if (!byDate.has(dateKey)) byDate.set(dateKey, []);
         byDate.get(dateKey).push(q);
       }
@@ -351,7 +352,7 @@ function QueriesPageInner() {
                             }`}
                           >
                             {index === 0 ? "Latest call" : "Call"} ·{" "}
-                            {formatTime(call.startedAt).slice(11)} · {call.language} ·{" "}
+                            {formatClock(call.startedAt)} · {call.language} ·{" "}
                             {call.rows.length} question{call.rows.length === 1 ? "" : "s"}
                           </span>
                           <span className="h-px flex-1 bg-white/10" />

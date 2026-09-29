@@ -6,6 +6,7 @@ import {
   Pause,
   Play,
   PhoneOff,
+  User,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readGuestLanguage } from "@/components/LanguageSelect";
@@ -165,6 +166,18 @@ export default function AssistantPage() {
    */
   const [endedNotice, setEndedNotice] =
     useState("");
+
+  // Not logged in - the call runs as a guest, with no access to a
+  // child's records. null until checked, so the badge never flashes
+  // for a signed-in guardian while the page loads.
+  const [isGuest, setIsGuest] = useState(null);
+
+  useEffect(() => {
+    const check = () => setIsGuest(!getAccessToken());
+    check();
+    window.addEventListener("auth-change", check);
+    return () => window.removeEventListener("auth-change", check);
+  }, []);
 
   /*
    * The link to LiveKit dropped and the SDK is trying to get it back.
@@ -1671,6 +1684,17 @@ ${JSON.stringify(
     <div className="page-shell !max-w-none !px-0 !py-0">
 
       <section className="relative mx-auto flex min-h-[calc(100vh-4rem-2.5rem)] w-full items-center justify-center overflow-hidden bg-transparent">
+
+        {isGuest && (
+          <div className="pointer-events-none absolute inset-x-0 top-4 z-20">
+            <div className="mx-auto flex max-w-6xl px-4 sm:px-6">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-medium text-text-secondary backdrop-blur-md">
+                <User className="h-3.5 w-3.5" aria-hidden="true" />
+                Guest User
+              </span>
+            </div>
+          </div>
+        )}
 
         <motion.div
           initial={{

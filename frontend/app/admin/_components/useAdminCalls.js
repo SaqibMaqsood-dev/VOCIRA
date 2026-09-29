@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { adminFetch } from "@/app/admin/useAdminApi";
 import { getAccessToken } from "@/lib/session";
+import { parseServerTime } from "@/lib/time";
 
 // The gateway proxies WebSockets now, so the realtime channel goes
 // through the same address as every other call. It used to point
@@ -80,7 +81,7 @@ function fromEscalation(row) {
     room: row.sessionId ? `room-${row.sessionId}` : null,
     question: row.question || "The caller asked to speak with a person.",
     caller: row.userId ? "Parent" : "Guest",
-    at: new Date(row.time).getTime() || Date.now(),
+    at: parseServerTime(row.time).getTime() || Date.now(),
   };
 }
 

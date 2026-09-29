@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { parseServerTime } from "@/lib/time";
 
 import { authFetch, getAccessToken } from "@/lib/session";
 
@@ -133,13 +134,22 @@ export function useAdminData(path, fallback, { pollMs } = {}) {
 /** "2026-09-04T10:32:11" -> "2026-09-04 10:32" */
 export function formatTime(value) {
   if (!value) return "—";
-  const d = new Date(value);
+  const d = parseServerTime(value);
   if (Number.isNaN(d.getTime())) return String(value);
   const pad = (n) => String(n).padStart(2, "0");
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    formatClock(d)
   );
+}
+
+// "7:39 PM" - the 12-hour clock, in the viewer's own time zone.
+export function formatClock(value) {
+  const d = value instanceof Date ? value : parseServerTime(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${hours % 12 || 12}:${minutes} ${hours < 12 ? "AM" : "PM"}`;
 }
 
 

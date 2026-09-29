@@ -3,6 +3,9 @@ import socket
 import time
 import logging
 
+import httpx
+from bs4 import BeautifulSoup
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -24,7 +27,56 @@ def _get_driver_path():
     return _driver_path_cache
 
 
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+# Less visible text than this and the page is probably built by
+# JavaScript - only then is a real browser worth starting.
+_MIN_STATIC_TEXT = 500
+
+
+def _fetch_static(url: str) -> str | None:
+    """The page as the server sends it, or None if that is not enough."""
+    try:
+        response = httpx.get(
+            url,
+            timeout=20,
+            follow_redirects=True,
+            headers={"User-Agent": _USER_AGENT},
+        )
+    except httpx.HTTPError as error:
+        log.warning("Plain fetch failed for %s: %s", url, error)
+        return None
+
+    if response.status_code != 200:
+        log.warning("Plain fetch of %s returned %s", url, response.status_code)
+        return None
+
+    text = BeautifulSoup(response.text, "html.parser").get_text(" ", strip=True)
+    return response.text if len(text) >= _MIN_STATIC_TEXT else None
+
+
 def get_dynamic_data(url: str):
+    """
+    Fetch a page for the knowledge base.
+
+    A plain HTTP request first. The school site is served as ready
+    HTML: that takes ~1.5s and gives the same text a headless Chrome
+    gave in 20-60s (starting the browser, fixed sleeps, scrolling),
+    which is what made every sync take over a minute. Selenium is kept
+    for a page that really is rendered by JavaScript.
+    """
+    html = _fetch_static(url)
+    if html:
+        log.info("Fetched %s without a browser", url)
+        return html
+
+    return _get_rendered(url)
+
+
+def _get_rendered(url: str):
     """Scrape a single URL using Selenium with safety checks."""
     try:
         socket.create_connection(("8.8.8.8", 53), timeout=3)

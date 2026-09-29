@@ -14,7 +14,7 @@ files would start living in two places.
 import os
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
     PDF_PATH,
@@ -131,8 +131,10 @@ def list_documents(chunks_by_source: dict | None = None) -> list[dict]:
                     "name": entry,
                     "kind": kind,
                     "size": stat.st_size,
+                    # UTC with its zone, like every other time the API
+                    # sends - a bare local time here read as UTC.
                     "modified": datetime.fromtimestamp(
-                        stat.st_mtime
+                        stat.st_mtime, tz=timezone.utc
                     ).isoformat(timespec="seconds"),
                     "chunks": chunks,
                     "indexed": chunks is not None,
