@@ -27,7 +27,11 @@ from backend.microservices.livekit_Rag_services.services.erp_services.auth_clien
 from backend.microservices.livekit_Rag_services.services.erp_services.erp_service import (
     ERPService,
 )
+from backend.microservices.livekit_Rag_services.services.erp_services import (
+    connectors,
+)
 
+from backend.microservices.livekit_Rag_services.services import tenants
 from backend.microservices.livekit_Rag_services.services.groq import (
     answer_cache,
     human_text,
@@ -81,6 +85,22 @@ erp_service = ERPService()
 retriever = connect_existing_store(
     index_name=INDEX_NAME
 )
+
+# One retriever per school namespace (services/tenants.py). The first
+# school's is the one above; the others are made on first use.
+_retrievers = {tenants.DEFAULT_SCHOOL_ID: retriever}
+
+
+async def retriever_for(school):
+    """The retriever that searches only this school's knowledge."""
+    found = _retrievers.get(school.id)
+    if found is None:
+        found = await asyncio.to_thread(
+            connect_existing_store, INDEX_NAME, school.namespace
+        )
+        if found is not None:
+            _retrievers[school.id] = found
+    return found
 
 rabbitmq = RabbitMQ()
 
@@ -438,11 +458,12 @@ _PREVIOUS_WORDS_SECONDS = 90
 _previous_words: dict[str, tuple[float, str]] = {}
 
 
-async def caller_children(user_id) -> list[dict]:
-    """The caller's own children as the school records name them -
-    [] for a guest, or when they cannot be read right now."""
+async def caller_children(user_id, connector=None) -> list[dict]:
+    """The caller's own children as their school's records name them -
+    [] for a guest, a school with no records system, or when they
+    cannot be read right now."""
 
-    if not user_id:
+    if not user_id or connector is None or not connector.available:
         return []
 
     key = str(user_id)
@@ -453,19 +474,11 @@ async def caller_children(user_id) -> list[dict]:
     try:
         caller = await auth_client.get_internal_user(vocira_user_id=user_id)
         parent_id = caller.get("parent_id") if isinstance(caller, dict) else None
-        students = (
-            await erp_service.get_parent_students(erp_parent_id=parent_id)
-            if parent_id else []
-        )
+        children = await connector.children_of(parent_id) if parent_id else []
     except Exception as error:
         print(f"[Children] could not read the caller's children: {error}")
         return []
 
-    children = [
-        {"id": s["name"], "name": s["student_name"].strip()}
-        for s in students
-        if isinstance(s, dict) and s.get("name") and s.get("student_name")
-    ]
     _children_cache[key] = (time.monotonic() + _CHILDREN_TTL_SECONDS, children)
     return children
 
@@ -709,6 +722,12 @@ async def consume_audio(
     )
 
     print(f"Call language        : {call_language or 'default'}")
+
+    # The school comes from the token the backend minted - the login,
+    # or the link a guest opened - never from anything said on the call.
+    call_school = tenants.get_school((metadata or {}).get("school")).id
+
+    print(f"Call school          : {call_school}")
 
     await publish_call_language(service_handle, call_language)
 
@@ -1096,6 +1115,7 @@ async def consume_audio(
                                 service_handle=service_handle,
                                 generation=generation_id,
                                 language=call_language,
+                                school_id=call_school,
                             )
                         )
 
@@ -1154,6 +1174,7 @@ async def process_voice_intent(
     service_handle,
     generation: int,
     language: str | None = None,
+    school_id: str | None = None,
 ):
     """
     Complete voice processing pipeline.
@@ -1244,7 +1265,14 @@ async def process_voice_intent(
 
         # Read while the session and message are saved below - it is
         # cached after the first question, so only that one waits.
-        children_task = asyncio.create_task(caller_children(user_id))
+        school = tenants.get_school(school_id)
+
+        # The school's records system, whatever it is - one door
+        # (erp_services/connectors.py). A school without one gets a
+        # connector that has nothing, and no children to look up.
+        records = connectors.connector_for(school, default_service=erp_service)
+
+        children_task = asyncio.create_task(caller_children(user_id, records))
 
         # =====================================================
         # 3. DATABASE
@@ -1354,7 +1382,7 @@ async def process_voice_intent(
             use_cache = not (last_child or previous_words)
 
             cached_answer = (
-                answer_cache.get(user_id, user_query, language)
+                answer_cache.get(user_id, user_query, language, school.id)
                 if use_cache else None
             )
 
@@ -1647,6 +1675,20 @@ async def process_voice_intent(
                         # =================================================
             # ERP QUERY
             # =================================================
+
+            # A school with no records system connected: a question
+            # about a child gets a clear answer, and never reaches any
+            # school's ERP.
+            elif intent == "ERP" and erp_items and not records.available:
+
+                print(
+                    f"[Route]: records asked, but {school.name} "
+                    "has no records system"
+                )
+
+                ai_response_text = human_text.system_message(
+                    "records_not_available", language, school=school
+                )
 
             # The router now returns "ERP" (it was "ERP_QUERY").
             # Without a resource, ERP is meaningless - in that case
@@ -1977,9 +2019,9 @@ async def process_voice_intent(
                                         # concurrently rather than one
                                         # slow round-trip per item.
                                         erp_fetches = [
-                                            erp_service.fetch(
+                                            records.fetch(
                                                 resource=item["resource"],
-                                                erp_parent_id=erp_parent_id,
+                                                guardian_id=erp_parent_id,
                                                 student_name=item["student"],
                                                 session_id=str(session_id),
                                             )
@@ -2021,6 +2063,7 @@ async def process_voice_intent(
                                                 user_query=user_query,
                                                 response=erp_data,
                                                 language=language,
+                                                school_name=school.name,
                                             )
                                         )
 
@@ -2135,12 +2178,14 @@ async def process_voice_intent(
                 if not cached_answer:
 
                     ai_response_text = await ask_vocira(
-                        retriever=retriever,
+                        # Only the caller's school's knowledge.
+                        retriever=await retriever_for(school),
                         user_query=user_query,
                         language=language,
                         # The router's plain restatement - searched
                         # alongside the caller's own words.
                         search_query=route.get("search"),
+                        school_name=school.name,
                     )
 
                 if ai_response_text:
@@ -2191,6 +2236,7 @@ async def process_voice_intent(
                     question=user_query,
                     answer=ai_response_text,
                     language=language,
+                    school=school.id,
                 )
 
             # =================================================

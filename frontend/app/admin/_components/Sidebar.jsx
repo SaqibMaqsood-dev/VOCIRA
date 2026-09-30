@@ -24,6 +24,7 @@ import {
   BookOpen,
   LayoutDashboard,
   MessageCircle,
+  School,
   PanelLeftClose,
   PanelLeftOpen,
   Users,
@@ -37,6 +38,7 @@ const items = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/queries", label: "Queries", icon: MessageCircle },
   { href: "/admin/knowledge", label: "Knowledge", icon: BookOpen },
+  { href: "/admin/schools", label: "Schools", icon: School },
   { href: "/admin/escalations", label: "Escalations", icon: AlertTriangle },
   { href: "/admin/users", label: "Accounts", icon: Users },
 ];

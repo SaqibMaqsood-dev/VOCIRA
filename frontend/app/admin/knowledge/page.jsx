@@ -43,10 +43,20 @@ import FullScreenLoader from "@/components/FullScreenLoader";
 
 const EMPTY = { index: {}, last_sync: { state: "unknown" } };
 const EMPTY_DOCS = { documents: [], total: 0, indexed: 0, chunks: 0 };
+const EMPTY_SCHOOLS = { schools: [], default: "educators" };
 
 export default function KnowledgePage() {
+  // Every school has its own documents and its own part of the index
+  // (one agent, a knowledge base per school). Everything on this page
+  // is for the school picked here.
+  const { data: schoolsData } = useAdminData("/livekit/admin/schools", EMPTY_SCHOOLS);
+  const schools = schoolsData?.schools || [];
+  const [school, setSchool] = useState("educators");
+  const current = schools.find((s) => s.id === school);
+  const q = `?school=${encodeURIComponent(school)}`;
+
   const { data, loading, error, reload } = useAdminData(
-    "/livekit/admin/knowledge",
+    `/livekit/admin/knowledge${q}`,
     EMPTY
   );
 
@@ -54,7 +64,7 @@ export default function KnowledgePage() {
     data: docsData,
     loading: docsLoading,
     reload: reloadDocs,
-  } = useAdminData("/livekit/admin/knowledge/documents", EMPTY_DOCS);
+  } = useAdminData(`/livekit/admin/knowledge/documents${q}`, EMPTY_DOCS);
 
   const [syncing, setSyncing] = useState(false);
   const [busy, setBusy] = useState("");
@@ -111,7 +121,7 @@ export default function KnowledgePage() {
     setNotice("Syncing… this can take a moment.");
 
     try {
-      await adminFetch("/livekit/admin/knowledge/sync", { method: "POST" });
+      await adminFetch(`/livekit/admin/knowledge/sync${q}`, { method: "POST" });
 
       // The server returns 202 immediately - the sync runs in the
       // background. There was just a setTimeout(4s) here before: the
@@ -162,7 +172,7 @@ export default function KnowledgePage() {
       if (!alive.current) return { state: "gone" };
 
       try {
-        const fresh = await adminFetch("/livekit/admin/knowledge");
+        const fresh = await adminFetch(`/livekit/admin/knowledge${q}`);
         const last = fresh?.last_sync || {};
         if (last.state === "success" || last.state === "failed") {
           return last;
@@ -184,7 +194,7 @@ export default function KnowledgePage() {
       setBusy("upload");
       setProblem("");
       const res = await adminUpload(
-        "/livekit/admin/knowledge/documents",
+        `/livekit/admin/knowledge/documents${q}`,
         file
       );
       flash(`${res.name} uploaded. Run a sync to index it.`, 6000);
@@ -202,7 +212,7 @@ export default function KnowledgePage() {
     try {
       setBusy("note");
       setProblem("");
-      const res = await adminFetch("/livekit/admin/knowledge/notes", {
+      const res = await adminFetch(`/livekit/admin/knowledge/notes${q}`, {
         method: "POST",
         body: JSON.stringify({ title, text }),
       });
@@ -223,7 +233,7 @@ export default function KnowledgePage() {
       setBusy(name);
       setProblem("");
       await adminFetch(
-        `/livekit/admin/knowledge/documents/${encodeURIComponent(name)}`,
+        `/livekit/admin/knowledge/documents/${encodeURIComponent(name)}${q}`,
         { method: "DELETE" }
       );
       flash(`${name} removed. Run a sync to update the index.`, 6000);
@@ -254,6 +264,33 @@ export default function KnowledgePage() {
           <p className="mt-1 text-xs text-text-secondary">
             Vocira answers general questions from these documents.
           </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label htmlFor="kb-school" className="text-xs text-text-secondary">
+              School
+            </label>
+            <select
+              id="kb-school"
+              value={school}
+              onChange={(event) => setSchool(event.target.value)}
+              disabled={syncing}
+              style={{ colorScheme: "dark" }}
+              className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs text-white outline-none"
+            >
+              {(schools.length ? schools : [{ id: "educators", name: "The Educators" }]).map((s) => (
+                <option key={s.id} value={s.id} style={{ backgroundColor: "#100944", color: "#ffffff" }}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            {current && (
+              <span className="text-[11px] text-text-secondary">
+                {current.records
+                  ? "Records: ERP connected"
+                  : "General questions only - no records system"}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">

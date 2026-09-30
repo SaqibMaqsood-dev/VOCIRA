@@ -70,21 +70,34 @@ SYSTEM_MESSAGES = {
     },
     # The same, for a guest - with no account there is no way to get
     # back to them, so they are told where to reach the school instead.
+    # A school with no records system connected (services/tenants.py):
+    # a question about a child gets this instead of any ERP lookup.
+    "records_not_available": {
+        "en": (
+            "I am sorry, children's records for {school} are not "
+            "available on Vocira yet. For attendance, fees or results, "
+            "please call the school on {helpline}. I can still help you "
+            "with general questions about the school."
+        ),
+        "ur": (
+            "معذرت، {school} کے بچوں کا ریکارڈ ابھی ووسیرا پر دستیاب نہیں ہے۔ "
+            "حاضری، فیس یا نتیجے کے لیے براہ کرم اسکول کو {helpline} پر کال "
+            "کریں۔ اسکول کے عام سوالات میں میں اب بھی آپ کی مدد کر سکتا ہوں۔"
+        ),
+    },
     "handoff_no_answer_guest": {
         "en": (
             "I am sorry, no one from our staff is free at the moment. "
             "Since you are not logged in, we have no way to call you "
-            "back, so please call the school helpline on zero four two, "
-            "one one one, seven seven seven, eight hundred, or send a "
-            "request from the Support page. In the meantime, I can keep "
-            "helping you."
+            "back, so please call the school helpline on {helpline}, "
+            "or send a request from the Support page. In the meantime, "
+            "I can keep helping you."
         ),
         "ur": (
             "معذرت، اس وقت ہمارے عملے میں سے کوئی دستیاب نہیں ہے۔ آپ لاگ "
             "ان نہیں ہیں، اس لیے ہم آپ سے دوبارہ رابطہ نہیں کر سکتے۔ براہ "
-            "کرم اسکول کی ہیلپ لائن صفر چار دو، ایک ایک ایک، سات سات سات، "
-            "آٹھ سو پر کال کریں یا سپورٹ پیج سے درخواست بھیجیں۔ تب تک میں "
-            "آپ کی مدد کرتا رہوں گا۔"
+            "کرم اسکول کی ہیلپ لائن {helpline} پر کال کریں یا سپورٹ پیج سے "
+            "درخواست بھیجیں۔ تب تک میں آپ کی مدد کرتا رہوں گا۔"
         ),
     },
     "erp_not_authorized": {
@@ -131,14 +144,35 @@ SYSTEM_MESSAGES = {
 }
 
 
-def system_message(key: str, language: str | None = None) -> str:
-    """A short, non-LLM-written spoken message, in the caller's language."""
+def system_message(key: str, language: str | None = None, school=None) -> str:
+    """
+    A short, non-LLM-written spoken message, in the caller's language.
+
+    {school} and {helpline} are the caller's school's (services/tenants.py
+    - the first school when none is given); the helpline is spelled out
+    digit by digit, as every phone number is.
+    """
+
+    # Imported here: tenants and query pull in the RAG config and the
+    # vector store, which this small module should not load at import.
+    from backend.microservices.livekit_Rag_services.services import tenants
+    from backend.microservices.livekit_Rag_services.services.rag_engine.query import (
+        speak_phone_numbers,
+    )
 
     entry = SYSTEM_MESSAGES.get(key, {})
 
     language = (language or _RESPONSE_LANGUAGE).strip().lower()
 
-    return entry.get(language) or entry.get("en", "")
+    text = entry.get(language) or entry.get("en", "")
+
+    if "{school}" in text or "{helpline}" in text:
+        chosen = school if isinstance(school, tenants.School) else tenants.get_school(school)
+        text = text.replace("{school}", chosen.display_name(language)).replace(
+            "{helpline}", speak_phone_numbers(chosen.helpline, language)
+        )
+
+    return text
 
 
 # ERPNext's internal IDs - "EDU-ATT-2026-00001",
@@ -176,6 +210,7 @@ def build_response_prompt(
     response: str,
     today: str | None = None,
     language: str | None = None,
+    school_name: str = "The Educators",
 ) -> str:
     """
     Convert structured ERP/API data into a natural,
@@ -221,7 +256,7 @@ def build_response_prompt(
     number_rule = _NUMBER_RULES.get(language_key, _NUMBER_RULES["en"])
 
     return f"""
-You are Vocira, a professional AI voice assistant for The Educators.
+You are Vocira, a professional AI voice assistant for {school_name}.
 
 Your task is to convert the provided information into a clear,
 natural, conversational answer to the user's question.

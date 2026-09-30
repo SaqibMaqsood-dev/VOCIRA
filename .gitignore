@@ -318,3 +318,4 @@ frappe_test/
 *.zip
 *.sql.gz
 .sync_state.json
+.sync_state.*.json

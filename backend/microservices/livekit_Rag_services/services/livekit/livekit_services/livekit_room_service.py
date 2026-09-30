@@ -12,6 +12,7 @@ from backend.microservices.livekit_Rag_services.services.router_services.session
     SessionService,
 )
 
+from backend.microservices.livekit_Rag_services.services import tenants
 from backend.microservices.livekit_Rag_services.core.config import (
     settings,
 )
@@ -87,6 +88,10 @@ class LivekitRoomServices:
         self._admin_handoff_language = None
         self._admin_handoff_message_id = None
         self._escalation_id = None
+
+        # The school this call belongs to - set with the greeting,
+        # from the token's metadata (services/tenants.py).
+        self._call_school = tenants.get_school(None)
 
         # =====================================================
         # AGENT AUDIO
@@ -308,20 +313,23 @@ class LivekitRoomServices:
     # this is the one line the AI speaks that was never going through
     # the LLM at all, so changing the answer-writing prompts alone
     # would have left the call opening in English no matter what.
+    # {school} is the caller's school's name - one agent, every school.
     _GREETINGS = {
         "en": (
-            "Assalam o Alaikum, and welcome to The Educators. "
+            "Assalam o Alaikum, and welcome to {school}. "
             "I am Vocira, your school assistant. How may I help you today?"
         ),
         "ur": (
-            "السلام علیکم، دی ایجوکیٹرز میں خوش آمدید۔ "
+            "السلام علیکم، {school} میں خوش آمدید۔ "
             "میں ووسیرا ہوں، آپ کا اسکول اسسٹنٹ۔ میں آپ کی کس طرح مدد کر سکتا ہوں؟"
         ),
     }
 
     _DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "ur").strip().lower()
 
-    GREETING_TEXT = _GREETINGS.get(_DEFAULT_LANGUAGE, _GREETINGS["en"])
+    GREETING_TEXT = _GREETINGS.get(_DEFAULT_LANGUAGE, _GREETINGS["en"]).replace(
+        "{school}", tenants.get_school(None).display_name(_DEFAULT_LANGUAGE)
+    )
 
     async def greet_once(self, participant=None):
         """
@@ -359,6 +367,9 @@ class LivekitRoomServices:
                     or (metadata or {}).get("language")
                     or self._DEFAULT_LANGUAGE
                 )
+                self._call_school = tenants.get_school(
+                    (metadata or {}).get("school")
+                )
         except Exception as error:
             print(
                 f"[Greeting] language lookup failed, using "
@@ -366,7 +377,9 @@ class LivekitRoomServices:
                 f"{type(error).__name__}: {error}"
             )
 
-        greeting = self._GREETINGS.get(language, self._GREETINGS["en"])
+        greeting = self._GREETINGS.get(language, self._GREETINGS["en"]).replace(
+            "{school}", self._call_school.display_name(language)
+        )
 
         try:
             # speak_text does not raise on every failure - if the
@@ -1194,7 +1207,8 @@ class LivekitRoomServices:
                 service_handle=self,
                 audio_source=self.agent_source,
                 text=human_text.system_message(
-                    message_key, self._admin_handoff_language
+                    message_key, self._admin_handoff_language,
+                    school=self._call_school,
                 ),
                 language=self._admin_handoff_language,
             )

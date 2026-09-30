@@ -36,30 +36,38 @@ def _is_error_page(soup: BeautifulSoup, text: str) -> bool:
     return len(text) < _MIN_PAGE_CHARS
 
 
-async def assemble_knowledge_base():
-    """Load PDFs, text files, and live web data into chunks."""
+async def assemble_knowledge_base(
+    pdf_path: str = PDF_PATH,
+    text_path: str = TEXT_FILES_PATH,
+    urls_path: str = URLS_FILE_PATH,
+):
+    """Load PDFs, text files, and live web data into chunks.
+
+    The folders are one school's (services/tenants.py); the default
+    is the first school's, as it always was.
+    """
     all_docs = []
 
     # 1.Load PDFs — blocking disk I/O, so we send it into to_thread,
     # so that the event loop stays free for concurrent /ask requests.
-    if os.path.exists(PDF_PATH) and os.listdir(PDF_PATH):
-        pdf_loader = PyPDFDirectoryLoader(PDF_PATH)
+    if os.path.exists(pdf_path) and os.listdir(pdf_path):
+        pdf_loader = PyPDFDirectoryLoader(pdf_path)
         pdf_docs = await asyncio.to_thread(pdf_loader.load)
         all_docs.extend(pdf_docs)
-        log.info(f"PDFs loaded from {PDF_PATH}")
+        log.info(f"PDFs loaded from {pdf_path}")
 
     # 2. Load Text Files — same reason to_thread 
-    if os.path.exists(TEXT_FILES_PATH) and os.listdir(TEXT_FILES_PATH):
+    if os.path.exists(text_path) and os.listdir(text_path):
         text_loader = DirectoryLoader(
-            TEXT_FILES_PATH, glob="./*.txt", loader_cls=TextLoader
+            text_path, glob="./*.txt", loader_cls=TextLoader
         )
         text_docs = await asyncio.to_thread(text_loader.load)
         all_docs.extend(text_docs)
-        log.info(f"Text files loaded from {TEXT_FILES_PATH}")
+        log.info(f"Text files loaded from {text_path}")
 
     # 3. Parallel Web Scraping
-    if os.path.exists(URLS_FILE_PATH):
-        with open(URLS_FILE_PATH, "r") as f:
+    if os.path.exists(urls_path):
+        with open(urls_path, "r") as f:
             urls = [line.strip() for line in f if line.strip()]
 
         if urls:

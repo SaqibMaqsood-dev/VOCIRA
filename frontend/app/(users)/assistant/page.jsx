@@ -698,9 +698,16 @@ export default function AssistantPage() {
         // request - that is the only way it reaches the pipeline.
         const guestLanguage = readGuestLanguage();
 
+        // Which school the guest is calling: the link they opened,
+        // e.g. /assistant?school=demo-b. The backend falls back to
+        // the first school for anything missing or unknown.
+        const guestSchool =
+          new URLSearchParams(window.location.search).get("school") || "";
+
         tokenEndpoint =
           `${API_BASE_URL}/livekit/guest/live_kit/token` +
-          `?language=${encodeURIComponent(guestLanguage)}`;
+          `?language=${encodeURIComponent(guestLanguage)}` +
+          (guestSchool ? `&school=${encodeURIComponent(guestSchool)}` : "");
 
         console.log(
           "Using guest LiveKit endpoint, language:",

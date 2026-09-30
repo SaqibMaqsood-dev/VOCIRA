@@ -47,8 +47,10 @@ from backend.microservices.livekit_Rag_services.services.groq.groq import (
 
 class ERPService:
 
-    def __init__(self):
-        self.client = ERPClient()
+    def __init__(self, client: ERPClient | None = None):
+        # client: one school's ERP site (see connectors.py); the
+        # default is the one in the service settings.
+        self.client = client or ERPClient()
         self._redis = RedisServices()
 
     # ==========================================================

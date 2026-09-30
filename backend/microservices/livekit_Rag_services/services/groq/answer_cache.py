@@ -37,7 +37,7 @@ _DO_NOT_CACHE = (
     "connecting you to",
 )
 
-_store: dict[tuple[str, str, str], tuple[float, str]] = {}
+_store: dict[tuple[str, str, str, str], tuple[float, str]] = {}
 
 
 def _normalise(question: str) -> str:
@@ -50,20 +50,22 @@ def _normalise(question: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def _key(user_id, question: str, language: str | None = None) -> tuple[str, str, str]:
+def _key(user_id, question: str, language: str | None = None,
+         school: str | None = None) -> tuple[str, str, str, str]:
     # a user_id of None (guest) gets its own bucket - shared by every
     # guest, so the language has to be in the key too, or an Urdu
-    # answer is handed to the next guest who asked in English.
-    return (str(user_id), (language or "").lower(), _normalise(question))
+    # answer is handed to the next guest who asked in English. And the
+    # school: one school's fee answer must never reach another's guest.
+    return (str(user_id), (school or "").lower(), (language or "").lower(), _normalise(question))
 
 
-def get(user_id, question: str, language: str | None = None) -> str | None:
+def get(user_id, question: str, language: str | None = None, school: str | None = None) -> str | None:
     """Return the remembered answer, or None."""
 
     if not question:
         return None
 
-    key = _key(user_id, question, language)
+    key = _key(user_id, question, language, school)
     found = _store.get(key)
 
     if not found:
@@ -78,7 +80,7 @@ def get(user_id, question: str, language: str | None = None) -> str | None:
     return answer
 
 
-def put(user_id, question: str, answer: str, language: str | None = None) -> bool:
+def put(user_id, question: str, answer: str, language: str | None = None, school: str | None = None) -> bool:
     """Remember an answer. Reports whether it was stored."""
 
     if not question or not answer:
@@ -95,7 +97,7 @@ def put(user_id, question: str, answer: str, language: str | None = None) -> boo
         oldest = min(_store, key=lambda k: _store[k][0])
         _store.pop(oldest, None)
 
-    _store[_key(user_id, question, language)] = (time.monotonic(), answer)
+    _store[_key(user_id, question, language, school)] = (time.monotonic(), answer)
     return True
 
 

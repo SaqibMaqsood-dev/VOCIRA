@@ -72,16 +72,20 @@ def wait_for_index(pc: Pinecone, index_name: str, timeout: int = 120):
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def upload_to_pinecone(chunks, embeddings, index_name: str):
+def upload_to_pinecone(chunks, embeddings, index_name: str, namespace: str = PINECONE_NAMESPACE):
     return PineconeVectorStore.from_documents(
         documents=chunks,
         embedding=embeddings,
         index_name=index_name,
-        namespace=PINECONE_NAMESPACE,
+        namespace=namespace,
     )
 
 
-def _rebuild_sync(chunks) -> dict:
+# Every school's knowledge sits in its own namespace of the one index
+# (services/tenants.py). A sync clears and refills only that school's
+# namespace; the default is the first school's, as it always was.
+
+def _rebuild_sync(chunks, namespace: str = PINECONE_NAMESPACE) -> dict:
     """Fully synchronous — call it only through asyncio.to_thread."""
     pc = _client()
     existing = pc.list_indexes().names()
@@ -113,14 +117,14 @@ def _rebuild_sync(chunks) -> dict:
     before = (
         index.describe_index_stats()
         .get("namespaces", {})
-        .get(PINECONE_NAMESPACE, {})
+        .get(namespace, {})
         .get("vector_count", 0)
     )
     if before:
         log.info("Removing %s old vectors from namespace '%s'",
-                 before, PINECONE_NAMESPACE)
+                 before, namespace)
         try:
-            index.delete(delete_all=True, namespace=PINECONE_NAMESPACE)
+            index.delete(delete_all=True, namespace=namespace)
             time.sleep(2)
         except Exception as exc:
             # Pinecone returns 404 if the namespace is absent - harmless
@@ -128,7 +132,7 @@ def _rebuild_sync(chunks) -> dict:
 
     # ---- naye chunks ----
     log.info("Uploading %s chunks...", len(chunks))
-    upload_to_pinecone(chunks, get_embeddings(), INDEX_NAME)
+    upload_to_pinecone(chunks, get_embeddings(), INDEX_NAME, namespace)
 
     # A Pinecone index becomes consistent after a short delay
     # Checked every second, not every two - the count is usually right
@@ -139,7 +143,7 @@ def _rebuild_sync(chunks) -> dict:
         after = (
             index.describe_index_stats()
             .get("namespaces", {})
-            .get(PINECONE_NAMESPACE, {})
+            .get(namespace, {})
             .get("vector_count", 0)
         )
         if after >= len(chunks):
@@ -147,7 +151,7 @@ def _rebuild_sync(chunks) -> dict:
 
     return {
         "index": INDEX_NAME,
-        "namespace": PINECONE_NAMESPACE,
+        "namespace": namespace,
         "dimension": EMBEDDING_DIM,
         "chunks_uploaded": len(chunks),
         "vectors_before": before,
@@ -155,12 +159,12 @@ def _rebuild_sync(chunks) -> dict:
     }
 
 
-async def rebuild_vector_store(chunks) -> dict:
+async def rebuild_vector_store(chunks, namespace: str = PINECONE_NAMESPACE) -> dict:
     """Clear the namespace and insert the new chunks. Returns a summary."""
-    return await asyncio.to_thread(_rebuild_sync, chunks)
+    return await asyncio.to_thread(_rebuild_sync, chunks, namespace)
 
 
-def _stats_sync() -> dict:
+def _stats_sync(namespace: str = PINECONE_NAMESPACE) -> dict:
     pc = _client()
     names = pc.list_indexes().names()
 
@@ -169,7 +173,7 @@ def _stats_sync() -> dict:
             "index": INDEX_NAME,
             "exists": False,
             "vectors": 0,
-            "namespace": PINECONE_NAMESPACE,
+            "namespace": namespace,
             "embedding_model": EMBEDDING_MODEL,
             "dimension": EMBEDDING_DIM,
             "top_k": TOP_K,
@@ -184,8 +188,8 @@ def _stats_sync() -> dict:
         "exists": True,
         "index_dimension": d.dimension,
         "metric": d.metric,
-        "namespace": PINECONE_NAMESPACE,
-        "vectors": ns.get(PINECONE_NAMESPACE, {}).get("vector_count", 0),
+        "namespace": namespace,
+        "vectors": ns.get(namespace, {}).get("vector_count", 0),
         "vectors_all_namespaces": s.get("total_vector_count", 0),
         "embedding_model": EMBEDDING_MODEL,
         "embedding_dimension": EMBEDDING_DIM,
@@ -194,13 +198,13 @@ def _stats_sync() -> dict:
     }
 
 
-async def get_index_stats() -> dict:
+async def get_index_stats(namespace: str = PINECONE_NAMESPACE) -> dict:
     """Pinecone index ki maujooda halat."""
-    return await asyncio.to_thread(_stats_sync)
+    return await asyncio.to_thread(_stats_sync, namespace)
 
 
-def connect_existing_store(index_name: str = None):
-    """Maujooda index se retriever banayein."""
+def connect_existing_store(index_name: str = None, namespace: str = PINECONE_NAMESPACE):
+    """Maujooda index se retriever banayein - one school's namespace."""
     target = index_name or INDEX_NAME
     pc = _client()
 
@@ -208,13 +212,26 @@ def connect_existing_store(index_name: str = None):
         store = PineconeVectorStore.from_existing_index(
             index_name=target,
             embedding=get_embeddings(),
-            namespace=PINECONE_NAMESPACE,
+            namespace=namespace,
         )
         retriever = store.as_retriever(
-            search_kwargs={"k": TOP_K, "namespace": PINECONE_NAMESPACE}
+            search_kwargs={"k": TOP_K, "namespace": namespace}
         )
-        log.info("Pinecone '%s' se juda (namespace '%s')", target, PINECONE_NAMESPACE)
+        log.info("Pinecone '%s' se juda (namespace '%s')", target, namespace)
         return retriever
 
     log.error("Index '%s' not found on Pinecone", target)
     return None
+
+
+def _namespace_counts_sync() -> dict:
+    pc = _client()
+    if INDEX_NAME not in pc.list_indexes().names():
+        return {}
+    stats = pc.Index(INDEX_NAME).describe_index_stats()
+    return {name: ns.get("vector_count", 0) for name, ns in stats.get("namespaces", {}).items()}
+
+
+async def namespace_vector_counts() -> dict:
+    """namespace -> vectors, for every school at once (one Pinecone call)."""
+    return await asyncio.to_thread(_namespace_counts_sync)

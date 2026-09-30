@@ -302,8 +302,51 @@ async def admin_escalations(
 # KNOWLEDGE BASE
 # =========================================================
 
+def _school_kinds(school: str | None):
+    """The chosen school, and its document folders."""
+    from backend.microservices.livekit_Rag_services.services import tenants
+    from backend.microservices.livekit_Rag_services.services.rag_engine import documents
+
+    chosen = tenants.get_school(school)
+    return chosen, documents.kinds_for(chosen.pdf_dir, chosen.text_dir)
+
+
+@router.get("/schools")
+async def admin_schools():
+    """
+    The schools this deployment serves - one agent, a knowledge base and
+    a records connector per school. Feeds the knowledge page's picker
+    and the Schools page.
+    """
+    from backend.microservices.livekit_Rag_services.routers.users_route import (
+        rag_route,
+    )
+    from backend.microservices.livekit_Rag_services.services import tenants
+    from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore import (
+        namespace_vector_counts,
+    )
+
+    try:
+        counts = await namespace_vector_counts()
+    except Exception as exc:
+        print(f"[Schools] could not read the vector counts: {exc}")
+        counts = None
+
+    schools = []
+    for school in tenants.public_list():
+        last = rag_route.sync_state(school["id"])
+        schools.append({
+            **school,
+            "vectors": None if counts is None else counts.get(school["namespace"], 0),
+            "last_sync": {"state": last.get("state"), "finished_at": last.get("finished_at")},
+            "guest_link": f"/assistant?school={school['id']}",
+        })
+
+    return {"schools": schools, "default": tenants.DEFAULT_SCHOOL_ID}
+
+
 @router.get("/knowledge")
-async def admin_knowledge():
+async def admin_knowledge(school: str | None = None):
     """
     Knowledge base ki asli halat.
 
@@ -320,20 +363,23 @@ async def admin_knowledge():
         get_index_stats,
     )
 
+    chosen, _ = _school_kinds(school)
+
     try:
-        stats = await get_index_stats()
+        stats = await get_index_stats(namespace=chosen.namespace)
     except Exception as exc:
         stats = {"error": f"{type(exc).__name__}: {exc}"}
 
     return {
+        "school": chosen.id,
         "index": stats,
-        "last_sync": getattr(rag_route, "_last_sync", {"state": "unknown"}),
+        "last_sync": rag_route.sync_state(chosen.id),
     }
 
 
 @router.post("/knowledge/sync", status_code=202)
-async def admin_sync_knowledge():
-    """Knowledge base dobara banayein (background mein)."""
+async def admin_sync_knowledge(school: str | None = None):
+    """One school's knowledge base dobara banayein (background mein)."""
 
     import asyncio
 
@@ -341,10 +387,12 @@ async def admin_sync_knowledge():
         rag_route,
     )
 
-    if rag_route._last_sync.get("state") == "running":
+    # One sync at a time across schools - they share the index.
+    if rag_route._sync_lock.locked():
         return {"state": "running", "message": "A sync is already running."}
 
-    asyncio.create_task(rag_route._run_sync())
+    chosen, _ = _school_kinds(school)
+    asyncio.create_task(rag_route._run_sync(chosen.id))
 
     return {
         "state": "started",
@@ -384,7 +432,7 @@ async def set_escalation_status(
 # =========================================================
 
 @router.get("/knowledge/documents")
-async def admin_knowledge_documents():
+async def admin_knowledge_documents(school: str | None = None):
     """
     Which documents exist, and how many chunks each produced.
 
@@ -399,9 +447,10 @@ async def admin_knowledge_documents():
         documents,
     )
 
-    sources = getattr(rag_route, "_last_sync", {}).get("sources") or {}
+    chosen, kinds = _school_kinds(school)
+    sources = rag_route.sync_state(chosen.id).get("sources") or {}
 
-    docs = documents.list_documents(chunks_by_source=sources)
+    docs = documents.list_documents(chunks_by_source=sources, kinds=kinds)
 
     return {
         "documents": docs,
@@ -412,7 +461,7 @@ async def admin_knowledge_documents():
 
 
 @router.post("/knowledge/documents", status_code=201)
-async def admin_upload_document(file: UploadFile = File(...)):
+async def admin_upload_document(file: UploadFile = File(...), school: str | None = None):
     """PDF ya TXT upload karein."""
 
     from backend.microservices.livekit_Rag_services.services.rag_engine import (
@@ -422,9 +471,11 @@ async def admin_upload_document(file: UploadFile = File(...)):
     content = await file.read()
 
     try:
+        _, kinds = _school_kinds(school)
         saved = documents.save_upload(
             filename=file.filename,
             content=content,
+            kinds=kinds,
         )
     except documents.DocumentError as error:
         raise HTTPException(
@@ -443,7 +494,7 @@ class NoteRequest(BaseModel):
 
 
 @router.post("/knowledge/notes", status_code=201)
-async def admin_add_note(request: NoteRequest):
+async def admin_add_note(request: NoteRequest, school: str | None = None):
     """
     Write a short note directly - no need to produce a PDF.
 
@@ -456,9 +507,11 @@ async def admin_add_note(request: NoteRequest):
     )
 
     try:
+        _, kinds = _school_kinds(school)
         saved = documents.save_note(
             title=request.title,
             text=request.text,
+            kinds=kinds,
         )
     except documents.DocumentError as error:
         raise HTTPException(
@@ -472,7 +525,7 @@ async def admin_add_note(request: NoteRequest):
 
 
 @router.delete("/knowledge/documents/{name}")
-async def admin_delete_document(name: str):
+async def admin_delete_document(name: str, school: str | None = None):
     """Document hatayein. Index se wo agli sync par nikalta hai."""
 
     from backend.microservices.livekit_Rag_services.services.rag_engine import (
@@ -480,7 +533,8 @@ async def admin_delete_document(name: str):
     )
 
     try:
-        removed = documents.delete_document(name)
+        _, kinds = _school_kinds(school)
+        removed = documents.delete_document(name, kinds=kinds)
     except documents.DocumentError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

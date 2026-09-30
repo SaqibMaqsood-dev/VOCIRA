@@ -29,6 +29,11 @@ KINDS = {
     ".txt": ("text", TEXT_FILES_PATH),
 }
 
+
+def kinds_for(pdf_dir: str, text_dir: str) -> dict:
+    """The same kinds, in one school's folders (services/tenants.py)."""
+    return {".pdf": ("pdf", pdf_dir), ".txt": ("text", text_dir)}
+
 MAX_BYTES = 10 * 1024 * 1024   # 10 MB
 MAX_NOTE_CHARS = 20000
 
@@ -82,21 +87,21 @@ def _resolve(kind_dir: str, filename: str) -> str:
     return full
 
 
-def _kind_for(filename: str):
+def _kind_for(filename: str, kinds: dict = KINDS):
     ext = os.path.splitext(filename)[1].lower()
 
-    if ext not in KINDS:
-        allowed = ", ".join(sorted(KINDS))
+    if ext not in kinds:
+        allowed = ", ".join(sorted(kinds))
         raise DocumentError(f"Only {allowed} files are supported")
 
-    return KINDS[ext]
+    return kinds[ext]
 
 
 # =========================================================
 # LIST
 # =========================================================
 
-def list_documents(chunks_by_source: dict | None = None) -> list[dict]:
+def list_documents(chunks_by_source: dict | None = None, kinds: dict = KINDS) -> list[dict]:
     """
     Disk par jo documents hain, un ki list.
 
@@ -108,7 +113,7 @@ def list_documents(chunks_by_source: dict | None = None) -> list[dict]:
     chunks_by_source = chunks_by_source or {}
     out = []
 
-    for ext, (kind, folder) in KINDS.items():
+    for ext, (kind, folder) in kinds.items():
         if not os.path.isdir(folder):
             continue
 
@@ -149,7 +154,7 @@ def list_documents(chunks_by_source: dict | None = None) -> list[dict]:
 # UPLOAD
 # =========================================================
 
-def save_upload(filename: str, content: bytes) -> dict:
+def save_upload(filename: str, content: bytes, kinds: dict = KINDS) -> dict:
     """Store an uploaded file where ingestion looks for it."""
 
     if not content:
@@ -161,7 +166,7 @@ def save_upload(filename: str, content: bytes) -> dict:
         )
 
     name = safe_filename(filename)
-    kind, folder = _kind_for(name)
+    kind, folder = _kind_for(name, kinds)
 
     os.makedirs(folder, exist_ok=True)
     path = _resolve(folder, name)
@@ -176,7 +181,7 @@ def save_upload(filename: str, content: bytes) -> dict:
 # NOTE  (for small things - no need to produce a PDF)
 # =========================================================
 
-def save_note(title: str, text: str) -> dict:
+def save_note(title: str, text: str, kinds: dict = KINDS) -> dict:
     """
     Ek chhota note .txt ki soorat mein.
 
@@ -204,8 +209,9 @@ def save_note(title: str, text: str) -> dict:
     if not name.lower().endswith(".txt"):
         name = f"{name}.txt"
 
-    os.makedirs(TEXT_FILES_PATH, exist_ok=True)
-    path = _resolve(TEXT_FILES_PATH, name)
+    text_dir = kinds[".txt"][1]
+    os.makedirs(text_dir, exist_ok=True)
+    path = _resolve(text_dir, name)
 
     # The title is written into the file as well - it gives the
     # RAG chunks context (the "School timings" part).
@@ -221,11 +227,11 @@ def save_note(title: str, text: str) -> dict:
 # DELETE
 # =========================================================
 
-def delete_document(name: str) -> bool:
+def delete_document(name: str, kinds: dict = KINDS) -> bool:
     """Delete a file. It leaves the index on the next sync."""
 
     name = safe_filename(name)
-    _, folder = _kind_for(name)
+    _, folder = _kind_for(name, kinds)
     path = _resolve(folder, name)
 
     if not os.path.isfile(path):

@@ -25,6 +25,7 @@ from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore 
     get_index_stats,
     rebuild_vector_store,
 )
+from backend.microservices.livekit_Rag_services.services import tenants
 
 # NOTE: ingestion is imported inside _run_sync(), not here. It pulls
 # in langchain's text splitters, which drag in sentence_transformers
@@ -46,13 +47,25 @@ INTERNAL_KEY = os.getenv(
 # other's vectors.
 _sync_lock = asyncio.Lock()
 
-_last_sync: dict = {
-    "state": "never",       # never | running | success | failed
-    "started_at": None,
-    "finished_at": None,
-    "result": None,
-    "error": None,
-}
+def _fresh_state() -> dict:
+    return {
+        "state": "never",       # never | running | success | failed
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "error": None,
+    }
+
+
+# One sync state per school - each school's knowledge is synced into
+# its own namespace, on its own. _last_sync stays the first school's,
+# so everything that already reads it keeps working.
+_sync_states: dict = {school_id: _fresh_state() for school_id in tenants.SCHOOLS}
+_last_sync: dict = _sync_states[tenants.DEFAULT_SCHOOL_ID]
+
+
+def sync_state(school_id: str | None = None) -> dict:
+    return _sync_states[tenants.get_school(school_id).id]
 
 # The sync result is written to disk as well.
 #
@@ -65,23 +78,32 @@ _STATE_FILE = os.path.join(
 )
 
 
-def _save_state() -> None:
+def _state_file(school_id: str) -> str:
+    # The first school keeps the file it always had.
+    if school_id == tenants.DEFAULT_SCHOOL_ID:
+        return _STATE_FILE
+    return os.path.join(os.path.dirname(_STATE_FILE), f".sync_state.{school_id}.json")
+
+
+def _save_state(school_id: str = tenants.DEFAULT_SCHOOL_ID) -> None:
     """This is a notification, not real work - just log a failure."""
     try:
-        os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
-        with open(_STATE_FILE, "w", encoding="utf-8") as handle:
-            json.dump(_last_sync, handle)
+        path = _state_file(school_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(_sync_states[school_id], handle)
     except Exception as error:
         print(f"[RAG Sync] could not save state: {error}")
 
 
-def _load_state() -> None:
+def _load_state(school_id: str = tenants.DEFAULT_SCHOOL_ID) -> None:
     """Restore the previous state when the service starts."""
     try:
-        if not os.path.isfile(_STATE_FILE):
+        path = _state_file(school_id)
+        if not os.path.isfile(path):
             return
 
-        with open(_STATE_FILE, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             saved = json.load(handle)
 
         if isinstance(saved, dict):
@@ -92,13 +114,14 @@ def _load_state() -> None:
                 saved["state"] = "failed"
                 saved["error"] = "Service restarted while syncing"
 
-            _last_sync.update(saved)
+            _sync_states[school_id].update(saved)
 
     except Exception as error:
         print(f"[RAG Sync] could not read the saved state: {error}")
 
 
-_load_state()
+for _school_id in tenants.SCHOOLS:
+    _load_state(_school_id)
 
 
 def _check_key(key: str | None):
@@ -113,10 +136,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-async def _run_sync():
-    """Background sync: files/URLs -> chunks -> embeddings -> Pinecone."""
+async def _run_sync(school_id: str | None = None):
+    """Background sync of one school: its files/URLs -> chunks ->
+    embeddings -> its own Pinecone namespace. Other schools untouched."""
+    school = tenants.get_school(school_id)
+    state = _sync_states[school.id]
+
     async with _sync_lock:
-        _last_sync.update(
+        state.update(
             state="running",
             started_at=_now(),
             finished_at=None,
@@ -129,20 +156,24 @@ async def _run_sync():
                 assemble_knowledge_base,
             )
 
-            print("[RAG Sync] assembling the knowledge base...")
+            print(f"[RAG Sync] assembling the knowledge base of {school.name}...")
             started = time.monotonic()
-            chunks = await assemble_knowledge_base()
+            chunks = await assemble_knowledge_base(
+                pdf_path=school.pdf_dir,
+                text_path=school.text_dir,
+                urls_path=school.urls_file,
+            )
             print(f"[RAG Sync] assembled in {time.monotonic() - started:.1f}s")
 
             if not chunks:
                 raise RuntimeError(
-                    "No content found — check data/pdf, data/text_files "
-                    "and data/urls.txt"
+                    f"No content found for {school.name} — check {school.pdf_dir}, "
+                    f"{school.text_dir} and {school.urls_file}"
                 )
 
             print(f"[RAG Sync] {len(chunks)} chunks -> Pinecone")
             uploading = time.monotonic()
-            result = await rebuild_vector_store(chunks)
+            result = await rebuild_vector_store(chunks, namespace=school.namespace)
             print(f"[RAG Sync] uploaded in {time.monotonic() - uploading:.1f}s")
 
             # How many chunks came from each file - the admin panel
@@ -155,24 +186,24 @@ async def _run_sync():
                     key = os.path.realpath(source) if os.path.exists(source) else source
                     counts[key] = counts.get(key, 0) + 1
 
-            _last_sync["sources"] = counts
-            _save_state()
+            state["sources"] = counts
+            _save_state(school.id)
 
-            _last_sync.update(
+            state.update(
                 state="success",
                 finished_at=_now(),
                 result=result,
             )
-            _save_state()
+            _save_state(school.id)
             print(f"[RAG Sync] done: {result}")
 
         except Exception as exc:
-            _last_sync.update(
+            state.update(
                 state="failed",
                 finished_at=_now(),
                 error=f"{type(exc).__name__}: {exc}",
             )
-            _save_state()
+            _save_state(school.id)
             print(f"[RAG Sync] fail: {exc}")
 
 
@@ -183,6 +214,7 @@ async def _run_sync():
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
 async def sync_knowledge_base(
     x_internal_key: str | None = Header(default=None),
+    school: str | None = None,
 ):
     """
     Knowledge base dobara banayein.
@@ -192,13 +224,13 @@ async def sync_knowledge_base(
     """
     _check_key(x_internal_key)
 
-    if _last_sync["state"] == "running":
+    if _sync_lock.locked():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A sync is already running.",
         )
 
-    asyncio.create_task(_run_sync())
+    asyncio.create_task(_run_sync(school))
 
     return {
         "state": "started",
@@ -213,16 +245,19 @@ async def sync_knowledge_base(
 @router.get("/status")
 async def knowledge_base_status(
     x_internal_key: str | None = Header(default=None),
+    school: str | None = None,
 ):
-    """Pinecone index ki halat aur aakhri sync ka nateeja."""
+    """Pinecone index ki halat aur aakhri sync ka nateeja - one school."""
     _check_key(x_internal_key)
+    chosen = tenants.get_school(school)
 
     try:
-        stats = await get_index_stats()
+        stats = await get_index_stats(namespace=chosen.namespace)
     except Exception as exc:
         stats = {"error": f"{type(exc).__name__}: {exc}"}
 
     return {
+        "school": chosen.id,
         "index": stats,
-        "last_sync": _last_sync,
+        "last_sync": sync_state(chosen.id),
     }

@@ -9,15 +9,24 @@ from backend.microservices.livekit_Rag_services.services.http_retry import (
 
 class ERPClient:
 
-    def __init__(self):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+    ):
 
-        self.base_url = settings.ERP_BASE_URL.rstrip("/")
+        # One school's ERP site (see connectors.py). Left out, it is
+        # the one in the service settings - the first school's.
+        self.base_url = (base_url or settings.ERP_BASE_URL).rstrip("/")
+
+        self._api_key = api_key or settings.ERP_API_KEY
 
         self.headers = {
             "Authorization": (
                 f"token "
-                f"{settings.ERP_API_KEY}:"
-                f"{settings.ERP_API_SECRET}"
+                f"{self._api_key}:"
+                f"{api_secret or settings.ERP_API_SECRET}"
             ),
             "Accept": "application/json",
         }
@@ -50,7 +59,7 @@ class ERPClient:
         print(f"PARAMS  : {params}")
         print(
             f"AUTH    : "
-            f"{'set' if settings.ERP_API_KEY else 'GHAYAB'}"
+            f"{'set' if self._api_key else 'GHAYAB'}"
         )
         print("=" * 52)
 
@@ -126,7 +135,7 @@ class ERPClient:
         print(f"FIELDS  : {sorted(payload.keys())}")
         print(
             f"AUTH    : "
-            f"{'set' if settings.ERP_API_KEY else 'GHAYAB'}"
+            f"{'set' if self._api_key else 'GHAYAB'}"
         )
         print("=" * 52)
 

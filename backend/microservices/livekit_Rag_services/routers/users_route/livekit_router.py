@@ -54,9 +54,10 @@ async def room_token(
 @router.post(
     "/guest/live_kit/token",
 )
-async def guest_room_token(language: str | None = None):
+async def guest_room_token(language: str | None = None, school: str | None = None):
     return await livekit_service.create_guest_room_token(
         language=language,
+        school=school,
     )
 
 

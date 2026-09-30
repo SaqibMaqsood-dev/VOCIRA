@@ -8,6 +8,7 @@ from livekit.api import AccessToken, VideoGrants
 from backend.helper_functions.database.session import SessionLocal
 
 from backend.microservices.livekit_Rag_services.core.config import settings
+from backend.microservices.livekit_Rag_services.services import tenants
 
 from backend.microservices.livekit_Rag_services.schema.livekit_schema import (
     LiveKitTokenResponse
@@ -145,6 +146,9 @@ class LivekitServices:
                         "role": "parent",
                         "type": "user",
                         "session_id": session_id,
+                        # Every guardian account belongs to the first
+                        # school for now - their records are its ERP.
+                        "school": tenants.DEFAULT_SCHOOL_ID,
                     }
                 )
             )
@@ -187,7 +191,7 @@ class LivekitServices:
     # language, a prompt instruction, a Piper voice and a greeting.
     SUPPORTED_LANGUAGES = ("en", "ur")
 
-    async def create_guest_room_token(self, language: str | None = None):
+    async def create_guest_room_token(self, language: str | None = None, school: str | None = None):
 
         async with SessionLocal() as db:
 
@@ -224,6 +228,11 @@ class LivekitServices:
             if chosen not in self.SUPPORTED_LANGUAGES:
                 chosen = None
 
+            # The school comes from the link the guest opened
+            # (/assistant?school=...). Unknown or missing means the
+            # first school - the call still goes ahead.
+            guest_school = tenants.get_school(school).id
+
             token = (
                 AccessToken(
                     api_key=settings.LIVEKIT_API_KEY,
@@ -243,6 +252,7 @@ class LivekitServices:
                             "type": "guest",
                             "session_id": session_id,
                             "language": chosen,
+                            "school": guest_school,
                         }
                     )
                 )

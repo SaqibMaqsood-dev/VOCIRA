@@ -181,12 +181,16 @@ async def ask_vocira(
     user_query: str,
     language: str | None = None,
     search_query: str | None = None,
+    school_name: str = "The Educators",
 ):
     """
     Core RAG logic — async, non-blocking, returns a single string answer.
 
     `search_query` is the router's plain-English restatement of the
     question (it costs no extra call - the router writes it anyway).
+
+    `retriever` searches one school's namespace, and `school_name` is
+    that school's - the same agent answers for every school.
     """
     # The caller's own language, not the deployment default - an
     # English guest was getting Urdu answers read out by the English
@@ -209,7 +213,7 @@ async def ask_vocira(
         language, _LANGUAGE_INSTRUCTIONS["en"]
     )
 
-    system_prompt = f"""You are Vocira, the official AI Assistant for 'The Educators'.
+    system_prompt = f"""You are Vocira, the official AI Assistant for '{school_name}'.
 Use the following verified context to answer the user's question.
 
 LANGUAGE:
