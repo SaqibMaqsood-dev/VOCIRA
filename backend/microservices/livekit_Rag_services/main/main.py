@@ -16,6 +16,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from backend.helper_functions.database import (create_database_engine , Base)
+# Registers the "schools" table (schools added from the admin panel)
+# before create_all runs.
+from backend.microservices.livekit_Rag_services.models import school_model  # noqa: F401
 
 
 

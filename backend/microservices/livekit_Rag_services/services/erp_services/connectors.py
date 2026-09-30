@@ -108,7 +108,9 @@ _ADAPTERS = {
     "erpnext": _erpnext_for,
 }
 
-_connectors: dict[str, RecordsConnector] = {}
+# Keyed by the school AND its records setting, so a school whose
+# records system was changed in the admin panel gets a fresh connector.
+_connectors: dict[tuple, RecordsConnector] = {}
 
 
 def connector_for(school, default_service: ERPService | None = None) -> RecordsConnector:
@@ -118,9 +120,10 @@ def connector_for(school, default_service: ERPService | None = None) -> RecordsC
     default_service is the ERPNext service to use for a school that
     keeps the service's own ERP settings (the first school).
     """
-    found = _connectors.get(school.id)
+    key = (school.id, school.records, school.records_env_prefix)
+    found = _connectors.get(key)
     if found is None:
         build = _ADAPTERS.get(school.records or "")
         found = build(school, default_service) if build else NoRecordsConnector()
-        _connectors[school.id] = found
+        _connectors[key] = found
     return found

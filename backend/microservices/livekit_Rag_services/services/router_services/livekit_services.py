@@ -231,6 +231,7 @@ class LivekitServices:
             # The school comes from the link the guest opened
             # (/assistant?school=...). Unknown or missing means the
             # first school - the call still goes ahead.
+            await tenants.refresh(force=not tenants.is_known(school))
             guest_school = tenants.get_school(school).id
 
             token = (

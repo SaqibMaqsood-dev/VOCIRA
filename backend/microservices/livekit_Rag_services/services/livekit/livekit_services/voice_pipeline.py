@@ -725,7 +725,9 @@ async def consume_audio(
 
     # The school comes from the token the backend minted - the login,
     # or the link a guest opened - never from anything said on the call.
-    call_school = tenants.get_school((metadata or {}).get("school")).id
+    requested_school = (metadata or {}).get("school")
+    await tenants.refresh(force=not tenants.is_known(requested_school))
+    call_school = tenants.get_school(requested_school).id
 
     print(f"Call school          : {call_school}")
 

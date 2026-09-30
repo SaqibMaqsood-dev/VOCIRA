@@ -302,13 +302,96 @@ async def admin_escalations(
 # KNOWLEDGE BASE
 # =========================================================
 
-def _school_kinds(school: str | None):
+async def _school_kinds(school: str | None):
     """The chosen school, and its document folders."""
     from backend.microservices.livekit_Rag_services.services import tenants
     from backend.microservices.livekit_Rag_services.services.rag_engine import documents
 
+    await tenants.refresh(force=not tenants.is_known(school))
     chosen = tenants.get_school(school)
     return chosen, documents.kinds_for(chosen.pdf_dir, chosen.text_dir)
+
+
+class SchoolRequest(BaseModel):
+    name: str = Field(min_length=3, max_length=80)
+    name_ur: str | None = Field(default=None, max_length=80)
+    helpline: str = Field(min_length=7, max_length=30)
+    records: str | None = None
+    records_env_prefix: str | None = Field(default=None, max_length=40)
+
+
+@router.post("/schools", status_code=201)
+async def admin_add_school(request: SchoolRequest):
+    """
+    Add a school - no code change. It gets its own knowledge base
+    (namespace and folders, from its id) straight away; documents are
+    added on the Knowledge page, and guests reach it by its link.
+    """
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    try:
+        school = await tenants.create_school(**request.model_dump())
+    except tenants.TenantError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error))
+
+    print(f"[Schools] added: {school.id} ({school.name})")
+    return {"id": school.id, "name": school.name, "namespace": school.namespace,
+            "guest_link": f"/assistant?school={school.id}"}
+
+
+@router.patch("/schools/{school_id}")
+async def admin_update_school(school_id: str, request: SchoolRequest):
+    """Change a school added from the panel (name, helpline, records)."""
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    try:
+        school = await tenants.update_school(school_id, **request.model_dump())
+    except tenants.TenantError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error))
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="School not found")
+
+    return {"id": school.id, "name": school.name}
+
+
+@router.delete("/schools/{school_id}")
+async def admin_delete_school(school_id: str):
+    """
+    Remove a school added from the panel. Its knowledge is cleared from
+    the index so it can never answer again; its files stay on disk.
+    """
+    import asyncio
+
+    from backend.microservices.livekit_Rag_services.routers.users_route import rag_route
+    from backend.microservices.livekit_Rag_services.services import tenants
+    from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore import clear_namespace
+
+    if rag_route._sync_lock.locked():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A sync is running - try again shortly.")
+
+    try:
+        school = await tenants.delete_school(school_id)
+    except tenants.TenantError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error))
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="School not found")
+
+    try:
+        await clear_namespace(school.namespace)
+    except Exception as exc:
+        print(f"[Schools] could not clear {school.namespace}: {exc}")
+
+    # Its sync record goes too; its uploaded files stay on disk.
+    import os
+
+    rag_route._sync_states.pop(school.id, None)
+    try:
+        os.remove(rag_route._state_file(school.id))
+    except FileNotFoundError:
+        pass
+
+    print(f"[Schools] removed: {school.id}")
+    return {"removed": school.id}
 
 
 @router.get("/schools")
@@ -325,6 +408,8 @@ async def admin_schools():
     from backend.microservices.livekit_Rag_services.services.rag_engine.vectorstore import (
         namespace_vector_counts,
     )
+
+    await tenants.refresh(force=True)
 
     try:
         counts = await namespace_vector_counts()
@@ -363,7 +448,7 @@ async def admin_knowledge(school: str | None = None):
         get_index_stats,
     )
 
-    chosen, _ = _school_kinds(school)
+    chosen, _ = await _school_kinds(school)
 
     try:
         stats = await get_index_stats(namespace=chosen.namespace)
@@ -391,7 +476,7 @@ async def admin_sync_knowledge(school: str | None = None):
     if rag_route._sync_lock.locked():
         return {"state": "running", "message": "A sync is already running."}
 
-    chosen, _ = _school_kinds(school)
+    chosen, _ = await _school_kinds(school)
     asyncio.create_task(rag_route._run_sync(chosen.id))
 
     return {
@@ -447,7 +532,7 @@ async def admin_knowledge_documents(school: str | None = None):
         documents,
     )
 
-    chosen, kinds = _school_kinds(school)
+    chosen, kinds = await _school_kinds(school)
     sources = rag_route.sync_state(chosen.id).get("sources") or {}
 
     docs = documents.list_documents(chunks_by_source=sources, kinds=kinds)
@@ -471,7 +556,7 @@ async def admin_upload_document(file: UploadFile = File(...), school: str | None
     content = await file.read()
 
     try:
-        _, kinds = _school_kinds(school)
+        _, kinds = await _school_kinds(school)
         saved = documents.save_upload(
             filename=file.filename,
             content=content,
@@ -507,7 +592,7 @@ async def admin_add_note(request: NoteRequest, school: str | None = None):
     )
 
     try:
-        _, kinds = _school_kinds(school)
+        _, kinds = await _school_kinds(school)
         saved = documents.save_note(
             title=request.title,
             text=request.text,
@@ -533,7 +618,7 @@ async def admin_delete_document(name: str, school: str | None = None):
     )
 
     try:
-        _, kinds = _school_kinds(school)
+        _, kinds = await _school_kinds(school)
         removed = documents.delete_document(name, kinds=kinds)
     except documents.DocumentError as error:
         raise HTTPException(

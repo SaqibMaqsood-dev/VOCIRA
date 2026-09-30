@@ -52,6 +52,12 @@ export default function KnowledgePage() {
   const { data: schoolsData } = useAdminData("/livekit/admin/schools", EMPTY_SCHOOLS);
   const schools = schoolsData?.schools || [];
   const [school, setSchool] = useState("educators");
+
+  // Opened from the Schools page ("Add documents") - start on that school.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("school");
+    if (wanted) setSchool(wanted);
+  }, []);
   const current = schools.find((s) => s.id === school);
   const q = `?school=${encodeURIComponent(school)}`;
 

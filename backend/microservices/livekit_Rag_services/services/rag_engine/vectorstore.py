@@ -235,3 +235,21 @@ def _namespace_counts_sync() -> dict:
 async def namespace_vector_counts() -> dict:
     """namespace -> vectors, for every school at once (one Pinecone call)."""
     return await asyncio.to_thread(_namespace_counts_sync)
+
+
+def _clear_namespace_sync(namespace: str) -> None:
+    pc = _client()
+    if INDEX_NAME not in pc.list_indexes().names():
+        return
+    try:
+        pc.Index(INDEX_NAME).delete(delete_all=True, namespace=namespace)
+    except Exception as exc:
+        # Pinecone answers 404 for a namespace that holds nothing - harmless
+        log.warning("Namespace delete: %s", exc)
+
+
+async def clear_namespace(namespace: str) -> None:
+    """Remove every vector of one school's namespace."""
+    if namespace == PINECONE_NAMESPACE:
+        raise ValueError("The first school's namespace is never cleared from here.")
+    await asyncio.to_thread(_clear_namespace_sync, namespace)

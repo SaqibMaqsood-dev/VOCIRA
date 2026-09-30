@@ -65,7 +65,12 @@ _last_sync: dict = _sync_states[tenants.DEFAULT_SCHOOL_ID]
 
 
 def sync_state(school_id: str | None = None) -> dict:
-    return _sync_states[tenants.get_school(school_id).id]
+    school_id = tenants.get_school(school_id).id
+    if school_id not in _sync_states:
+        # A school added from the admin panel after this process started.
+        _sync_states[school_id] = _fresh_state()
+        _load_state(school_id)
+    return _sync_states[school_id]
 
 # The sync result is written to disk as well.
 #
@@ -91,7 +96,7 @@ def _save_state(school_id: str = tenants.DEFAULT_SCHOOL_ID) -> None:
         path = _state_file(school_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
-            json.dump(_sync_states[school_id], handle)
+            json.dump(sync_state(school_id), handle)
     except Exception as error:
         print(f"[RAG Sync] could not save state: {error}")
 
@@ -140,7 +145,7 @@ async def _run_sync(school_id: str | None = None):
     """Background sync of one school: its files/URLs -> chunks ->
     embeddings -> its own Pinecone namespace. Other schools untouched."""
     school = tenants.get_school(school_id)
-    state = _sync_states[school.id]
+    state = sync_state(school.id)
 
     async with _sync_lock:
         state.update(
@@ -223,6 +228,7 @@ async def sync_knowledge_base(
     Progress /rag/status se dekhein.
     """
     _check_key(x_internal_key)
+    await tenants.refresh(force=not tenants.is_known(school))
 
     if _sync_lock.locked():
         raise HTTPException(
@@ -249,6 +255,7 @@ async def knowledge_base_status(
 ):
     """Pinecone index ki halat aur aakhri sync ka nateeja - one school."""
     _check_key(x_internal_key)
+    await tenants.refresh(force=not tenants.is_known(school))
     chosen = tenants.get_school(school)
 
     try:

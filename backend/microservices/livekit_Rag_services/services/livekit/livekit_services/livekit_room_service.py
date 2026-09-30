@@ -367,9 +367,9 @@ class LivekitRoomServices:
                     or (metadata or {}).get("language")
                     or self._DEFAULT_LANGUAGE
                 )
-                self._call_school = tenants.get_school(
-                    (metadata or {}).get("school")
-                )
+                requested_school = (metadata or {}).get("school")
+                await tenants.refresh(force=not tenants.is_known(requested_school))
+                self._call_school = tenants.get_school(requested_school)
         except Exception as error:
             print(
                 f"[Greeting] language lookup failed, using "
