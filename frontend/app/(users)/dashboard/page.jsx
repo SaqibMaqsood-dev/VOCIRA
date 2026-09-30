@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import StatsCard from "@/components/StatsCard";
 import CallTable from "@/components/CallTable";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
 import { authFetch, clearSession, getAccessToken } from "@/lib/session";
-import { parseServerTime } from "@/lib/time";
+import { localDateKey, parseServerTime } from "@/lib/time";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -21,6 +21,27 @@ const PAGE_SIZE = 20;
 // left the child names white on white. colorScheme on the <select>
 // darkens the popup itself for the same reason.
 const OPTION_STYLE = { backgroundColor: "#100944", color: "#ffffff" };
+
+// A day picked on the calendar ("2026-09-30") as the two UTC instants
+// that bound it on the viewer's own clock - so a call at 1am Pakistan
+// time counts on that day, not the one before (UTC).
+function dayRange(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return {
+    start: new Date(year, month - 1, day).toISOString(),
+    end: new Date(year, month - 1, day + 1).toISOString(),
+  };
+}
+
+// "30 Sep 2026"
+function formatDay(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 export default function DashboardPage() {
   const [sessions, setSessions] = useState([]);
@@ -40,6 +61,18 @@ export default function DashboardPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
 
+  // The day picked on the Call History calendar ("" = every day), and
+  // how many calls the last page brought - a full page means there
+  // may be more for that day. The stats' total counts every day, so
+  // it cannot tell.
+  const [callDate, setCallDate] = useState("");
+  const [lastPageSize, setLastPageSize] = useState(0);
+  const [loadingDay, setLoadingDay] = useState(false);
+
+  // Picking days quickly must not let a slower, older answer
+  // overwrite the newer one.
+  const dayRequest = useRef(0);
+
   // =========================================================
   // FETCH ONE PAGE OF SESSIONS
   //
@@ -48,9 +81,16 @@ export default function DashboardPage() {
   // and which loading flag they drive.
   // =========================================================
 
-  const fetchSessions = async (skip) => {
+  const fetchSessions = async (skip, date = callDate) => {
+    let query = `limit=${PAGE_SIZE}&skip=${skip}`;
+
+    if (date) {
+      const { start, end } = dayRange(date);
+      query += `&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+    }
+
     const sessionsResponse = await authFetch(
-      `/livekit/sessions/?limit=${PAGE_SIZE}&skip=${skip}`,
+      `/livekit/sessions/?${query}`,
       { method: "GET" }
     );
 
@@ -80,6 +120,35 @@ export default function DashboardPage() {
     return Array.isArray(sessionsData) ? sessionsData : [];
   };
 
+  // A day picked on the calendar - or "" for every day again.
+  const changeDate = async (date) => {
+    const request = ++dayRequest.current;
+
+    setCallDate(date);
+    setLoadingDay(true);
+    setError("");
+
+    try {
+      const firstPage = await fetchSessions(0, date);
+      if (firstPage && request === dayRequest.current) {
+        setSessions(firstPage);
+        setLastPageSize(firstPage.length);
+      }
+    } catch (err) {
+      if (request !== dayRequest.current) return;
+      console.error("Loading that day's calls failed:", err);
+      setError(
+        err instanceof TypeError
+          ? "Could not reach the server. Please make sure the API Gateway is running."
+          : err instanceof Error
+            ? err.message
+            : "Failed to load calls for that day."
+      );
+    } finally {
+      if (request === dayRequest.current) setLoadingDay(false);
+    }
+  };
+
   const loadMore = async () => {
     setLoadingMore(true);
 
@@ -87,6 +156,7 @@ export default function DashboardPage() {
       const nextPage = await fetchSessions(sessions.length);
       if (nextPage) {
         setSessions((prev) => [...prev, ...nextPage]);
+        setLastPageSize(nextPage.length);
       }
     } catch (err) {
       console.error("Load more failed:", err);
@@ -126,8 +196,17 @@ export default function DashboardPage() {
 
         // authFetch renews an expired access token and retries, so
         // a 401 here means the refresh token is gone too.
+        // "Today" and "this week" on the viewer's own clock - left
+        // to the server they were UTC's, and in Pakistan the UTC day
+        // only starts at 5am, so the card disagreed with the calendar.
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const weekStart = new Date(todayStart);
+        weekStart.setDate(todayStart.getDate() - ((todayStart.getDay() + 6) % 7));
+
         const statsResponse = await authFetch(
-          "/livekit/sessions/stats",
+          `/livekit/sessions/stats?today_start=${encodeURIComponent(todayStart.toISOString())}` +
+            `&week_start=${encodeURIComponent(weekStart.toISOString())}`,
           { method: "GET" }
         );
 
@@ -202,6 +281,7 @@ export default function DashboardPage() {
         // =====================================================
 
         setSessions(sessionsData || []);
+        setLastPageSize((sessionsData || []).length);
 
       } catch (err) {
         console.error("Dashboard error:", err);
@@ -337,7 +417,51 @@ export default function DashboardPage() {
     };
   });
 
-  const hasMore = sessions.length < stats.total_calls;
+  const hasMore = callDate
+    ? lastPageSize === PAGE_SIZE
+    : sessions.length < stats.total_calls;
+
+  const todayKey = localDateKey(new Date());
+
+  // Where "Most recent calls" used to be: pick a day, see that day.
+  const dayPicker = (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor="call-date" className="text-xs text-text-secondary">
+        {callDate ? "Calls on" : "Most recent calls · pick a day"}
+      </label>
+
+      <input
+        id="call-date"
+        type="date"
+        value={callDate}
+        max={todayKey}
+        disabled={loadingDay}
+        onChange={(event) => changeDate(event.target.value)}
+        // Open the calendar on a click anywhere in the box, not only
+        // on its small icon.
+        onClick={(event) => {
+          try {
+            event.currentTarget.showPicker?.();
+          } catch {
+            /* the browser opens it on its own */
+          }
+        }}
+        style={{ colorScheme: "dark" }}
+        className="cursor-pointer rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs text-text-primary outline-none transition hover:border-white/20 focus:border-accent-primary/60 disabled:opacity-60"
+      />
+
+      {callDate && (
+        <button
+          type="button"
+          onClick={() => changeDate("")}
+          disabled={loadingDay}
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:border-white/20 hover:text-text-primary disabled:opacity-60"
+        >
+          All dates
+        </button>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -497,9 +621,19 @@ export default function DashboardPage() {
         }}
         className="mt-6"
       >
-        <CallTable rows={callRows} />
+        <CallTable
+          rows={loadingDay ? [] : callRows}
+          headerRight={dayPicker}
+          emptyText={
+            loadingDay
+              ? "Loading…"
+              : callDate
+                ? `No calls on ${formatDay(callDate)}.`
+                : ""
+          }
+        />
 
-        {hasMore && (
+        {hasMore && !loadingDay && (
           <div className="mt-4 flex justify-center">
             <button
               type="button"
@@ -509,7 +643,9 @@ export default function DashboardPage() {
             >
               {loadingMore
                 ? "Loading…"
-                : `Load more (${sessions.length} of ${stats.total_calls})`}
+                : callDate
+                  ? "Load more"
+                  : `Load more (${sessions.length} of ${stats.total_calls})`}
             </button>
           </div>
         )}

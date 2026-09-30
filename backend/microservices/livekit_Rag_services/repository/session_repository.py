@@ -13,6 +13,13 @@ from backend.microservices.livekit_Rag_services.models import (
 )
 
 
+def _naive_utc(moment: datetime) -> datetime:
+    """UTC without a zone - how start_at is stored."""
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
+    return moment
+
+
 class SessionRepository(
     BaseRepository[session_model.Session]
 ):
@@ -68,17 +75,28 @@ class SessionRepository(
         user_id: UUID,
         limit: int = 10,
         skip: int = 0,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ):
         print(
             f"[SessionRepository] "
             f"Fetching sessions for user_id={user_id}"
         )
 
+        stmt = select(session_model.Session).where(
+            session_model.Session.user_id == user_id
+        )
+
+        # One day on the caller's calendar, as the two UTC instants
+        # that bound it. start_at is stored as UTC without a zone, so
+        # the bounds are compared the same way.
+        if start is not None:
+            stmt = stmt.where(session_model.Session.start_at >= _naive_utc(start))
+        if end is not None:
+            stmt = stmt.where(session_model.Session.start_at < _naive_utc(end))
+
         stmt = (
-            select(session_model.Session)
-            .where(
-                session_model.Session.user_id == user_id
-            )
+            stmt
             .order_by(
                 session_model.Session.start_at.desc()
             )
@@ -139,6 +157,7 @@ class SessionRepository(
         self,
         db: AsyncSession,
         user_id: UUID,
+        today_start: datetime | None = None,
     ) -> int:
         """
         Count authenticated user's sessions created today.
@@ -148,6 +167,10 @@ class SessionRepository(
 
         Therefore the datetime values sent to PostgreSQL
         must be timezone-naive.
+
+        `today_start` is midnight on the caller's own clock. Without it
+        "today" was the UTC day, which in Pakistan only begins at 5am -
+        at 5:10am the card said 3 calls today when there had been 21.
         """
 
         # Get current UTC time
@@ -155,10 +178,10 @@ class SessionRepository(
 
         # Remove timezone information because the DB column
         # is TIMESTAMP WITHOUT TIME ZONE.
-        start_of_day = datetime(
-            now.year,
-            now.month,
-            now.day,
+        start_of_day = (
+            _naive_utc(today_start)
+            if today_start is not None
+            else datetime(now.year, now.month, now.day)
         )
 
         end_of_day = start_of_day + timedelta(days=1)
@@ -185,6 +208,7 @@ class SessionRepository(
         self,
         db: AsyncSession,
         user_id: UUID,
+        week_start: datetime | None = None,
     ) -> int:
         """
         Count authenticated user's sessions from Monday
@@ -195,6 +219,9 @@ class SessionRepository(
 
         Therefore all datetime values sent to PostgreSQL
         are timezone-naive.
+
+        `week_start` is Monday midnight on the caller's own clock -
+        the same reason as today_start above.
         """
 
         # Get current UTC time
@@ -209,8 +236,9 @@ class SessionRepository(
 
         # Monday 00:00:00
         start_of_week = (
-            start_of_today
-            - timedelta(days=now.weekday())
+            _naive_utc(week_start)
+            if week_start is not None
+            else start_of_today - timedelta(days=now.weekday())
         )
 
         # Next Monday 00:00:00

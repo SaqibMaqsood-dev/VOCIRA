@@ -47,7 +47,12 @@ function HandlerBadge({ handler }) {
   );
 }
 
-export default function CallTable({ rows = [] }) {
+/**
+ * headerRight - what sits opposite the title (the dashboard puts its
+ *               date picker there); "Most recent calls" otherwise.
+ * emptyText   - said when there are no rows, e.g. "No calls on 29 Sep".
+ */
+export default function CallTable({ rows = [], headerRight = null, emptyText = "" }) {
   const hasRows = Array.isArray(rows) && rows.length > 0;
 
   return (
@@ -57,10 +62,12 @@ export default function CallTable({ rows = [] }) {
           TABLE HEADER
       ===================================================== */}
 
-      <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
         <h2 className="text-sm font-semibold tracking-wide text-text-primary">
           Call History
         </h2>
+
+        {headerRight}
 
         {/*
           This used to say "Last 30 days" - but the query behind it
@@ -70,9 +77,11 @@ export default function CallTable({ rows = [] }) {
           that label next to it. This says what the page actually
           does instead.
         */}
-        <p className="text-xs text-text-secondary">
-          Most recent calls
-        </p>
+        {!headerRight && (
+          <p className="text-xs text-text-secondary">
+            Most recent calls
+          </p>
+        )}
       </div>
 
       {/* =====================================================
@@ -167,6 +176,12 @@ export default function CallTable({ rows = [] }) {
 
                 </tr>
               ))
+            ) : emptyText ? (
+              <tr className="text-sm text-text-secondary">
+                <td colSpan={6} className="px-5 py-8 text-center text-sm">
+                  {emptyText}
+                </td>
+              </tr>
             ) : (
               /* =================================================
                  EMPTY STATE

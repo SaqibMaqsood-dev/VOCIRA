@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List
 from uuid import UUID
 
@@ -65,6 +66,11 @@ async def get_my_sessions(
     current_user=Depends(current_user),
     limit: int = 10,
     skip: int = 0,
+    # Only calls that started in [start, end) - the "My Calls"
+    # calendar sends the bounds of the picked day in the caller's own
+    # time zone, as UTC instants.
+    start: datetime | None = None,
+    end: datetime | None = None,
 ):
     print("======================================")
     print("CURRENT USER:", current_user)
@@ -76,6 +82,8 @@ async def get_my_sessions(
         user_id=current_user.user_id,
         limit=limit,
         skip=skip,
+        start=start,
+        end=end,
     )
 
     print("SESSIONS RETURNED:", len(sessions))
@@ -90,10 +98,16 @@ async def get_my_sessions(
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(current_user),
+    # Midnight today and Monday midnight on the caller's own clock, as
+    # UTC instants. Left out, "today" and "this week" are UTC's.
+    today_start: datetime | None = None,
+    week_start: datetime | None = None,
 ):
     return await ss_service.get_dashboard_stats(
         db=db,
         user_id=current_user.user_id,
+        today_start=today_start,
+        week_start=week_start,
     )
 
 

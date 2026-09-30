@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -162,9 +163,10 @@ class SessionService:
     # =========================================================
     # GET USER SESSIONS
     # =========================================================
-    async def get_user_sessions(self, db: AsyncSession, user_id: UUID, limit: int = 10, skip: int = 0):
+    async def get_user_sessions(self, db: AsyncSession, user_id: UUID, limit: int = 10, skip: int = 0,
+                                start: datetime | None = None, end: datetime | None = None):
         rows = await self.session_repo.get_user_sessions(
-            db=db, user_id=user_id, limit=limit, skip=skip
+            db=db, user_id=user_id, limit=limit, skip=skip, start=start, end=end
         )
         return await self._decorate(db=db, sessions=rows)
 
@@ -280,11 +282,17 @@ class SessionService:
     # =========================================================
     # DASHBOARD STATS
     # =========================================================
-    async def get_dashboard_stats(self, db: AsyncSession, user_id: UUID):
+    async def get_dashboard_stats(self, db: AsyncSession, user_id: UUID,
+                                  today_start: datetime | None = None,
+                                  week_start: datetime | None = None):
         return {
             "total_calls": await self.session_repo.count_user_sessions(db=db, user_id=user_id),
-            "today_calls": await self.session_repo.count_today_sessions(db=db, user_id=user_id),
-            "this_week_calls": await self.session_repo.count_week_sessions(db=db, user_id=user_id),
+            "today_calls": await self.session_repo.count_today_sessions(
+                db=db, user_id=user_id, today_start=today_start
+            ),
+            "this_week_calls": await self.session_repo.count_week_sessions(
+                db=db, user_id=user_id, week_start=week_start
+            ),
         }
 
     # =========================================================
