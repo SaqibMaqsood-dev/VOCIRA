@@ -13,12 +13,24 @@ const CONFIG = {
   noise: 0.18,
 };
 
-// The same colours, still - for a browser that gives no WebGL
-const FALLBACK = {
-  background:
-    "radial-gradient(ellipse at 20% 15%, #0a0850 0%, transparent 60%)," +
-    "radial-gradient(ellipse at 80% 85%, #0a0850 0%, transparent 55%), #000000",
-};
+// While WebGL is away, look for it again this often - the GPU can come
+// back (a driver reset, memory freed) and GradFlow with it, no reload.
+const RETRY_MS = 15000;
+
+const GLOW = { background: "radial-gradient(circle, #0a0850 0%, transparent 65%)" };
+
+/** The same colours for a browser that gives no WebGL - drifting slowly (globals.css). */
+function CssGradient() {
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-black">
+      <div className="gradient-drift absolute -left-[25vmax] -top-[25vmax] h-[80vmax] w-[80vmax] rounded-full" style={GLOW} />
+      <div
+        className="gradient-drift gradient-drift-reverse absolute -bottom-[25vmax] -right-[25vmax] h-[75vmax] w-[75vmax] rounded-full"
+        style={GLOW}
+      />
+    </div>
+  );
+}
 
 /**
  * Can this browser hand out a WebGL context right now? It may not: WebGL
@@ -40,7 +52,7 @@ function webglAvailable() {
   }
 }
 
-/** Anything GradFlow still throws ends in the still background, not a broken page. */
+/** Anything GradFlow still throws ends in the CSS background, not a broken page. */
 class FallBackOnError extends Component {
   constructor(props) {
     super(props);
@@ -51,29 +63,56 @@ class FallBackOnError extends Component {
     return { failed: true };
   }
 
+  componentDidCatch() {
+    this.props.onFail?.();
+  }
+
   render() {
-    return this.state.failed ? <div className="h-full w-full" style={FALLBACK} /> : this.props.children;
+    return this.state.failed ? <CssGradient /> : this.props.children;
   }
 }
 
 export default function BackgroundGradient() {
-  // null until mounted (WebGL is a browser question), then "webgl" or "still"
+  // null until mounted (WebGL is a browser question), then "webgl" or "css"
   const [mode, setMode] = useState(null);
+  // a fresh GradFlow each time WebGL comes back - the old one's context is gone
+  const [round, setRound] = useState(0);
   const box = useRef(null);
 
   useEffect(() => {
-    setMode(webglAvailable() ? "webgl" : "still");
+    setMode(webglAvailable() ? "webgl" : "css");
   }, []);
 
   // The GPU can drop the context later (a driver reset, memory pressure) -
-  // the canvas would go black; the still background takes over instead.
+  // the canvas would go black; the CSS background takes over instead.
+  // GradFlow's canvas comes a moment after this mounts, so it is watched
+  // on the box (the event does not bubble - caught on the way down).
   useEffect(() => {
     if (mode !== "webgl") return undefined;
-    const canvas = box.current?.querySelector("canvas");
-    if (!canvas) return undefined;
-    const lost = () => setMode("still");
-    canvas.addEventListener("webglcontextlost", lost);
-    return () => canvas.removeEventListener("webglcontextlost", lost);
+    const holder = box.current;
+    if (!holder) return undefined;
+    const lost = () => setMode("css");
+    holder.addEventListener("webglcontextlost", lost, true);
+    return () => holder.removeEventListener("webglcontextlost", lost, true);
+  }, [mode, round]);
+
+  // Without WebGL, keep asking - when the tab is looked at again, and now
+  // and then - and bring GradFlow back once the browser has it again.
+  useEffect(() => {
+    if (mode !== "css") return undefined;
+    const retry = () => {
+      if (document.visibilityState !== "visible" || !webglAvailable()) return;
+      setRound((n) => n + 1);
+      setMode("webgl");
+    };
+    const timer = setInterval(retry, RETRY_MS);
+    document.addEventListener("visibilitychange", retry);
+    window.addEventListener("focus", retry);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", retry);
+      window.removeEventListener("focus", retry);
+    };
   }, [mode]);
 
   if (mode === null) return null;
@@ -81,11 +120,11 @@ export default function BackgroundGradient() {
   return (
     <div ref={box} className="pointer-events-none fixed inset-0 -z-20">
       {mode === "webgl" ? (
-        <FallBackOnError>
+        <FallBackOnError key={round} onFail={() => setMode("css")}>
           <GradFlow config={CONFIG} />
         </FallBackOnError>
       ) : (
-        <div className="h-full w-full" style={FALLBACK} />
+        <CssGradient />
       )}
     </div>
   );

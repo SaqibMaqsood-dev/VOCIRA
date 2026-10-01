@@ -334,3 +334,27 @@ input::-ms-clear {
 @media (prefers-reduced-motion: reduce) {
   .animate-install-in { animation: none; }
 }
+
+/*
+ * The background without WebGL (components/BackgroundGradient.jsx):
+ * GradFlow's colours as two soft glows drifting slowly, so the page
+ * never sits on a frozen backdrop. Transforms only - cheap to animate.
+ */
+@keyframes gradient-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(14vw, 10vh) scale(1.2); }
+}
+
+.gradient-drift {
+  animation: gradient-drift 26s ease-in-out infinite;
+  will-change: transform;
+}
+
+.gradient-drift-reverse {
+  animation-direction: reverse;
+  animation-delay: -9s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gradient-drift { animation: none; }
+}
