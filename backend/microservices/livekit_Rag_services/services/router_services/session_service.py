@@ -97,12 +97,13 @@ class SessionService:
     # =========================================================
     # CREATE SESSION (transaction-safe)
     # =========================================================
-    async def create_session(self, db: AsyncSession, user_id: UUID | None):
+    async def create_session(self, db: AsyncSession, user_id: UUID | None, school_id: str | None = None):
         try:
             async with db.begin():  # transaction block
                 new_session = await self.session_repo.session_create(
                     db=db,
                     user_id=user_id,
+                    school_id=school_id,
                 )
 
                 if not new_session:

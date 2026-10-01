@@ -33,6 +33,10 @@ class Users(Base):
     # it out), so they can never drift apart. NULL means "not chosen",
     # which falls back to the STT_LANGUAGE default.
     language        : Mapped[str | None]  = mapped_column(VARCHAR(5), nullable=True)
+    # The school this account belongs to (a school admin's, or a
+    # guardian's). NULL means the first school - every account made
+    # before schools existed. A super admin belongs to none.
+    school_id       : Mapped[str | None]  = mapped_column(VARCHAR(40), nullable=True)
     location        : Mapped[str | None]  = mapped_column(Text, nullable=True)
     address         : Mapped[str | None]  = mapped_column(Text, nullable=True)
     date_birth      : Mapped[date | None] = mapped_column(Date, nullable=True)

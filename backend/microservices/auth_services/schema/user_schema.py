@@ -157,4 +157,7 @@ class InternalUserResponse(BaseModel):
     # the LLM prompt, the TTS voice and the greeting.
     language: Optional[str] = None
 
+    # The account's school - None means the first school.
+    school_id: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)

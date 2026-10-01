@@ -44,6 +44,8 @@ def access_claims(user) -> dict:
         "user_id": str(user.user_id),
         "role": role_of(user),
         "name": user.name,
+        # Which school a school admin may see (require_admin.py).
+        "school_id": getattr(user, "school_id", None),
     }
 
 

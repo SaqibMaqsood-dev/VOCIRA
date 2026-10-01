@@ -9,7 +9,9 @@ import { usePathname } from "next/navigation";
 
 export default function AppChrome({ children }) {
   const pathname = usePathname();
-  const isAdmin = pathname?.startsWith("/admin");
+  // Both panels bring their own frame (sidebar + header); the site's
+  // navbar on top of it covered the sidebar's top when scrolling.
+  const isAdmin = pathname?.startsWith("/admin") || pathname?.startsWith("/superadmin");
 
   // The background on both sides. Admin used to return early from
   // this branch, so the panel had no gradient at all.

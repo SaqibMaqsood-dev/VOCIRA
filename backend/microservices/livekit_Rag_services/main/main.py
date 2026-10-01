@@ -16,9 +16,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from backend.helper_functions.database import (create_database_engine , Base)
+from sqlalchemy import text
 # Registers the "schools" table (schools added from the admin panel)
 # before create_all runs.
 from backend.microservices.livekit_Rag_services.models import school_model  # noqa: F401
+from backend.microservices.livekit_Rag_services.models import school_connection_model  # noqa: F401
 
 
 
@@ -109,6 +111,34 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all
         )
 
+        # create_all never adds a column to a table that exists: the
+        # school of a call is added here, and every call made before
+        # schools existed was the first school's.
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS school_id VARCHAR(40)"
+        ))
+        await conn.execute(text(
+            "UPDATE sessions SET school_id = 'educators' WHERE school_id IS NULL"
+        ))
+        # a school defined in code that was removed on the Schools page
+        await conn.execute(text(
+            "ALTER TABLE schools ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        # the school's own address - its subdomain
+        await conn.execute(text(
+            "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subdomain VARCHAR(40)"
+        ))
+
+    # The first school's ERPNext keys move once from the server settings
+    # into its encrypted connection - so it is managed on the Schools page
+    # like every other school (services/erp_services/connections.py).
+    try:
+        from backend.microservices.livekit_Rag_services.services.erp_services import connections
+
+        await connections.adopt_server_erp()
+    except Exception as e:
+        print(f"WARNING: could not move the first school's ERP keys into its connection ({e}).")
+
     # -----------------------------------------------------
     # RabbitMQ
     # -----------------------------------------------------
@@ -140,6 +170,12 @@ async def lifespan(app: FastAPI):
             "Starting without admin notifications / voice worker handoff."
         )
 
+    # The live spreadsheet links of the schools whose records are
+    # sheets: re-read on a timer (services/erp_services/records_sync.py).
+    from backend.microservices.livekit_Rag_services.services.erp_services import records_sync
+
+    records_sync_task = asyncio.create_task(records_sync.run_forever())
+
     print(
         "Application started successfully"
     )
@@ -149,6 +185,12 @@ async def lifespan(app: FastAPI):
         yield
 
     finally:
+
+        records_sync_task.cancel()
+        try:
+            await records_sync_task
+        except asyncio.CancelledError:
+            pass
 
         # -------------------------------------------------
         # Stop notification consumer

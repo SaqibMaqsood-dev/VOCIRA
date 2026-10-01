@@ -9,6 +9,10 @@ from backend.helper_functions.database.session import SessionLocal
 
 from backend.microservices.livekit_Rag_services.core.config import settings
 from backend.microservices.livekit_Rag_services.services import tenants
+from backend.helper_functions.token_service.access_tokken.require_admin import (
+    caller_school,
+)
+from backend.microservices.auth_services.models.user_model import Users
 
 from backend.microservices.livekit_Rag_services.schema.livekit_schema import (
     LiveKitTokenResponse
@@ -93,9 +97,22 @@ class LivekitServices:
         # This is what later protects call logs.
         # --------------------------------------------------------
 
+        # The guardian's school, from their account - NULL is the first
+        # school, as every account made before schools existed.
+        # Read in a session of its own: a query on `db` opens a
+        # transaction, and create_session() below begins its own on
+        # `db` - "A transaction is already begun" failed every call.
+        async with SessionLocal() as lookup:
+            account_school = await lookup.scalar(
+                select(Users.school_id).where(Users.user_id == current_user.user_id)
+            )
+        await tenants.refresh(force=bool(account_school) and not tenants.is_known(account_school))
+        user_school = tenants.get_school(account_school).id
+
         session = await self.ss_service.create_session(
             db=db,
             user_id=current_user.user_id,
+            school_id=user_school,
         )
 
         if not session:
@@ -146,9 +163,7 @@ class LivekitServices:
                         "role": "parent",
                         "type": "user",
                         "session_id": session_id,
-                        # Every guardian account belongs to the first
-                        # school for now - their records are its ERP.
-                        "school": tenants.DEFAULT_SCHOOL_ID,
+                        "school": user_school,
                     }
                 )
             )
@@ -181,6 +196,7 @@ class LivekitServices:
             token=jwt_token,
             room=room_name,
             url=settings.LIVEKIT_URL,
+            school={"id": user_school, "name": tenants.get_school(user_school).name},
         )
 
     # ============================================================
@@ -193,6 +209,21 @@ class LivekitServices:
 
     async def create_guest_room_token(self, language: str | None = None, school: str | None = None):
 
+        # The school comes from the address the guest opened - the
+        # school's own subdomain. Without one there is no call: a guest
+        # must never land in some other (the default) school.
+        await tenants.refresh()
+        found = tenants.find_by_address(school)
+        if found is None:
+            await tenants.refresh(force=True)
+            found = tenants.find_by_address(school)
+        if found is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Open the assistant from your school's own link.",
+            )
+        guest_school = found.id
+
         async with SessionLocal() as db:
 
             # ----------------------------------------------------
@@ -204,6 +235,7 @@ class LivekitServices:
             session = await self.ss_service.create_session(
                 db=db,
                 user_id=None,
+                school_id=guest_school,
             )
 
             if not session:
@@ -227,12 +259,6 @@ class LivekitServices:
 
             if chosen not in self.SUPPORTED_LANGUAGES:
                 chosen = None
-
-            # The school comes from the link the guest opened
-            # (/assistant?school=...). Unknown or missing means the
-            # first school - the call still goes ahead.
-            await tenants.refresh(force=not tenants.is_known(school))
-            guest_school = tenants.get_school(school).id
 
             token = (
                 AccessToken(
@@ -278,6 +304,8 @@ class LivekitServices:
                 "room_name": room_name,
                 "token": token.to_jwt(),
                 "url": settings.LIVEKIT_URL,
+                # the school the call really goes to - the page shows it
+                "school": {"id": guest_school, "name": tenants.get_school(guest_school).name},
             }
 
     # ============================================================
@@ -387,6 +415,16 @@ class LivekitServices:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Voice session not found.",
+            )
+
+        # A school's admin takes only their own school's calls. Another
+        # school's escalation is "not found" - nothing is given away.
+        admin_school = caller_school(current_user)
+        if admin_school is not None and (session.school_id or tenants.DEFAULT_SCHOOL_ID) != admin_school:
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Escalation not found.",
             )
 
         # ========================================================

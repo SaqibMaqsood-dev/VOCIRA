@@ -212,7 +212,11 @@ export default function LoginPage() {
 
       setTimeout(() => {
         window.location.href =
-          role === "admin" ? "/admin" : "/dashboard";
+          role === "super_admin"
+            ? "/superadmin"
+            : role === "admin"
+              ? "/admin"
+              : "/dashboard";
       }, REDIRECT_DELAY_MS);
 
       return;

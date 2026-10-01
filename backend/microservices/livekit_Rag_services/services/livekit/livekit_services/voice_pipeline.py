@@ -111,10 +111,12 @@ session_service = SessionService()
 # AUTHORIZATION
 # =========================================================
 
+# Only a guardian's own login reads children's records. An admin account
+# used to be allowed too - so an admin login carrying a guardian id could
+# hear that family's fees and results on a call.
 ERP_ALLOWED_ROLES = {
     "parent",
     "guardian",
-    "admin",
 }
 
 ADMIN_HANDOFF_INTENT = "ADMIN_HANDOFF"
@@ -474,6 +476,9 @@ async def caller_children(user_id, connector=None) -> list[dict]:
     try:
         caller = await auth_client.get_internal_user(vocira_user_id=user_id)
         parent_id = caller.get("parent_id") if isinstance(caller, dict) else None
+        # only a guardian's own login has children to name on a call
+        if not isinstance(caller, dict) or normalize_role(caller.get("role")) not in ERP_ALLOWED_ROLES:
+            parent_id = None
         children = await connector.children_of(parent_id) if parent_id else []
     except Exception as error:
         print(f"[Children] could not read the caller's children: {error}")

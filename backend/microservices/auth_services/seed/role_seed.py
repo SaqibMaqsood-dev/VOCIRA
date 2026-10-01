@@ -7,6 +7,7 @@ async def role_seeding(db):
         {"role_id": "ROLE-001", "name": "admin"},
         {"role_id": "ROLE-002", "name": "guardian"},
         {"role_id": "ROLE-003", "name": "guest"},
+        {"role_id": "ROLE-004", "name": "super_admin"},
     ]
 
     try:

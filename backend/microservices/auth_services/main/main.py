@@ -21,6 +21,7 @@ from backend.microservices.auth_services.models import (
 from backend.helper_functions.database.engine import create_database_engine
 from backend.microservices.auth_services.core.config import settings
 from backend.helper_functions.database.base import Base
+from sqlalchemy import text
 
 
 # ============================================================
@@ -41,6 +42,19 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # create_all never adds a column to a table that exists, so the
+        # school of an account is added here - once, and harmlessly
+        # again on every later start.
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id VARCHAR(40)"
+        ))
+
+        # The platform's super admin role (runs every school).
+        await conn.execute(text(
+            "INSERT INTO role (role_id, name) SELECT 'ROLE-004', 'super_admin' "
+            "WHERE NOT EXISTS (SELECT 1 FROM role WHERE name = 'super_admin')"
+        ))
 
     print("Auth service started successfully")
 

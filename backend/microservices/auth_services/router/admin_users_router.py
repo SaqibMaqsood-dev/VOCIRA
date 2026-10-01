@@ -26,11 +26,15 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.helper_functions.database.session import get_db
 from backend.helper_functions.token_service.access_tokken.require_admin import (
+    DEFAULT_SCHOOL_ID,
+    SUPER_ADMIN_ROLE,
+    caller_school,
+    is_super_admin,
     require_admin,
 )
 from backend.microservices.auth_services.models.role_model import Role
@@ -76,6 +80,62 @@ class PasswordReset(BaseModel):
     password: str = Field(min_length=MIN_PASSWORD, max_length=128)
 
 
+# A school admin manages only their own school's accounts, and can
+# never hand out the platform-wide super_admin role - that would let a
+# school's admin make themselves the owner of every school.
+
+def _school_of(user: Users) -> str:
+    return (user.school_id or DEFAULT_SCHOOL_ID).strip().lower()
+
+
+def _check_role_allowed(admin, role_name: str | None) -> None:
+    if role_name and role_name.strip().lower() == SUPER_ADMIN_ROLE and not is_super_admin(admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the platform's super admin can give the super_admin role",
+        )
+
+
+async def _account_in_scope(db: AsyncSession, admin, user_id) -> Users:
+    """The account - or 404 when it is another school's (or a super admin's)."""
+    user = (
+        await db.execute(select(Users).where(Users.user_id == user_id))
+    ).scalar_one_or_none()
+
+    school = caller_school(admin)
+    if user is not None and school is not None:
+        role_name = (
+            await db.execute(select(Role.name).where(Role.role_id == user.role_id))
+        ).scalar_one_or_none()
+        if _school_of(user) != school or role_name == SUPER_ADMIN_ROLE:
+            user = None
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    return user
+
+
+# Only a guardian's own account is linked to a guardian in the school's
+# records - it is what lets a login hear a child's fees and results.
+_GUARDIAN_ROLES = {"guardian", "parent"}
+
+
+def _guardian_link_allowed(role_name: str | None, parent_id: str | None) -> None:
+    if parent_id and (role_name or "").strip().lower() not in _GUARDIAN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only a guardian account can be linked to a guardian in the school's records.",
+        )
+
+
+async def _role_name(db: AsyncSession, role_id: str) -> str | None:
+    row = (await db.execute(select(Role).where(Role.role_id == role_id))).scalar_one_or_none()
+    return row.name if row else None
+
+
 async def _role_id(db: AsyncSession, name: str) -> str:
     row = (
         await db.execute(select(Role).where(Role.name == name.strip().lower()))
@@ -102,6 +162,7 @@ def _shape(user: Users, role_name: str | None) -> dict:
         "name": user.name,
         "parent_id": user.parent_id,
         "role": role_name,
+        "school_id": _school_of(user),
         "created_at": (
             user.created_at.isoformat(timespec="seconds")
             if user.created_at
@@ -115,16 +176,26 @@ def _shape(user: Users, role_name: str | None) -> dict:
 # =========================================================
 
 @router.get("")
-async def list_users(db: AsyncSession = Depends(get_db)):
-    """Saare accounts, role ke naam ke sath."""
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    admin: Annotated[object, Depends(require_admin)] = None,
+):
+    """The accounts of the admin's school (every school for a super admin)."""
 
-    rows = (
-        await db.execute(
-            select(Users, Role.name)
-            .outerjoin(Role, Role.role_id == Users.role_id)
-            .order_by(Users.created_at.desc())
+    query = (
+        select(Users, Role.name)
+        .outerjoin(Role, Role.role_id == Users.role_id)
+        .order_by(Users.created_at.desc())
+    )
+
+    school = caller_school(admin)
+    if school is not None:
+        query = query.where(
+            func.coalesce(Users.school_id, DEFAULT_SCHOOL_ID) == school,
+            func.coalesce(Role.name, "") != SUPER_ADMIN_ROLE,
         )
-    ).all()
+
+    rows = (await db.execute(query)).all()
 
     users = [_shape(user, role) for user, role in rows]
 
@@ -140,9 +211,16 @@ async def list_users(db: AsyncSession = Depends(get_db)):
 # =========================================================
 
 @router.get("/roles")
-async def list_roles(db: AsyncSession = Depends(get_db)):
+async def list_roles(
+    db: AsyncSession = Depends(get_db),
+    admin: Annotated[object, Depends(require_admin)] = None,
+):
     rows = (await db.execute(select(Role).order_by(Role.name))).scalars().all()
-    return [{"role_id": r.role_id, "name": r.name} for r in rows]
+    return [
+        {"role_id": r.role_id, "name": r.name}
+        for r in rows
+        if r.name != SUPER_ADMIN_ROLE or is_super_admin(admin)
+    ]
 
 
 # =========================================================
@@ -153,7 +231,9 @@ async def list_roles(db: AsyncSession = Depends(get_db)):
 async def create_user(
     request: UserCreate,
     db: AsyncSession = Depends(get_db),
+    admin: Annotated[object, Depends(require_admin)] = None,
 ):
+    _check_role_allowed(admin, request.role)
     email = str(request.email).strip().lower()
 
     exists = (
@@ -167,6 +247,7 @@ async def create_user(
         )
 
     role_id = await _role_id(db=db, name=request.role)
+    _guardian_link_allowed(request.role, (request.parent_id or "").strip() or None)
 
     user = Users(
         user_id=uuid.uuid4(),
@@ -175,6 +256,9 @@ async def create_user(
         parent_id=(request.parent_id or "").strip() or None,
         role_id=role_id,
         password_hashed=Hash.get_hash_password(request.password),
+        # A school admin's new accounts are their school's. A super
+        # admin's are the first school's until a school is chosen.
+        school_id=caller_school(admin),
     )
 
     db.add(user)
@@ -195,16 +279,10 @@ async def update_user(
     user_id: uuid.UUID,
     request: UserUpdate,
     db: AsyncSession = Depends(get_db),
+    admin: Annotated[object, Depends(require_admin)] = None,
 ):
-    user = (
-        await db.execute(select(Users).where(Users.user_id == user_id))
-    ).scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    _check_role_allowed(admin, request.role)
+    user = await _account_in_scope(db, admin, user_id)
 
     if request.email is not None:
         email = str(request.email).strip().lower()
@@ -246,6 +324,15 @@ async def update_user(
         user.role_id = await _role_id(db=db, name=request.role)
         role_name = request.role.strip().lower()
 
+    # an account that is not (or no longer) a guardian's carries no guardian link
+    final_role = role_name or await _role_name(db, user.role_id)
+    if (final_role or "").lower() not in _GUARDIAN_ROLES:
+        if request.parent_id is not None:
+            _guardian_link_allowed(final_role, request.parent_id.strip() or None)
+        if user.parent_id:
+            print(f"[Admin] {user.email}: no longer a guardian - guardian link removed")
+        user.parent_id = None
+
     await db.commit()
     await db.refresh(user)
 
@@ -270,6 +357,7 @@ async def reset_password(
     user_id: uuid.UUID,
     request: PasswordReset,
     db: AsyncSession = Depends(get_db),
+    admin: Annotated[object, Depends(require_admin)] = None,
 ):
     """
     Naya password set karein.
@@ -279,15 +367,7 @@ async def reset_password(
     forgotten theirs.
     """
 
-    user = (
-        await db.execute(select(Users).where(Users.user_id == user_id))
-    ).scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    user = await _account_in_scope(db, admin, user_id)
 
     user.password_hashed = Hash.get_hash_password(request.password)
     await db.commit()
@@ -307,15 +387,7 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
     admin: Annotated[object, Depends(require_admin)] = None,
 ):
-    user = (
-        await db.execute(select(Users).where(Users.user_id == user_id))
-    ).scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    user = await _account_in_scope(db, admin, user_id)
 
     # Deleting your own account locks you out of the panel with no
     # way back in.

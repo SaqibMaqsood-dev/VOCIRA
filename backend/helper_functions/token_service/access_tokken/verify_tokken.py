@@ -32,6 +32,7 @@ def verify_jwt(token, credentials_exception):
             user_id=user_id,
             parent_id=parent_id,
             role=str(role).strip().lower() if role else None,
+            school_id=payload.get("school_id"),
         )
 
     except InvalidTokenError:

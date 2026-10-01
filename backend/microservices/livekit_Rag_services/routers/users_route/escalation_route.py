@@ -19,6 +19,7 @@ from backend.helper_functions.token_service.access_tokken.get_current_user impor
 
 from backend.helper_functions.token_service.access_tokken.require_admin import (
     require_admin,
+    require_super_admin,
 )
 
 
@@ -64,9 +65,10 @@ async def get_all_escalations(
     db: AsyncSession = Depends(get_db),
     # This carried only `current_user` before - meaning ANY
     # logged-in parent could see every escalation, other families'
-    # questions included. This is the full list, so it has to be
-    # admin-only.
-    admin=Depends(require_admin),
+    # questions included. This is the full list across every school,
+    # so it is the platform super admin's only - a school's admin uses
+    # /admin/escalations, which is limited to their school.
+    admin=Depends(require_super_admin),
 ):
     return await escalation_service.get_all_escalations(
         db=db,

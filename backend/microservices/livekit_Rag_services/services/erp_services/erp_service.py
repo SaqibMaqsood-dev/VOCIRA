@@ -45,6 +45,194 @@ from backend.microservices.livekit_Rag_services.services.groq.groq import (
 )
 
 
+def match_child_names(student_name: str, students: list) -> list[str]:
+    """
+    Which of a guardian's own children a spoken name means -
+    students are [{"name": <id>, "student_name": <full name>}], already
+    limited to that guardian's children. Exact name, then first name,
+    then the closest name if it is clearly closer than every sibling.
+    Shared by every records connector (ERPNext, spreadsheet).
+    """
+
+    requested_name = (
+        student_name.strip().lower()
+    )
+
+    matched_ids = []
+
+    # Filled in below as a last-resort fallback: the closest
+    # student by name-similarity, used only if nothing matches
+    # exactly or by first name.
+    best_fuzzy_id = None
+    best_fuzzy_score = 0.0
+
+    # The runner-up matters as much as the winner: accepting a
+    # close-but-not-exact name is only safe when it is clearly
+    # closer than every OTHER child of this same guardian.
+    best_distinct_score = 0.0
+    second_best_distinct_score = 0.0
+
+    for student in students:
+
+        if not isinstance(
+            student,
+            dict,
+        ):
+            continue
+
+        student_id = student.get(
+            "name"
+        )
+
+        actual_name = student.get(
+            "student_name"
+        )
+
+        if not student_id or not actual_name:
+            continue
+
+        actual_name_normalized = (
+            actual_name.strip().lower()
+        )
+
+        # --------------------------------------------------
+        # Exact full name
+        # --------------------------------------------------
+
+        if (
+            actual_name_normalized
+            == requested_name
+        ):
+
+            matched_ids.append(
+                student_id
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # First name
+        #
+        # Alisha -> Alisha Ahmed
+        # --------------------------------------------------
+
+        first_name = (
+            actual_name_normalized
+            .split()[0]
+        )
+
+        if first_name == requested_name:
+
+            matched_ids.append(
+                student_id
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # Fuzzy fallback candidate
+        #
+        # The router-LLM transliterates a spoken (often Urdu)
+        # name into Roman English before it ever reaches here,
+        # and transliteration is not always exact: "حنا" comes
+        # back as "Heena" against a record that says "Hina",
+        # "آمنہ" as "Aamna" against "Amna". An exact or
+        # first-name match is tried first; this only tracks the
+        # closest name in case both of those come up empty, so
+        # a real child is not endlessly asked for again over a
+        # one-letter spelling difference.
+        #
+        # The comparison is made against the whole name as well
+        # as the first name. It used to be first-name-only, so a
+        # guardian who said the FULL name got nothing whenever
+        # the spelling differed at all ("Aamna Farooq" scored
+        # 0.32 against "amna" and fell straight through) - the
+        # one case where the caller had been most specific was
+        # the one most likely to fail.
+        # --------------------------------------------------
+
+        # Two separate questions, because they need different
+        # comparisons:
+        #
+        #   how close is this to a real name at all  -> the best
+        #   match any way round, used as the floor;
+        #
+        #   which of THESE children is meant         -> first
+        #   names only. Siblings share a surname, so comparing
+        #   full names makes every one of them look alike:
+        #   "Heena Farooq" scores 0.87 against "Hina Farooq" and
+        #   0.78 against "Amna Farooq", and the gap between the
+        #   right child and the wrong one all but disappears.
+        name_score = max(
+            SequenceMatcher(
+                None, requested_name, actual_name_normalized
+            ).ratio(),
+            SequenceMatcher(
+                None, requested_name, first_name
+            ).ratio(),
+        )
+
+        # Against EVERY part of the record's name, not just the
+        # first. The called name is often the second one here:
+        # "Muhammad Ali" is asked about as "Ali", and comparing
+        # that to "Muhammad" alone scored 0.18 - losing to a
+        # sibling called "Alisha" at 0.67, so the guardian was
+        # answered about the wrong child.
+        requested_first = requested_name.split()[0]
+
+        distinct_score = max(
+            SequenceMatcher(None, requested_first, part).ratio()
+            for part in actual_name_normalized.split()
+        )
+
+        name_score = max(name_score, distinct_score)
+
+        if distinct_score > best_distinct_score:
+            second_best_distinct_score = best_distinct_score
+            best_distinct_score = distinct_score
+            best_fuzzy_score = name_score
+            best_fuzzy_id = student_id
+        elif distinct_score > second_best_distinct_score:
+            second_best_distinct_score = distinct_score
+
+    # --------------------------------------------------
+    # Nothing matched exactly - fall back to the closest name,
+    # but only when it is close enough to be the same name
+    # rather than a different child entirely.
+    # --------------------------------------------------
+
+    # 0.75 was too strict for real transliterations - "Heena"
+    # against a record saying "Hina" scores 0.67 and the caller
+    # was told their own child could not be found. The floor is
+    # lower now, but a match must also beat the next-closest
+    # sibling by a clear margin, so a lower bar cannot start
+    # answering about the wrong child.
+    if (
+        not matched_ids
+        and best_fuzzy_id
+        and best_fuzzy_score >= 0.6
+        and best_distinct_score - second_best_distinct_score >= 0.1
+    ):
+        matched_ids.append(best_fuzzy_id)
+
+    print("=" * 70)
+    print("[STUDENT NAME RESULT]")
+    print(
+        f"Requested Name : {student_name}"
+    )
+    print(
+        f"Matched IDs    : {matched_ids}"
+    )
+    print(
+        f"Best Fuzzy     : {best_fuzzy_id} "
+        f"({best_fuzzy_score:.2f}, first-name margin "
+        f"{best_distinct_score:.2f} vs {second_best_distinct_score:.2f})"
+    )
+    print("=" * 70)
+
+    return matched_ids
+
+
 class ERPService:
 
     def __init__(self, client: ERPClient | None = None):
@@ -908,183 +1096,7 @@ class ERPService:
                 "ERP Student response is invalid"
             )
 
-        requested_name = (
-            student_name.strip().lower()
-        )
-
-        matched_ids = []
-
-        # Filled in below as a last-resort fallback: the closest
-        # student by name-similarity, used only if nothing matches
-        # exactly or by first name.
-        best_fuzzy_id = None
-        best_fuzzy_score = 0.0
-
-        # The runner-up matters as much as the winner: accepting a
-        # close-but-not-exact name is only safe when it is clearly
-        # closer than every OTHER child of this same guardian.
-        best_distinct_score = 0.0
-        second_best_distinct_score = 0.0
-
-        for student in students:
-
-            if not isinstance(
-                student,
-                dict,
-            ):
-                continue
-
-            student_id = student.get(
-                "name"
-            )
-
-            actual_name = student.get(
-                "student_name"
-            )
-
-            if not student_id or not actual_name:
-                continue
-
-            actual_name_normalized = (
-                actual_name.strip().lower()
-            )
-
-            # --------------------------------------------------
-            # Exact full name
-            # --------------------------------------------------
-
-            if (
-                actual_name_normalized
-                == requested_name
-            ):
-
-                matched_ids.append(
-                    student_id
-                )
-
-                continue
-
-            # --------------------------------------------------
-            # First name
-            #
-            # Alisha -> Alisha Ahmed
-            # --------------------------------------------------
-
-            first_name = (
-                actual_name_normalized
-                .split()[0]
-            )
-
-            if first_name == requested_name:
-
-                matched_ids.append(
-                    student_id
-                )
-
-                continue
-
-            # --------------------------------------------------
-            # Fuzzy fallback candidate
-            #
-            # The router-LLM transliterates a spoken (often Urdu)
-            # name into Roman English before it ever reaches here,
-            # and transliteration is not always exact: "حنا" comes
-            # back as "Heena" against a record that says "Hina",
-            # "آمنہ" as "Aamna" against "Amna". An exact or
-            # first-name match is tried first; this only tracks the
-            # closest name in case both of those come up empty, so
-            # a real child is not endlessly asked for again over a
-            # one-letter spelling difference.
-            #
-            # The comparison is made against the whole name as well
-            # as the first name. It used to be first-name-only, so a
-            # guardian who said the FULL name got nothing whenever
-            # the spelling differed at all ("Aamna Farooq" scored
-            # 0.32 against "amna" and fell straight through) - the
-            # one case where the caller had been most specific was
-            # the one most likely to fail.
-            # --------------------------------------------------
-
-            # Two separate questions, because they need different
-            # comparisons:
-            #
-            #   how close is this to a real name at all  -> the best
-            #   match any way round, used as the floor;
-            #
-            #   which of THESE children is meant         -> first
-            #   names only. Siblings share a surname, so comparing
-            #   full names makes every one of them look alike:
-            #   "Heena Farooq" scores 0.87 against "Hina Farooq" and
-            #   0.78 against "Amna Farooq", and the gap between the
-            #   right child and the wrong one all but disappears.
-            name_score = max(
-                SequenceMatcher(
-                    None, requested_name, actual_name_normalized
-                ).ratio(),
-                SequenceMatcher(
-                    None, requested_name, first_name
-                ).ratio(),
-            )
-
-            # Against EVERY part of the record's name, not just the
-            # first. The called name is often the second one here:
-            # "Muhammad Ali" is asked about as "Ali", and comparing
-            # that to "Muhammad" alone scored 0.18 - losing to a
-            # sibling called "Alisha" at 0.67, so the guardian was
-            # answered about the wrong child.
-            requested_first = requested_name.split()[0]
-
-            distinct_score = max(
-                SequenceMatcher(None, requested_first, part).ratio()
-                for part in actual_name_normalized.split()
-            )
-
-            name_score = max(name_score, distinct_score)
-
-            if distinct_score > best_distinct_score:
-                second_best_distinct_score = best_distinct_score
-                best_distinct_score = distinct_score
-                best_fuzzy_score = name_score
-                best_fuzzy_id = student_id
-            elif distinct_score > second_best_distinct_score:
-                second_best_distinct_score = distinct_score
-
-        # --------------------------------------------------
-        # Nothing matched exactly - fall back to the closest name,
-        # but only when it is close enough to be the same name
-        # rather than a different child entirely.
-        # --------------------------------------------------
-
-        # 0.75 was too strict for real transliterations - "Heena"
-        # against a record saying "Hina" scores 0.67 and the caller
-        # was told their own child could not be found. The floor is
-        # lower now, but a match must also beat the next-closest
-        # sibling by a clear margin, so a lower bar cannot start
-        # answering about the wrong child.
-        if (
-            not matched_ids
-            and best_fuzzy_id
-            and best_fuzzy_score >= 0.6
-            and best_distinct_score - second_best_distinct_score >= 0.1
-        ):
-            matched_ids.append(best_fuzzy_id)
-
-        print("=" * 70)
-        print("[STUDENT NAME RESULT]")
-        print(
-            f"Requested Name : {student_name}"
-        )
-        print(
-            f"Matched IDs    : {matched_ids}"
-        )
-        print(
-            f"Best Fuzzy     : {best_fuzzy_id} "
-            f"({best_fuzzy_score:.2f}, first-name margin "
-            f"{best_distinct_score:.2f} vs {second_best_distinct_score:.2f})"
-        )
-        print("=" * 70)
-
-        return matched_ids
+        return match_child_names(student_name, students)
 
     # ==========================================================
     # ENRICH PROGRAM ENROLLMENT

@@ -48,6 +48,55 @@ async def room_token(
 
 
 # ============================================================
+# WHICH SCHOOL A CALL GOES TO
+# ============================================================
+
+@router.get("/tenant/{address}")
+async def school_at_address(address: str):
+    """
+    The school at an address - the subdomain the page was opened on
+    (medicaps.vocira.com -> "medicaps"), or a school id from an older
+    /s/<id> link. Only that one school, by name: there is no list of
+    schools to ask for, so no school learns which others use Vocira.
+    """
+    from fastapi import HTTPException
+
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    await tenants.refresh()
+    school = tenants.find_by_address(address)
+    if school is None:
+        # added a moment ago, perhaps
+        await tenants.refresh(force=True)
+        school = tenants.find_by_address(address)
+    if school is None:
+        raise HTTPException(status_code=404, detail="There is no school at this address.")
+    return {"id": school.id, "name": school.name, "name_ur": school.name_ur,
+            "subdomain": tenants.address_of(school)}
+
+
+@router.get("/live_kit/school")
+async def my_call_school(
+    db: AsyncSession = Depends(get_db),
+    current_user: user_schema.User = Depends(current_user),
+):
+    """
+    The school a signed-in user's call goes to - their account's, read
+    exactly as the call token reads it, so what the page shows is what
+    the call does. A link or a choice on the page never changes it.
+    """
+    from sqlalchemy import select
+
+    from backend.microservices.auth_services.models.user_model import Users
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    school_id = await db.scalar(select(Users.school_id).where(Users.user_id == current_user.user_id))
+    await tenants.refresh(force=bool(school_id) and not tenants.is_known(school_id))
+    school = tenants.get_school(school_id)
+    return {"id": school.id, "name": school.name, "name_ur": school.name_ur, "from": "account"}
+
+
+# ============================================================
 # GUEST LIVEKIT TOKEN
 # ============================================================
 

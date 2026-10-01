@@ -27,7 +27,11 @@ import { ShieldAlert } from "lucide-react";
 import { getAccessToken } from "@/lib/session";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
-export default function AdminGuard({ children }) {
+// Where each administrator belongs: a school's admin in /admin, the
+// platform super admin in /superadmin.
+const HOME_OF = { admin: "/admin", super_admin: "/superadmin" };
+
+export default function AdminGuard({ children, allow = "admin" }) {
   // "checking" -> not known yet, "allowed" -> admin, "denied" -> redirected
   const [state, setState] = useState("checking");
 
@@ -49,8 +53,8 @@ export default function AdminGuard({ children }) {
       if (role) localStorage.setItem("role", role);
     }
 
-    if (role !== "admin") {
-      window.location.href = "/dashboard";
+    if (role !== allow) {
+      window.location.href = HOME_OF[role] || "/dashboard";
       setState("denied");
       return;
     }

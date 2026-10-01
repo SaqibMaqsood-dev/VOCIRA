@@ -52,9 +52,20 @@ ALLOWED_ORIGINS = (
     else ["*"]
 )
 
+# Every school has its own address - medicaps.vocira.com, and locally
+# medicaps.localhost:3000 - so the frontend's origins are a pattern,
+# not a list. CORS_ORIGIN_REGEX sets it for the real domain, e.g.
+# ^https://[a-z0-9-]+\.vocira\.com$. The school addresses on this
+# computer (*.localhost) are always let in: no website on the internet
+# can have such an origin.
+LOCAL_SCHOOLS = r"http://[a-z0-9-]+\.localhost(:[0-9]+)?"
+_origin_regex = os.getenv("CORS_ORIGIN_REGEX", "").strip().lstrip("^").rstrip("$")
+ORIGIN_REGEX = f"^(?:{LOCAL_SCHOOLS}|{_origin_regex})$" if _origin_regex else f"^{LOCAL_SCHOOLS}$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

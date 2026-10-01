@@ -23,6 +23,9 @@ class TokenData(BaseModel):
     role      : str | None = None
     parent_id : str | None = None
 
+    # The school a school admin is limited to (require_admin.py).
+    school_id : str | None = None
+
 class RefreshToken(BaseModel):
     refreshtoken : str
 

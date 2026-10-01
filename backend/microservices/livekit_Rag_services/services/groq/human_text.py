@@ -157,7 +157,7 @@ def system_message(key: str, language: str | None = None, school=None) -> str:
     # vector store, which this small module should not load at import.
     from backend.microservices.livekit_Rag_services.services import tenants
     from backend.microservices.livekit_Rag_services.services.rag_engine.query import (
-        speak_phone_numbers,
+        speak_phone_number,
     )
 
     entry = SYSTEM_MESSAGES.get(key, {})
@@ -169,7 +169,7 @@ def system_message(key: str, language: str | None = None, school=None) -> str:
     if "{school}" in text or "{helpline}" in text:
         chosen = school if isinstance(school, tenants.School) else tenants.get_school(school)
         text = text.replace("{school}", chosen.display_name(language)).replace(
-            "{helpline}", speak_phone_numbers(chosen.helpline, language)
+            "{helpline}", speak_phone_number(chosen.helpline, language)
         )
 
     return text

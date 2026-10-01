@@ -50,14 +50,18 @@ def clean_for_tts(text: str) -> str:
 
 
 # A phone number as the context writes it: "042-111-777-800",
-# "0423-8050005", "0423 8050005", "04238050005".
+# "0423-8050005", "0423 8050005", "04238050005" - or with a country
+# code: "+92 300 1234567", "+44-20-7946-0958", "+923001234567".
 # A full stop or comma after it ends the sentence - only one followed
 # by another digit ("7,000", "3.5") makes it part of a bigger number.
 _PHONE = re.compile(
     r"(?<!\d)(?<!\d[,.])"
-    r"(?:0\d{2,4}(?:[-\s]\d{3,8})+|0\d{9,11})"
+    r"(?:\+\d{1,3}(?:[-\s]\d{2,12}){1,5}|\+\d{8,15}"
+    r"|0\d{2,4}(?:[-\s]\d{3,8})+|0\d{9,11})"
     r"(?!\d|[,.]\d)"
 )
+
+_PLUS = {"en": "plus", "ur": "پلس"}
 
 _DIGIT_WORDS = {
     "en": ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
@@ -112,14 +116,21 @@ def speak_phone_numbers(text: str, language: str) -> str:
     "eight zero five, zero zero five". Here each group is spelled
     exactly, a short pause (comma) between groups.
     """
+    return _PHONE.sub(lambda match: speak_phone_number(match.group(0), language), text)
+
+
+def speak_phone_number(number: str, language: str) -> str:
+    """
+    One phone number, however it is written ("+92 300 1234567",
+    "(042) 111-777-800", "042.111.777.800"), read out digit by digit -
+    a short pause (comma) between its groups, "plus" for a leading +.
+    """
     words = _DIGIT_WORDS.get(language, _DIGIT_WORDS["en"])
     sep = "، " if language == "ur" else ", "
-
-    def spell(match: re.Match) -> str:
-        groups = re.split(r"[-\s]+", match.group(0))
-        return sep.join(" ".join(words[int(d)] for d in g) for g in groups)
-
-    return _PHONE.sub(spell, text)
+    groups = [" ".join(words[int(d)] for d in g) for g in re.split(r"\D+", number or "") if g]
+    if groups and (number or "").strip().startswith("+"):
+        groups[0] = f"{_PLUS.get(language, _PLUS['en'])} {groups[0]}"
+    return sep.join(groups)
 
 
 async def search_knowledge_base(retriever, query: str, also: str | None = None):

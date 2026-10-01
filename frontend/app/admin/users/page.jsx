@@ -46,6 +46,12 @@ const BASE = "/auth/admin/users";
 // interrupts whatever the admin is doing.
 const POLL_MS = 20000;
 
+const RECORDS_NAME = {
+  erpnext: "ERPNext",
+  "open-school-mis": "Open School MIS",
+  spreadsheet: "the school's sheets",
+};
+
 export default function UsersPage() {
   const { data, loading, error, reload } = useAdminData(BASE, EMPTY, { pollMs: POLL_MS });
   const { data: roles } = useAdminData(`${BASE}/roles`, []);
@@ -55,6 +61,10 @@ export default function UsersPage() {
   // from this list so a guardian added in ERPNext shows up here on
   // its own, with a "Set password" action, instead of staying
   // invisible until someone remembers to add their account by hand.
+  // the admin's own school - which records system its guardians come from
+  const { data: mySchools } = useAdminData("/livekit/admin/schools", { schools: [] });
+  const recordsKind = mySchools?.schools?.[0]?.records;
+  const recordsName = RECORDS_NAME[recordsKind] || "the school's records";
   const { data: guardians } = useAdminData("/livekit/admin/guardians", [], {
     pollMs: POLL_MS,
   });
@@ -288,8 +298,8 @@ export default function UsersPage() {
             Accounts
           </h1>
           <p className="mt-1 text-xs text-text-secondary">
-            Admin and parent logins for Vocira. These are separate from
-            ERPNext users.
+            Admin and parent logins for Vocira. These are separate from the
+            logins of {recordsName}.
           </p>
         </div>
 
@@ -330,7 +340,7 @@ export default function UsersPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardHeader title="Guardians (ERPNext)" />
+          <CardHeader title={`Guardians (${recordsName})`} />
           <p className="text-2xl font-semibold text-white">
             {loading ? "…" : guardianList.length}
           </p>
@@ -390,7 +400,7 @@ export default function UsersPage() {
                 ended up with two different addresses. */}
             <label className="block sm:col-span-2">
               <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Guardian (from ERPNext)
+                Guardian (from {recordsName})
               </span>
               <select
                 value={picked}
@@ -404,7 +414,7 @@ export default function UsersPage() {
                   <option key={g.id} value={g.id} className="bg-[#0b0a2a]">
                     {g.name} · {g.students} student
                     {g.students === 1 ? "" : "s"}
-                    {g.email ? "" : "  (no email in ERPNext)"}
+                    {g.email ? "" : `  (no email in ${recordsName})`}
                   </option>
                 ))}
               </select>
@@ -427,10 +437,16 @@ export default function UsersPage() {
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
                   <span className="font-semibold">
-                    {chosen.name} has no email address in ERPNext.
+                    {chosen.name} has no email address in {recordsName}.
                   </span>{" "}
-                  Set it first in ERPNext (Education → Guardian →{" "}
-                  {chosen.name} → Email Address), then reload this page.
+                  {recordsKind === "erpnext" ? (
+                    <>
+                      Set it first in ERPNext (Education → Guardian → {chosen.name} → Email Address), then reload this
+                      page.
+                    </>
+                  ) : (
+                    <>Set it first in {recordsName}, then reload this page.</>
+                  )}
                   The login email must match the guardian record.
                 </span>
               </div>
@@ -469,7 +485,7 @@ export default function UsersPage() {
               {form.mode === "create" ? (
                 <span className="mt-1.5 block text-[11px] leading-4 text-text-secondary/70">
                   {chosen?.email
-                    ? "Taken from the guardian record in ERPNext."
+                    ? `Taken from the guardian record in ${recordsName}.`
                     : "No guardian selected — type the email manually."}
                 </span>
               ) : chosen?.email && chosen.email !== emailValue ? (
@@ -481,7 +497,7 @@ export default function UsersPage() {
                   className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-amber-400/10 px-2 py-1 text-[11px] font-medium text-amber-200 transition-colors hover:bg-amber-400/20"
                 >
                   <AlertTriangle className="h-3 w-3" />
-                  Use {chosen.email} from ERPNext
+                  Use {chosen.email} from {recordsName}
                 </button>
               ) : (
                 <span className="mt-1.5 block text-[11px] leading-4 text-text-secondary/70">
@@ -598,7 +614,7 @@ export default function UsersPage() {
 
       <AccountTable
         title="Parents"
-        description="One row per ERPNext guardian — new ones appear here on their own"
+        description={`One row per guardian in ${recordsName} — new ones appear here on their own`}
         rows={filteredParents}
         totalCount={parentRows.length}
         showGuardian
@@ -606,7 +622,8 @@ export default function UsersPage() {
         search={parentSearch}
         onSearchChange={setParentSearch}
         searchPlaceholder="Search parents..."
-        emptyText={parentNeedle ? "No parents match this search." : "No guardians in ERPNext yet."}
+        emptyText={parentNeedle ? "No parents match this search." : `No guardians in ${recordsName} yet.`}
+        recordsName={recordsName}
         busy={busy}
         isOpen={openSections.has("parents")}
         onToggle={() => toggleSection("parents")}
@@ -627,6 +644,7 @@ export default function UsersPage() {
  * meaningless for them.
  */
 function AccountTable({
+  recordsName = "the school's records",
   title,
   guardianById,
   description,
@@ -741,11 +759,11 @@ function AccountTable({
                   if (!g?.email || g.email === u.email) return null;
                   return (
                     <span
-                      title={`ERPNext has ${g.email}`}
+                      title={`${recordsName} has ${g.email}`}
                       className="ml-2 inline-flex items-center gap-1 rounded-md bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-200"
                     >
                       <AlertTriangle className="h-2.5 w-2.5" />
-                      differs from ERPNext
+                      differs from {recordsName}
                     </span>
                   );
                 })()}

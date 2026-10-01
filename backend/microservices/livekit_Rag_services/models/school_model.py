@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import Boolean, DateTime, String, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.helper_functions.database.base import (
@@ -14,7 +14,9 @@ class SchoolRecord(Base):
 
     The first schools are defined in code; everything added later
     lives here, so both the API and the voice worker - separate
-    processes - see the same list.
+    processes - see the same list. A row under a first school's id
+    holds what was changed about it on the Schools page (or that it
+    was removed).
     """
 
     __tablename__ = "schools"
@@ -26,3 +28,8 @@ class SchoolRecord(Base):
     records            : Mapped[str | None]  = mapped_column(String(20), nullable=True)
     records_env_prefix : Mapped[str | None]  = mapped_column(String(40), nullable=True)
     created_at         : Mapped[datetime]    = mapped_column(DateTime, server_default=func.now())
+    # a school defined in code that was removed on the Schools page (an
+    # added school's row is simply deleted)
+    deleted            : Mapped[bool]        = mapped_column(Boolean, default=False, server_default=false())
+    # the school's own address (<subdomain>.vocira.com); NULL = its id
+    subdomain          : Mapped[str | None]  = mapped_column(String(40), nullable=True)

@@ -34,13 +34,19 @@ import { cn } from "@/lib/utils";
 import BrandLogo from "@/components/BrandLogo";
 import { adminFetch } from "@/app/admin/useAdminApi";
 
-const items = [
+// A school's admin panel. Schools are not here: adding and removing
+// schools is the platform super admin's (app/superadmin).
+export const ADMIN_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/queries", label: "Queries", icon: MessageCircle },
   { href: "/admin/knowledge", label: "Knowledge", icon: BookOpen },
-  { href: "/admin/schools", label: "Schools", icon: School },
   { href: "/admin/escalations", label: "Escalations", icon: AlertTriangle },
   { href: "/admin/users", label: "Accounts", icon: Users },
+];
+
+// The platform super admin's panel.
+export const SUPER_ADMIN_ITEMS = [
+  { href: "/superadmin/schools", label: "Schools", icon: School },
 ];
 
 export default function Sidebar({
@@ -48,11 +54,16 @@ export default function Sidebar({
   mobileOpen,
   onToggle,
   onMobileClose,
+  items = ADMIN_ITEMS,
+  title = "Vocira Admin",
+  home = "/admin",
+  showPending = true,
 }) {
   const pathname = usePathname();
   const [pending, setPending] = useState(0);
 
   useEffect(() => {
+    if (!showPending) return;
     adminFetch("/livekit/admin/escalations?limit=100")
       .then((rows) =>
         setPending(
@@ -75,7 +86,7 @@ export default function Sidebar({
           collapsed ? "w-[76px]" : "w-60"
         )}
       >
-        <Brand collapsed={collapsed} onToggle={onToggle} />
+        <Brand collapsed={collapsed} onToggle={onToggle} title={title} home={home} />
 
         {collapsed && <ExpandButton onToggle={onToggle} />}
 
@@ -84,6 +95,7 @@ export default function Sidebar({
           pathname={pathname}
           collapsed={collapsed}
           pending={pending}
+          home={home}
         />
 
         {!collapsed && (
@@ -114,7 +126,7 @@ export default function Sidebar({
           mobileOpen ? "translate-x-0" : "-translate-x-[110%]"
         )}
       >
-        <Brand collapsed={false} onNavigate={onMobileClose} />
+        <Brand collapsed={false} onNavigate={onMobileClose} title={title} home={home} />
 
         <NavList
           items={items}
@@ -122,13 +134,14 @@ export default function Sidebar({
           collapsed={false}
           pending={pending}
           onNavigate={onMobileClose}
+          home={home}
         />
       </aside>
     </>
   );
 }
 
-function Brand({ collapsed, onToggle, onNavigate }) {
+function Brand({ collapsed, onToggle, onNavigate, title = "Vocira Admin", home = "/admin" }) {
   return (
     <div
       className={cn(
@@ -137,14 +150,14 @@ function Brand({ collapsed, onToggle, onNavigate }) {
       )}
     >
       <Link
-        href="/admin"
+        href={home}
         onClick={onNavigate}
         className="flex min-w-0 items-center gap-2.5"
       >
         <BrandLogo variant="icon" className="h-9 w-9 shrink-0" />
         {!collapsed && (
           <span className="truncate text-sm font-semibold tracking-wide text-white">
-            Vocira Admin
+            {title}
           </span>
         )}
       </Link>
@@ -181,13 +194,13 @@ function ExpandButton({ onToggle }) {
   );
 }
 
-function NavList({ items, pathname, collapsed, pending, onNavigate }) {
+function NavList({ items, pathname, collapsed, pending, onNavigate, home = "/admin" }) {
   return (
     <nav className={cn("mt-4 space-y-1", collapsed ? "px-2" : "px-3")}>
       {items.map((item) => {
         const active =
-          item.href === "/admin"
-            ? pathname === "/admin"
+          item.href === home
+            ? pathname === home
             : pathname.startsWith(item.href);
 
         const Icon = item.icon;

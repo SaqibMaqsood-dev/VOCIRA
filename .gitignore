@@ -319,3 +319,6 @@ frappe_test/
 *.sql.gz
 .sync_state.json
 .sync_state.*.json
+
+# A school's records sheets (students' personal data) - synced to the server, never committed
+backend/microservices/livekit_Rag_services/services/rag_engine/data/schools/*/records/

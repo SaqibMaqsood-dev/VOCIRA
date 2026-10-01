@@ -35,6 +35,7 @@ class SessionRepository(
         self,
         db: AsyncSession,
         user_id: UUID | None,
+        school_id: str | None = None,
     ):
         """
         Create a voice session.
@@ -48,6 +49,7 @@ class SessionRepository(
 
         new_session = session_model.Session(
             user_id=user_id,
+            school_id=school_id,
             title="Voice Agent Session",
             status=session_model.SessionStatus.active,
         )

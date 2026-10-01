@@ -18,7 +18,14 @@ import Header from "./Header";
 import PageTransition from "./PageTransition";
 import IncomingCall from "./IncomingCall";
 
-export default function AdminLayout({ children }) {
+export default function AdminLayout({
+  children,
+  items,
+  title,
+  home,
+  showPending = true,
+  incomingCalls = true,
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -29,6 +36,10 @@ export default function AdminLayout({ children }) {
         mobileOpen={mobileOpen}
         onToggle={() => setCollapsed(!collapsed)}
         onMobileClose={() => setMobileOpen(false)}
+        items={items}
+        title={title}
+        home={home}
+        showPending={showPending}
       />
 
       {/* min-w-0 is required: without it, wide tables stretch the
@@ -47,7 +58,7 @@ export default function AdminLayout({ children }) {
           arrive at any moment, and the admin may be on Knowledge or
           Users at the time. It survives navigation, so a call in
           progress is not cut off by changing route. */}
-      <IncomingCall />
+      {incomingCalls && <IncomingCall />}
     </div>
   );
 }

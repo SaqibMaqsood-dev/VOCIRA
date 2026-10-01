@@ -58,6 +58,13 @@ export default function KnowledgePage() {
     const wanted = new URLSearchParams(window.location.search).get("school");
     if (wanted) setSchool(wanted);
   }, []);
+
+  // A school's admin is given only their own school - start there.
+  useEffect(() => {
+    if (schools.length && !schools.some((s) => s.id === school)) {
+      setSchool(schools[0].id);
+    }
+  }, [schools, school]);
   const current = schools.find((s) => s.id === school);
   const q = `?school=${encodeURIComponent(school)}`;
 
@@ -272,9 +279,12 @@ export default function KnowledgePage() {
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            {schools.length > 1 && (
             <label htmlFor="kb-school" className="text-xs text-text-secondary">
               School
             </label>
+            )}
+            {schools.length > 1 ? (
             <select
               id="kb-school"
               value={school}
@@ -289,6 +299,9 @@ export default function KnowledgePage() {
                 </option>
               ))}
             </select>
+            ) : (
+              <span className="text-xs font-semibold text-white">{current?.name}</span>
+            )}
             {current && (
               <span className="text-[11px] text-text-secondary">
                 {current.records

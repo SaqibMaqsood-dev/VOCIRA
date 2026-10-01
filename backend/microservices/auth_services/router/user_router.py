@@ -299,4 +299,5 @@ async def get_internal_user(
         # The voice pipeline reads this once per call to pick the
         # caller's language for STT, the LLM prompt and the TTS voice.
         "language": user.language,
+        "school_id": user.school_id,
     }

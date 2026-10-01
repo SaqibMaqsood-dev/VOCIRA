@@ -6,10 +6,17 @@ import {
   Pause,
   Play,
   PhoneOff,
+  School,
   User,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readGuestLanguage } from "@/components/LanguageSelect";
+import {
+  fetchAccountSchool,
+  fetchSchoolAt,
+  schoolUrl,
+  subdomainOfPage,
+} from "@/lib/school";
 
 import {
   DisconnectReason,
@@ -217,6 +224,72 @@ export default function AssistantPage() {
     window.addEventListener("auth-change", check);
     return () => window.removeEventListener("auth-change", check);
   }, []);
+
+  /*
+   * The school this call goes to - shown in a badge so the caller
+   * knows whose information the assistant answers with.
+   *
+   *   signed in -> the account's school, read from the server; the
+   *                address never changes it
+   *   guest     -> the school whose address this is (its subdomain,
+   *                medicaps.localhost:3000). On the plain address there
+   *                is no school and no call - the guest is asked to open
+   *                their school's link. No list of schools, ever.
+   *
+   * schoolState: "loading" | "ready" | "none" (plain address)
+   *              | "unknown" (not a school's address) | "unreachable"
+   * The ref is what the call reads.
+   */
+  const [schoolState, setSchoolState] = useState("loading");
+  const [callSchool, setCallSchool] = useState(null);
+  const callSchoolRef = useRef(null);
+
+  const chooseSchool = useCallback((school) => {
+    callSchoolRef.current = school;
+    setCallSchool(school);
+  }, []);
+
+  useEffect(() => {
+    if (isGuest === null) return;
+    let cancelled = false;
+    const done = (state, school = null) => {
+      if (cancelled) return;
+      chooseSchool(school);
+      setSchoolState(state);
+    };
+
+    setSchoolState("loading");
+
+    if (!isGuest) {
+      fetchAccountSchool()
+        .then((school) => done("ready", { ...school, from: "account" }))
+        .catch(() => done("ready"));
+    } else {
+      const subdomain = subdomainOfPage();
+      const oldLink = (new URLSearchParams(window.location.search).get("school") || "").trim().toLowerCase();
+
+      if (subdomain) {
+        fetchSchoolAt(subdomain)
+          .then((school) => (school ? done("ready", { ...school, from: "address" }) : done("unknown")))
+          .catch(() => done("unreachable"));
+      } else if (oldLink) {
+        // an older link, /assistant?school=<id>: on to the school's own address
+        fetchSchoolAt(oldLink)
+          .then((school) => {
+            if (cancelled) return;
+            if (school) window.location.replace(schoolUrl(school.subdomain));
+            else done("none");
+          })
+          .catch(() => done("unreachable"));
+      } else {
+        done("none");
+      }
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, chooseSchool]);
 
   /*
    * The link to LiveKit dropped and the SDK is trying to get it back.
@@ -633,6 +706,12 @@ export default function AssistantPage() {
       return;
     }
 
+    // A guest calls only from a school's own address - and not while
+    // the page is still finding out which school that is.
+    if (!getAccessToken() && !callSchoolRef.current) {
+      return;
+    }
+
     setIsConnecting(true);
     setError(null);
 
@@ -698,11 +777,9 @@ export default function AssistantPage() {
         // request - that is the only way it reaches the pipeline.
         const guestLanguage = readGuestLanguage();
 
-        // Which school the guest is calling: the link they opened,
-        // e.g. /assistant?school=demo-b. The backend falls back to
-        // the first school for anything missing or unknown.
-        const guestSchool =
-          new URLSearchParams(window.location.search).get("school") || "";
+        // Which school the guest is calling - the one whose address
+        // this is. The backend refuses a call without a known school.
+        const guestSchool = callSchoolRef.current?.id || "";
 
         tokenEndpoint =
           `${API_BASE_URL}/livekit/guest/live_kit/token` +
@@ -903,6 +980,17 @@ ${rawResponse}`
         typeof data?.room === "string"
           ? data.room.trim()
           : "";
+
+      // The school the server really put the call in - the badge shows
+      // that, not what the page asked for.
+      if (data?.school?.id) {
+        chooseSchool({
+          ...(callSchoolRef.current || {}),
+          id: data.school.id,
+          name: data.school.name,
+          from: callSchoolRef.current?.from || "server",
+        });
+      }
 
       console.log(
         "Extracted values:"
@@ -1795,6 +1883,24 @@ ${JSON.stringify(
       }
     };
 
+  // A guest on the plain address, or on one that is no school's: there
+  // is nothing to call - say what to do instead of showing the mic.
+  const SCHOOL_NOTICE = {
+    none: {
+      title: "Open your school's assistant",
+      text: "Vocira answers for your school only. Please open the assistant link your school shares - on its website, in a notice, or as a QR code.",
+    },
+    unknown: {
+      title: "This is not a school's address",
+      text: "Please check the link, or ask your school for its assistant link.",
+    },
+    unreachable: {
+      title: "The assistant cannot be reached",
+      text: "Please try again in a moment.",
+    },
+  };
+  const schoolNotice = isGuest && !isConnected ? SCHOOL_NOTICE[schoolState] : null;
+
   // ============================================================
   // UI
   // ============================================================
@@ -1812,13 +1918,30 @@ ${JSON.stringify(
 
       <section className="relative mx-auto flex min-h-[calc(100vh-4rem-2.5rem)] w-full items-center justify-center overflow-hidden bg-transparent">
 
-        {isGuest && (
+        {(isGuest || callSchool?.name) && (
           <div className="pointer-events-none absolute inset-x-0 top-4 z-20">
-            <div className="mx-auto flex max-w-6xl px-4 sm:px-6">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-medium text-text-secondary backdrop-blur-md">
-                <User className="h-3.5 w-3.5" aria-hidden="true" />
-                Guest User
-              </span>
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 sm:px-6">
+              {isGuest && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-medium text-text-secondary backdrop-blur-md">
+                  <User className="h-3.5 w-3.5" aria-hidden="true" />
+                  Guest User
+                </span>
+              )}
+
+              {callSchool?.name && (
+                <span
+                  id="school-badge"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/10 px-3 py-1 text-xs font-medium text-white backdrop-blur-md"
+                  title={
+                    isGuest
+                      ? "The assistant answers with this school's information"
+                      : "Your calls go to your account's school"
+                  }
+                >
+                  <School className="h-3.5 w-3.5" aria-hidden="true" />
+                  {callSchool.name}
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -1873,7 +1996,24 @@ ${JSON.stringify(
             all - the circle looked exactly the same whether the
             agent was speaking or silent.
           */}
-          {isConnected && room ? (
+          {schoolNotice ? (
+
+            <div
+              id="school-needed"
+              className="mt-10 w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.05] px-6 py-6 text-center backdrop-blur-md"
+            >
+              <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-accent-primary/15">
+                <School className="h-6 w-6 text-accent-secondary" aria-hidden="true" />
+              </div>
+              <p className="text-base font-semibold text-text-primary">
+                {schoolNotice.title}
+              </p>
+              <p className="mt-2 text-sm text-text-secondary">
+                {schoolNotice.text}
+              </p>
+            </div>
+
+          ) : isConnected && room ? (
 
             <div
               id="voice-assistant-demo"
