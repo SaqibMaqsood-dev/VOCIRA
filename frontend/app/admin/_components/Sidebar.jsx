@@ -27,6 +27,7 @@ import {
   School,
   PanelLeftClose,
   PanelLeftOpen,
+  Ticket,
   Users,
 } from "lucide-react";
 
@@ -41,6 +42,8 @@ export const ADMIN_ITEMS = [
   { href: "/admin/queries", label: "Queries", icon: MessageCircle },
   { href: "/admin/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/admin/escalations", label: "Escalations", icon: AlertTriangle },
+  // what parents sent from the Support page
+  { href: "/admin/tickets", label: "Tickets", icon: Ticket },
   { href: "/admin/users", label: "Accounts", icon: Users },
 ];
 
@@ -60,22 +63,28 @@ export default function Sidebar({
   showPending = true,
 }) {
   const pathname = usePathname();
-  const [pending, setPending] = useState(0);
+  // the counts on the items: pending escalations, open tickets
+  const [pending, setPending] = useState({});
 
   useEffect(() => {
     if (!showPending) return;
     adminFetch("/livekit/admin/escalations?limit=100")
       .then((rows) =>
-        setPending(
-          Array.isArray(rows)
-            ? rows.filter((r) => r.status === "pending").length
-            : 0
-        )
+        setPending((p) => ({
+          ...p,
+          "/admin/escalations": Array.isArray(rows) ? rows.filter((r) => r.status === "pending").length : 0,
+        }))
       )
       .catch(() => {
         /* sidebar ki wajah se page na ruke */
       });
-  }, []);
+    adminFetch("/livekit/admin/tickets?status=open&limit=100")
+      .then((rows) => setPending((p) => ({ ...p, "/admin/tickets": Array.isArray(rows) ? rows.length : 0 })))
+      .catch(() => {
+        /* sidebar ki wajah se page na ruke */
+      });
+    // a ticket answered on its page is no longer "open"
+  }, [pathname]);
 
   return (
     <>
@@ -204,7 +213,7 @@ function NavList({ items, pathname, collapsed, pending, onNavigate, home = "/adm
             : pathname.startsWith(item.href);
 
         const Icon = item.icon;
-        const badge = item.href === "/admin/escalations" ? pending : 0;
+        const badge = pending[item.href] || 0;
 
         return (
           <Link

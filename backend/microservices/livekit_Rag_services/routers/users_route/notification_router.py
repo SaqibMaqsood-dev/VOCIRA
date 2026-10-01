@@ -31,6 +31,7 @@ from backend.helper_functions.token_service.access_tokken.verify_tokken import (
 
 from backend.helper_functions.token_service.access_tokken.require_admin import (
     ADMIN_ROLES,
+    caller_school,
 )
 
 from backend.microservices.livekit_Rag_services.services.websokets.websocket_manager import (
@@ -104,9 +105,12 @@ async def admin_notification_websocket(
     # Not from the URL - identity always comes from the token
     admin_id = str(token_data.user_id)
 
+    # ...and so does the school whose calls this admin is told about
+    # (None for the super admin, who takes no school's calls)
     await notification_manager.connect(
         admin_id=admin_id,
         websocket=websocket,
+        school=caller_school(token_data),
     )
 
     try:

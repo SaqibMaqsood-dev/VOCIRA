@@ -64,6 +64,11 @@ class UserCreate(BaseModel):
     parent_id: Optional[str] = Field(default=None, max_length=100)
     role: str = Field(default="guardian")
 
+    # The school the account belongs to - chosen by the super admin only
+    # (the Schools page's "Add admin"). A school admin's new accounts are
+    # always their own school's.
+    school_id: Optional[str] = Field(default=None, max_length=40)
+
 
 
 class UserUpdate(BaseModel):
@@ -129,6 +134,51 @@ def _guardian_link_allowed(role_name: str | None, parent_id: str | None) -> None
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Only a guardian account can be linked to a guardian in the school's records.",
         )
+
+
+async def _school_for_new_account(admin, request: UserCreate) -> str | None:
+    """
+    The school a new account belongs to.
+
+    A school admin's accounts are their own school's - naming another is
+    refused. The super admin may name any school that exists, and must
+    name one to give a new school its first admin: before this, every
+    account the super admin made became the first school's, so a new
+    school had no way to get an admin at all. Naming none keeps the old
+    behaviour (the first school). The super admin role belongs to no school.
+    """
+    asked = (request.school_id or "").strip().lower() or None
+    own = caller_school(admin)
+
+    if own is not None:
+        if asked and asked != own:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="A school admin can only add accounts to their own school",
+            )
+        return own
+
+    if asked is None:
+        return None
+
+    if request.role.strip().lower() == SUPER_ADMIN_ROLE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The super admin belongs to no school - leave the school out",
+        )
+
+    # The livekit service's list of schools is the one truth: the ones in
+    # code, the ones added on the Schools page, less the ones removed. It
+    # reads the same database, so a school added a moment ago counts.
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    await tenants.refresh(force=True)
+    if not tenants.is_known(asked):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"There is no school '{asked}'",
+        )
+    return asked
 
 
 async def _role_name(db: AsyncSession, role_id: str) -> str | None:
@@ -248,6 +298,7 @@ async def create_user(
 
     role_id = await _role_id(db=db, name=request.role)
     _guardian_link_allowed(request.role, (request.parent_id or "").strip() or None)
+    school_id = await _school_for_new_account(admin, request)
 
     user = Users(
         user_id=uuid.uuid4(),
@@ -256,9 +307,7 @@ async def create_user(
         parent_id=(request.parent_id or "").strip() or None,
         role_id=role_id,
         password_hashed=Hash.get_hash_password(request.password),
-        # A school admin's new accounts are their school's. A super
-        # admin's are the first school's until a school is chosen.
-        school_id=caller_school(admin),
+        school_id=school_id,
     )
 
     db.add(user)

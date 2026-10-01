@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, LifeBuoy, Mic, PhoneCall, Sparkles } from "lucide-react";
+import { Home, LayoutDashboard, LifeBuoy, ListOrdered, Mic, PhoneCall, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSite } from "@/lib/site";
 
 /**
  * The bottom bar phones and tablets navigate with.
@@ -26,7 +27,18 @@ const RIGHT = [
   { href: "/support", label: "Support", icon: LifeBuoy },
 ];
 
+// Vocira's own site: what Vocira is - no assistant there
+const VOCIRA_TABS = [
+  { href: "/", label: "Home", icon: Home },
+  { href: "/features", label: "Features", icon: Sparkles },
+  { href: "/how-it-works", label: "How it works", icon: ListOrdered },
+];
+
+// the super admin, signed in there: back to their panel
+const PANEL_TAB = { href: "/superadmin/schools", label: "Panel", icon: LayoutDashboard };
+
 function isActive(pathname, href) {
+  if (href.includes("#")) return false;
   return href === "/" ? pathname === "/" : pathname?.startsWith(href);
 }
 
@@ -54,6 +66,22 @@ function Tab({ item, pathname }) {
 export default function MobileTabBar() {
   const pathname = usePathname();
   const assistantActive = pathname?.startsWith("/assistant");
+  const site = useSite();
+
+  if (site?.product) {
+    return (
+      <nav
+        aria-label="Main"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-bg-primary/80 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
+      >
+        <div className="mx-auto flex max-w-md items-end justify-around px-2">
+          {(site.loggedIn ? [...VOCIRA_TABS, PANEL_TAB] : VOCIRA_TABS).map((item) => (
+            <Tab key={item.href} item={item} pathname={pathname} />
+          ))}
+        </div>
+      </nav>
+    );
+  }
 
   return (
     <nav

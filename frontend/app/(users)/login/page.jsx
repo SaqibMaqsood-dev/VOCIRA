@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 
 import { clearSession, saveSession } from "@/lib/session";
+import { SUPER_ADMIN_LOGIN, loginPath } from "@/lib/school";
+import { useSchoolOfPage, useSite } from "@/lib/site";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
 // How long the full-screen loader stays up after a successful login
@@ -40,6 +43,33 @@ function readRoleFromToken(token) {
 }
 
 export default function LoginPage() {
+  /*
+   * Where this sign-in is. Vocira's main address is the super admin's
+   * alone; parents and school staff sign in at their own school's
+   * address, and the server checks the account belongs to it.
+   *   site === null        -> still reading the address
+   *   school === undefined -> looking the school up
+   *   school === null      -> the address is no school's
+   */
+  const site = useSite();
+  const school = useSchoolOfPage(site?.subdomain);
+  const atSchool = Boolean(site?.isSchool);
+  const ready = site !== null && (!atSchool || Boolean(school));
+
+  // One page, two doors: a school's sign-in is its /login; the super
+  // admin's is /super_admin_login on the plain address, whose /login offers
+  // nothing (Vocira's own site has no sign-in for its visitors). The wrong
+  // door sends you on: to Vocira's home. A school's address never shows
+  // /super_admin_login at all - the server answers it "not found"
+  // (proxy.js); sending it to the school's /login is only a fallback.
+  const pathname = usePathname();
+  const wrongDoor =
+    site !== null && (atSchool ? pathname === SUPER_ADMIN_LOGIN : pathname !== SUPER_ADMIN_LOGIN);
+
+  useEffect(() => {
+    if (wrongDoor) window.location.replace(atSchool ? "/login" : "/");
+  }, [wrongDoor, atSchool]);
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -73,6 +103,10 @@ export default function LoginPage() {
       return;
     }
 
+    if (!ready) {
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -83,6 +117,10 @@ export default function LoginPage() {
 
       formData.append("username", username.trim());
       formData.append("password", password);
+      // the school this page belongs to - none on the main address
+      if (atSchool) {
+        formData.append("school", school.id);
+      }
 
       console.log("API_URL:", API_URL);
       console.log("LOGIN URL:", `${API_URL}/auth/login`);
@@ -263,15 +301,22 @@ export default function LoginPage() {
      * Redirect to login.
      */
 
-    window.location.href = "/login";
+    window.location.href = loginPath();
   };
+
+  // nothing of the sign-in shows behind a door that is about to send you on
+  if (site === null || wrongDoor) {
+    return <div className="page-shell" />;
+  }
 
   return (
     <>
       {redirecting && (
         <FullScreenLoader
           subLabel={
-            redirectRole === "admin"
+            redirectRole === "super_admin"
+              ? "Taking you to the schools"
+              : redirectRole === "admin"
               ? "Taking you to the admin panel"
               : "Taking you to your calls"
           }
@@ -293,16 +338,24 @@ export default function LoginPage() {
           <div className="pointer-events-none absolute -left-16 -top-10 size-56 rounded-full bg-accent-secondary/14 blur-3xl" />
 
           <h1 className="text-3xl font-semibold tracking-tight text-text-primary sm:text-4xl">
-            Welcome Back.
+            {site && !atSchool ? "Vocira super admin." : "Welcome Back."}
           </h1>
 
-          <p className="mt-3 text-lg text-text-secondary">
-            Sign into your account.
+          <p id="login-where" className="mt-3 text-lg text-text-secondary">
+            {site === null
+              ? " "
+              : !atSchool
+              ? "Sign in to manage the schools."
+              : school
+              ? `Sign in to ${school.name}.`
+              : "Sign into your account."}
           </p>
 
           <div className="mt-8 glass p-6">
             <p className="text-sm leading-7 text-text-secondary">
-              Continue your voice sessions and access your call history.
+              {site && !atSchool
+                ? "Add schools, give each its own address, and connect their records. Parents and school staff sign in at their own school's address, not here."
+                : "Continue your voice sessions and access your call history."}
             </p>
           </div>
         </motion.div>
@@ -320,13 +373,22 @@ export default function LoginPage() {
           <div className="glass p-6">
 
             <h2 className="text-2xl font-semibold text-text-primary">
-              Sign in
+              {site && !atSchool ? "Super admin sign in" : "Sign in"}
             </h2>
 
             <p className="mt-2 text-sm text-text-secondary">
-              Enter your credentials to access Vocira.
+              {site && !atSchool
+                ? "Only the Vocira super admin signs in here."
+                : school
+                ? `Enter your ${school.name} account.`
+                : "Enter your credentials to access Vocira."}
             </p>
 
+            {atSchool && school === null ? (
+              <div id="login-unknown-school" className="mt-6 rounded-xl border border-white/10 bg-white/[0.04] p-4 text-sm text-text-secondary">
+                This is not a school&apos;s address. Please open the sign-in link your school shares.
+              </div>
+            ) : (
             <form
               onSubmit={handleSubmit}
               className="mt-6 space-y-5"
@@ -419,7 +481,7 @@ export default function LoginPage() {
                   match the rest of the app. */}
               <motion.button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !ready}
                 whileHover={loading ? {} : { y: -2 }}
                 whileTap={loading ? {} : { scale: 0.98 }}
                 className="group relative w-full overflow-hidden rounded-xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-semibold text-text-primary shadow-card transition disabled:cursor-not-allowed disabled:opacity-60"
@@ -436,6 +498,7 @@ export default function LoginPage() {
               </motion.button>
 
             </form>
+            )}
 
             {/*
               Self-signup is deliberately absent.
@@ -450,8 +513,10 @@ export default function LoginPage() {
               So the school issues the account. This link used to
               point at /signup, which does not exist (404).
             */}
-            <div className="mt-6 text-center text-sm text-text-secondary">
-              Need an account? Please contact the school office.
+            <div id="login-footer" className="mt-6 text-center text-sm text-text-secondary">
+              {site && !atSchool
+                ? "Parent or school staff? Sign in at your school's own address."
+                : "Need an account? Please contact the school office."}
             </div>
 
           </div>

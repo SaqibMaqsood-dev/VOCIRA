@@ -3,6 +3,9 @@ import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+from openai import AsyncOpenAI
 from backend.microservices.livekit_Rag_services.services.rag_engine.config import (
     GROQ_MODEL, MAX_CONTEXT_CHARS, PINECONE_NAMESPACE
 )
@@ -11,6 +14,8 @@ from backend.microservices.livekit_Rag_services.services.rag_engine.config impor
 # before, so when gpt-oss-20b ran out of quota, ERP kept working
 # while RAG answered "assistant is currently busy" every time.
 from backend.microservices.livekit_Rag_services.services.groq.groq import (
+    LLM_BASE_URL,
+    _API_KEY,
     client as llm_client,
     _is_rate_limited,
     _model_chain,
@@ -187,7 +192,17 @@ _NO_CONTEXT_MESSAGE = {
 }
 
 
-async def ask_vocira(
+@dataclass
+class RagPrompt:
+    """What an answer is written from: Vocira's rules and the school's context."""
+
+    system_prompt: str
+    phone_numbers: dict[str, str]
+    language: str
+    user_query: str
+
+
+async def prepare_rag(
     retriever,
     user_query: str,
     language: str | None = None,
@@ -195,7 +210,9 @@ async def ask_vocira(
     school_name: str = "The Educators",
 ):
     """
-    Core RAG logic — async, non-blocking, returns a single string answer.
+    Search the school's knowledge and write the prompt an answer is made
+    from - a RagPrompt, or the reply itself (a string) when nothing in the
+    knowledge relates to the question.
 
     `search_query` is the router's plain-English restatement of the
     question (it costs no extra call - the router writes it anyway).
@@ -290,6 +307,30 @@ RULES:
 CONTEXT:
 {context}"""
 
+    return RagPrompt(
+        system_prompt=system_prompt,
+        phone_numbers=phone_numbers,
+        language=language,
+        user_query=user_query,
+    )
+
+
+async def ask_vocira(
+    retriever,
+    user_query: str,
+    language: str | None = None,
+    search_query: str | None = None,
+    school_name: str = "The Educators",
+):
+    """
+    Core RAG logic — async, non-blocking, returns a single string answer.
+    (stream_vocira gives the same answer a sentence at a time.)
+    """
+    prepared = await prepare_rag(retriever, user_query, language, search_query, school_name)
+    if isinstance(prepared, str):
+        return prepared
+    system_prompt, phone_numbers, language = prepared.system_prompt, prepared.phone_numbers, prepared.language
+
     # On Groq every model has its own daily budget. When one runs
     # out the others still have theirs - only that single model was
     # tried here before, so the moment its budget was gone every RAG
@@ -355,3 +396,126 @@ CONTEXT:
             return "Sorry, I'm having trouble reaching the assistant service right now — please try again in a moment."
 
     return "Sorry, the assistant is currently busy. Please try asking again shortly."
+
+
+# ---------------------------------------------------------
+# The same answer, a sentence at a time
+# ---------------------------------------------------------
+
+_async_llm: AsyncOpenAI | None = None
+
+
+def _async_client() -> AsyncOpenAI:
+    """Made on first use, on the loop that uses it (the voice agent's brain loop)."""
+    global _async_llm
+    if _async_llm is None:
+        _async_llm = AsyncOpenAI(api_key=_API_KEY, base_url=LLM_BASE_URL)
+    return _async_llm
+
+
+# Where a sentence ends - the rule Piper's splitter uses (text_speech/
+# piper_servies.py): . ! ? or Urdu's ۔ ؟, then a capital, a digit or any
+# non-Latin letter, so "Mr. Ahmed" and "3.5" stay whole.
+_SENTENCE_END = re.compile(r"(?<=[.!?۔؟])\s+(?=[A-Z0-9]|[^\x00-\x7F])")
+
+# shorter pieces are joined to the next - spoken alone they sound chopped
+_MIN_SPOKEN_CHARS = 24
+
+# A sentence longer than this is spoken in parts, cut after a comma: nothing
+# is heard until the first part is synthesized (~6 ms a character on this
+# machine), and one 278-character sentence kept a caller waiting 1.8 s for
+# it. Later parts are made while the one before plays, so only the first
+# has to be short.
+_FIRST_SPOKEN_MAX = 90
+_SPOKEN_MAX = 220
+_CLAUSE_END = re.compile(r"(?<=[,;:،؛])\s+")
+
+
+def _clause_cut(text: str, start: int) -> tuple[int, int] | None:
+    """Where to cut `text` after its last comma (or ; : ، ؛) past `start`."""
+    cut = None
+    for match in _CLAUSE_END.finditer(text):
+        if match.start() >= start:
+            cut = (match.start(), match.end())
+    return cut
+
+
+async def stream_vocira(prepared: RagPrompt):
+    """
+    The answer as the model writes it, one finished sentence at a time - so
+    the first sentence can be spoken while the rest is still being written,
+    instead of after the whole answer. Each sentence is finished exactly as
+    ask_vocira finishes its whole answer: phone tags back to numbers read
+    digit by digit, markdown stripped.
+    """
+    language = prepared.language
+
+    def finish(text: str) -> str:
+        # tags first: clean_for_tts strips underscores and would break [PHONE_1]
+        text = unmask_phone_numbers(text, prepared.phone_numbers, language)
+        return speak_phone_numbers(clean_for_tts(text), language)
+
+    for attempt, model_name in enumerate(_model_chain(GROQ_MODEL)):
+        extra = {"reasoning_effort": "low"} if "gpt-oss" in model_name else {}
+        spoken = False
+        try:
+            stream = await asyncio.wait_for(
+                _async_client().chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": prepared.system_prompt},
+                        {"role": "user", "content": prepared.user_query},
+                    ],
+                    max_tokens=320,
+                    temperature=0.1,
+                    stream=True,
+                    **extra,
+                ),
+                timeout=15.0,
+            )
+            buffer, pending = "", ""
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                buffer += chunk.choices[0].delta.content or ""
+                *ready, buffer = _SENTENCE_END.split(buffer)
+                for sentence in ready:
+                    pending = f"{pending} {sentence}".strip() if pending else sentence
+                    if len(pending) >= _MIN_SPOKEN_CHARS:
+                        if text := finish(pending):
+                            spoken = True
+                            yield text
+                        pending = ""
+                if len(pending) + len(buffer) > (_SPOKEN_MAX if spoken else _FIRST_SPOKEN_MAX):
+                    cut = _clause_cut(buffer, start=max(0, _MIN_SPOKEN_CHARS - len(pending)))
+                    if cut:
+                        part = f"{pending} {buffer[:cut[0]]}".strip()
+                        buffer, pending = buffer[cut[1]:], ""
+                        if text := finish(part):
+                            spoken = True
+                            yield text
+            rest = f"{pending} {buffer}".strip()
+            if rest and (text := finish(rest)):
+                spoken = True
+                yield text
+            return
+
+        except asyncio.TimeoutError:
+            log.warning(f"{model_name} timed out ({attempt + 1}).")
+            if spoken:
+                return
+            continue
+
+        except Exception as e:
+            if spoken:
+                # half an answer has been spoken - another model cannot continue it
+                log.error(f"Groq stream broke off ({model_name}): {e}")
+                return
+            if _is_rate_limited(e):
+                log.warning(f"{model_name} is out of budget - trying the next model")
+                continue
+            log.error(f"Groq error ({model_name}): {e}")
+            yield "Sorry, I'm having trouble reaching the assistant service right now — please try again in a moment."
+            return
+
+    yield "Sorry, the assistant is currently busy. Please try asking again shortly."

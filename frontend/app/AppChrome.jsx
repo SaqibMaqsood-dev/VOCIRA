@@ -18,11 +18,18 @@ export default function AppChrome({ children }) {
   //
   // It is mounted in one place - GradFlow is a WebGL canvas, and
   // giving every page its own context is wasteful.
+  //
+  // No page transition for the panels. Providers keys its fade on the
+  // path, and wrapped around a panel it took the whole frame with it:
+  // on every page change the sidebar and header faded out and back in,
+  // and the panel was rebuilt from scratch - its access check and
+  // "Checking access…" screen included. The panel's frame stays put; only
+  // the content area changes (AdminLayout).
   if (isAdmin) {
     return (
       <>
         <BackgroundGradient />
-        <Providers>{children}</Providers>
+        {children}
       </>
     );
   }

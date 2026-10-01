@@ -1,6 +1,5 @@
-import HomeHero from "@/components/HomeHero";
+import HomeSwitch from "./HomeSwitch";
 
 export default function HomePage() {
-  return <HomeHero />;
+  return <HomeSwitch />;
 }
-

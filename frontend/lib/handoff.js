@@ -7,6 +7,8 @@
  * the other would be left behind.
  */
 
+import { ParticipantKind } from "livekit-client";
+
 /**
  * The AI sets this attribute on its own participant:
  *
@@ -15,6 +17,20 @@
  *     no_answer  -> nobody picked up, the AI is taking over again
  */
 export const HANDOFF_ATTRIBUTE = "vocira.handoff";
+
+/**
+ * Is this participant the AI?
+ *
+ * The older worker joins as "agent" with the standard participant kind;
+ * the LiveKit Agents worker joins as "agent-<id>" with kind AGENT. Either
+ * one is the assistant - its voice, its state and its captions.
+ */
+export function isAgentParticipant(participant) {
+  return (
+    participant?.identity === "agent" ||
+    participant?.kind === ParticipantKind.AGENT
+  );
+}
 
 /**
  * Is this participant an admin?

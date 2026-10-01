@@ -21,13 +21,14 @@ const features = [
   {
     icon: BrainCircuit,
     title: "AI Powered Response Generation",
-    description: "Get instant, accurate answers powered by your OpenAI + RAG stack."
+    description:
+      "Instant answers written from the school's own documents and pages - its knowledge base - not from guesses."
   },
   {
     icon: ShieldCheck,
     title: "Sensitive Data Protection",
     description:
-      "Privacy-first handling with secure processing patterns across the platform."
+      "A child's records only for their own signed-in guardian, and every school kept apart from the others."
   },
   {
     icon: Radio,

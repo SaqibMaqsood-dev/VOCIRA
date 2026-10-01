@@ -45,6 +45,25 @@ const EMPTY = { index: {}, last_sync: { state: "unknown" } };
 const EMPTY_DOCS = { documents: [], total: 0, indexed: 0, chunks: 0 };
 const EMPTY_SCHOOLS = { schools: [], default: "educators" };
 
+// What each records system is called (services/tenants.py RECORDS_KINDS).
+// A "spreadsheet" school's links are Google Sheet tabs or online CSV /
+// Excel files (erp_services/spreadsheet.py).
+const RECORDS_NAME = {
+  erpnext: "ERPNext",
+  "open-school-mis": "Open School MIS",
+  spreadsheet: "Google Sheet / Excel",
+};
+
+/** "Records: ERPNext connected" - or that it is not connected yet. */
+function recordsLabel(school) {
+  if (!school.records) return "General questions only - no records system";
+  const name = RECORDS_NAME[school.records] || school.records;
+  if (school.records_ready === false) {
+    return `Records: ${name} - ${school.records === "spreadsheet" ? "no students link yet" : "not connected yet"}`;
+  }
+  return `Records: ${name} connected`;
+}
+
 export default function KnowledgePage() {
   // Every school has its own documents and its own part of the index
   // (one agent, a knowledge base per school). Everything on this page
@@ -304,9 +323,7 @@ export default function KnowledgePage() {
             )}
             {current && (
               <span className="text-[11px] text-text-secondary">
-                {current.records
-                  ? "Records: ERP connected"
-                  : "General questions only - no records system"}
+                {recordsLabel(current)}
               </span>
             )}
           </div>

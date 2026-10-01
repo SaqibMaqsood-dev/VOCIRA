@@ -353,6 +353,109 @@ async def admin_escalations(
 
 
 # =========================================================
+# TICKETS  (the Support page's messages, for their school's admin)
+# =========================================================
+
+class TicketUpdate(BaseModel):
+    status: str | None = None
+    # the school's answer - a guardian reads it on their Support page
+    reply: str | None = Field(default=None, max_length=5000)
+
+
+def _ticket_out(ticket, school_names: dict) -> dict:
+    return {
+        "id": str(ticket.id),
+        "reference": ticket.reference,
+        "school": ticket.school_id,
+        "schoolName": school_names.get(ticket.school_id, ticket.school_id),
+        "from": "guardian" if ticket.user_id else "guest",
+        "name": ticket.name,
+        "email": ticket.email,
+        "subject": ticket.subject,
+        "message": ticket.message,
+        "status": ticket.status,
+        "reply": ticket.reply,
+        "createdAt": ticket.created_at.isoformat() if ticket.created_at else None,
+        "updatedAt": ticket.updated_at.isoformat() if ticket.updated_at else None,
+        "resolvedAt": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+    }
+
+
+@router.get("/tickets")
+async def admin_tickets(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin: Annotated[object, Depends(require_admin)],
+    status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+    school: str | None = None,
+):
+    """The school's tickets, newest first: a school admin sees only their own school's."""
+    from backend.microservices.livekit_Rag_services.models.support_ticket_model import (
+        SupportTicket,
+    )
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    scope = await _scope(admin, school)
+    query = select(SupportTicket).order_by(SupportTicket.created_at.desc()).limit(limit)
+    if scope is not None:
+        query = query.where(SupportTicket.school_id == scope)
+    if status_filter:
+        query = query.where(SupportTicket.status == status_filter)
+
+    rows = (await db.execute(query)).scalars().all()
+    names = {s.id: s.name for s in tenants.all_schools().values()}
+    return [_ticket_out(t, names) for t in rows]
+
+
+@router.patch("/tickets/{ticket_id}")
+async def admin_update_ticket(
+    ticket_id: str,
+    request: TicketUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin: Annotated[object, Depends(require_admin)],
+):
+    """Move a ticket along, or answer it - only a ticket of the admin's own school."""
+    from uuid import UUID
+
+    from backend.microservices.livekit_Rag_services.models.support_ticket_model import (
+        TICKET_STATUSES,
+        SupportTicket,
+    )
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    try:
+        key = UUID(ticket_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found") from None
+
+    ticket = await db.get(SupportTicket, key)
+    scope = caller_school(admin)
+    # another school's ticket does not exist, as far as this admin knows
+    if ticket is None or (scope is not None and ticket.school_id != scope):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    if request.status is not None:
+        if request.status not in TICKET_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Status must be one of: {', '.join(TICKET_STATUSES)}",
+            )
+        # the parent's list keeps a resolved ticket for a while after this moment
+        if request.status == "resolved" and ticket.status != "resolved":
+            ticket.resolved_at = func.now()
+        elif request.status != "resolved":
+            ticket.resolved_at = None
+        ticket.status = request.status
+    if request.reply is not None:
+        ticket.reply = request.reply.strip() or None
+
+    await db.commit()
+    await db.refresh(ticket)
+    print(f"[Tickets] {ticket.reference} -> {ticket.status}{' (answered)' if ticket.reply else ''}")
+    return _ticket_out(ticket, {s.id: s.name for s in tenants.all_schools().values()})
+
+
+# =========================================================
 # KNOWLEDGE BASE
 # =========================================================
 

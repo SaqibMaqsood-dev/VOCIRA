@@ -29,7 +29,8 @@ def chk(label, cond, extra=""):
 def login(email, password):
     r = httpx.post(
         f"{GATEWAY}/auth/login",
-        data={"username": email, "password": password},
+        # signed in at The Educators' address (its accounts have no school set)
+        data={"username": email, "password": password, "school": "educators"},
         timeout=30,
     )
     if r.status_code != 200:

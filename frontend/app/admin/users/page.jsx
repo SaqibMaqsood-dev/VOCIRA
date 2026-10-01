@@ -22,7 +22,6 @@ import {
   KeyRound,
   Link2Off,
   Pencil,
-  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -32,6 +31,7 @@ import {
 import Badge from "@/app/admin/_components/ui/Badge";
 import Button from "@/app/admin/_components/ui/Button";
 import { Card, CardHeader } from "@/app/admin/_components/ui/Card";
+import Modal from "@/app/admin/_components/ui/Modal";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
 import { useAdminData, adminFetch, formatTime } from "@/app/admin/useAdminApi";
 import FullScreenLoader from "@/components/FullScreenLoader";
@@ -54,7 +54,6 @@ const RECORDS_NAME = {
 
 export default function UsersPage() {
   const { data, loading, error, reload } = useAdminData(BASE, EMPTY, { pollMs: POLL_MS });
-  const { data: roles } = useAdminData(`${BASE}/roles`, []);
 
   // ERPNext's guardians - every one of them, not just the ones that
   // already have a Vocira login. The Parents table below is built
@@ -126,8 +125,8 @@ export default function UsersPage() {
 
   // The Parents table shows one row per ERPNext guardian - not one
   // row per Vocira account - so a guardian with no login yet still
-  // appears, with a way to set one up right there instead of needing
-  // "Add account" and picking them out of a dropdown of hundreds.
+  // appears, with a way to set one up right there - the only way to add
+  // a login here, rather than picking them out of a dropdown of hundreds.
   //
   // An account whose parent_id points at nothing in ERPNext (deleted
   // guardian, typo, or simply no parent_id at all) has nowhere to
@@ -195,6 +194,16 @@ export default function UsersPage() {
     nameTyped !== null
       ? nameTyped
       : chosen?.name || form?.user?.name || "";
+
+  function closeForm() {
+    setForm(null);
+    setProblem("");
+  }
+
+  function closePassword() {
+    setPwFor(null);
+    setProblem("");
+  }
 
   const say = (message) => {
     setProblem("");
@@ -307,22 +316,15 @@ export default function UsersPage() {
           <Button variant="outline" onClick={reload}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
-          <Button onClick={() => { setPicked(""); setEmailTyped(null); setNameTyped(null); setForm({ mode: "create", user: null }); }}>
-            <Plus className="h-3.5 w-3.5" />
-            Add account
-          </Button>
         </div>
       </div>
 
-      {problem && (
-        <div className="rounded-xl border border-red-400/30 bg-red-400/[0.07] px-3 py-2 text-xs text-red-200">
-          {problem}
-        </div>
-      )}
+      {/* with a popup open, its problem shows inside it */}
+      {problem && !form && !pwFor && <ProblemBox text={problem} />}
 
-      {(error || notice) && !problem && (
+      {error && !problem && (
         <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
-          {error || notice}
+          {error}
         </div>
       )}
 
@@ -370,29 +372,17 @@ export default function UsersPage() {
         </Card>
       </div>
 
-      {/* ---- form ---- */}
+      {/* ---- form (a popup: it used to open at the top of the page,
+          out of sight for an admin far down the parents' list) ---- */}
       {form && (
-        <Card>
-          <div className="mb-4 flex items-start justify-between gap-2">
-            <div>
-              <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-secondary">
-                {form.mode === "create" ? "New account" : "Edit account"}
-              </h2>
-              {form.user && (
-                <p className="mt-1.5 text-xs text-text-secondary/75">
-                  {form.user.email}
-                </p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setForm(null)}
-              className="rounded-lg border border-white/10 p-1.5 text-text-secondary hover:bg-white/5 hover:text-white"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
+        <Modal
+          id="account-form"
+          size="lg"
+          title={form.mode === "create" ? "New account" : "Edit account"}
+          description={form.user?.email}
+          onClose={closeForm}
+        >
+          {problem && <ProblemBox text={problem} />}
           <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
             {/* Pick the guardian first - email and name are filled
                 in from it. The email used to be typed by hand, and
@@ -525,25 +515,12 @@ export default function UsersPage() {
               />
             )}
 
-            <label className="block">
-              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Role
-              </span>
-              <select
-                name="role"
-                defaultValue={form.user?.role || "guardian"}
-                className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white outline-none focus:border-accent-primary/50 focus:ring-2 focus:ring-accent-primary/30"
-              >
-                {(roles || []).map((r) => (
-                  <option key={r.role_id} value={r.name} className="bg-[#0b0a2a]">
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {/* No role to pick: a login set up or edited here is a
+                guardian's. An administrator's row keeps its admin role. */}
+            <input type="hidden" name="role" value={form.user?.role === "admin" ? "admin" : "guardian"} />
 
             <div className="flex items-end justify-end gap-2 sm:col-span-2">
-              <Button variant="outline" type="button" onClick={() => setForm(null)}>
+              <Button variant="outline" type="button" onClick={closeForm}>
                 Cancel
               </Button>
               <Button type="submit" disabled={busy === "save"}>
@@ -555,16 +532,18 @@ export default function UsersPage() {
               </Button>
             </div>
           </form>
-        </Card>
+        </Modal>
       )}
 
-      {/* ---- password reset ---- */}
+      {/* ---- password reset (a popup too) ---- */}
       {pwFor && (
-        <Card>
-          <CardHeader
-            title="Reset password"
-            description={`A new password for ${pwFor.email}. The old one stops working immediately.`}
-          />
+        <Modal
+          id="password-form"
+          title="Reset password"
+          description={`A new password for ${pwFor.email}. The old one stops working immediately.`}
+          onClose={closePassword}
+        >
+          {problem && <ProblemBox text={problem} />}
           <form onSubmit={resetPassword} className="flex flex-wrap items-end gap-3">
             <div className="min-w-[240px] flex-1">
               <PasswordField
@@ -576,7 +555,7 @@ export default function UsersPage() {
               />
             </div>
             <div className="flex gap-2 pb-0.5">
-              <Button variant="outline" type="button" onClick={() => setPwFor(null)}>
+              <Button variant="outline" type="button" onClick={closePassword}>
                 Cancel
               </Button>
               <Button type="submit" disabled={busy === "pw"}>
@@ -584,7 +563,18 @@ export default function UsersPage() {
               </Button>
             </div>
           </form>
-        </Card>
+        </Modal>
+      )}
+
+      {/* "Password changed…" where it is seen - the page may be scrolled far down */}
+      {notice && !error && (
+        <div
+          id="accounts-notice"
+          role="status"
+          className="fixed bottom-6 right-6 z-[95] max-w-sm rounded-xl border border-emerald-400/30 bg-bg-secondary px-4 py-3 text-xs text-emerald-200 shadow-card"
+        >
+          {notice}
+        </div>
       )}
 
       {/* ---- do alag list: admins aur parents ----
@@ -831,6 +821,14 @@ function AccountTable({
       </Table>
       )}
     </Card>
+  );
+}
+
+function ProblemBox({ text }) {
+  return (
+    <div className="mb-3 rounded-xl border border-red-400/30 bg-red-400/[0.07] px-3 py-2 text-xs text-red-200">
+      {text}
+    </div>
   );
 }
 

@@ -109,7 +109,8 @@ def main():
     # =====================================================
     r = httpx.post(
         f"{GATEWAY}/auth/login",
-        data={"username": EMAIL, "password": PASSWORD},
+        # signed in at The Educators' address (its accounts have no school set)
+        data={"username": EMAIL, "password": PASSWORD, "school": "educators"},
         timeout=40,
     )
     chk("login", r.status_code == 200, f"HTTP {r.status_code}")

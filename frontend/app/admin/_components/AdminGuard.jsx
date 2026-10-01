@@ -25,6 +25,7 @@
 import { useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { getAccessToken } from "@/lib/session";
+import { loginPath } from "@/lib/school";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
 // Where each administrator belongs: a school's admin in /admin, the
@@ -39,7 +40,7 @@ export default function AdminGuard({ children, allow = "admin" }) {
     const token = getAccessToken();
 
     if (!token) {
-      window.location.href = "/login";
+      window.location.href = loginPath();
       setState("denied");
       return;
     }

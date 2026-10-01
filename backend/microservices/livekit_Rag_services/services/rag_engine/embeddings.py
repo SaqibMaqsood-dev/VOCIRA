@@ -68,10 +68,23 @@ class GeminiEmbeddings(Embeddings):
             payload["taskType"] = task
         return payload
 
+    def _http(self) -> httpx.Client:
+        """
+        One client, kept open. A new one per request meant a new TLS
+        connection to Google for every question - most of the ~800 ms each
+        knowledge search spent embedding the question.
+        """
+        client = getattr(self, "_client", None)
+        if client is None:
+            client = self._client = httpx.Client(
+                timeout=self.timeout,
+                limits=httpx.Limits(max_keepalive_connections=4, keepalive_expiry=300),
+            )
+        return client
+
     def _post(self, path: str, body: dict) -> dict:
         url = f"{GEMINI_BASE}/models/{self.model}:{path}?key={self.api_key}"
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(url, json=body)
+        r = self._http().post(url, json=body)
 
         if r.status_code != 200:
             raise RuntimeError(
@@ -107,12 +120,24 @@ class GeminiEmbeddings(Embeddings):
         return vectors
 
     def embed_query(self, text: str) -> list[float]:
+        # The same question asked again (often - "the fee", "timings") needs
+        # no second round trip; a question's vector never changes.
+        cache = getattr(self, "_query_cache", None)
+        if cache is None:
+            cache = self._query_cache = {}
+        key = " ".join(text.split()).lower()
+        if key in cache:
+            return cache[key]
+
         data = self._post("embedContent", self._payload(text, self.QUERY_TASK))
         values = data.get("embedding", {}).get("values", [])
 
         if not values:
             raise RuntimeError("Gemini ne khali embedding di")
 
+        if len(cache) >= 512:
+            cache.pop(next(iter(cache)))
+        cache[key] = values
         return values
 
 

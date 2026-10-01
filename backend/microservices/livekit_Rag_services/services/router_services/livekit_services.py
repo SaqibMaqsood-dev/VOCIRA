@@ -1,13 +1,39 @@
 import json
+import os
 
 from fastapi import HTTPException, status, Request
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from livekit.api import AccessToken, VideoGrants
+from livekit.api import AccessToken, RoomAgentDispatch, RoomConfiguration, VideoGrants
 
 from backend.helper_functions.database.session import SessionLocal
 
 from backend.microservices.livekit_Rag_services.core.config import settings
+
+# Which voice agent answers a call:
+#   "agents" - the LiveKit Agents one (services/agent/worker.py); the call
+#              token asks LiveKit to send it into the room. The default.
+#   "legacy" - the older RabbitMQ worker (livekit_worker.py), told of each
+#              new session and joining the room itself - kept as a fallback
+#              (start-vocira.ps1 -LegacyWorker)
+VOICE_ENGINE = (os.getenv("VOICE_ENGINE") or "agents").strip().lower()
+AGENT_NAME = "vocira"
+
+
+def with_voice_agent(token: AccessToken, call: dict) -> AccessToken:
+    """On the agents engine, the token dispatches the agent with the call's details."""
+    if VOICE_ENGINE != "agents":
+        return token
+    return token.with_room_config(
+        RoomConfiguration(
+            agents=[RoomAgentDispatch(agent_name=AGENT_NAME, metadata=json.dumps(call))],
+            # LiveKit closes a room ~20 s after its last person leaves - an
+            # agent does not count - so a caller on a weak link who needed
+            # longer to get back found the call gone. The agent waits 30 s
+            # (agent/lifecycle.py), as the older worker did; so does the room.
+            departure_timeout=30,
+        )
+    )
 from backend.microservices.livekit_Rag_services.services import tenants
 from backend.helper_functions.token_service.access_tokken.require_admin import (
     caller_school,
@@ -113,6 +139,7 @@ class LivekitServices:
             db=db,
             user_id=current_user.user_id,
             school_id=user_school,
+            notify_worker=VOICE_ENGINE != "agents",
         )
 
         if not session:
@@ -143,7 +170,17 @@ class LivekitServices:
         # Generate token
         # --------------------------------------------------------
 
-        token = (
+        call = {
+            "user_id": str(
+                current_user.user_id
+            ),
+            "role": "parent",
+            "type": "user",
+            "session_id": session_id,
+            "school": user_school,
+        }
+
+        token = with_voice_agent(
             AccessToken(
                 api_key=settings.LIVEKIT_API_KEY,
                 api_secret=settings.LIVEKIT_API_SECRET,
@@ -155,17 +192,7 @@ class LivekitServices:
                 user_record["name"]
             )
             .with_metadata(
-                json.dumps(
-                    {
-                        "user_id": str(
-                            current_user.user_id
-                        ),
-                        "role": "parent",
-                        "type": "user",
-                        "session_id": session_id,
-                        "school": user_school,
-                    }
-                )
+                json.dumps(call)
             )
             .with_grants(
                 VideoGrants(
@@ -174,7 +201,8 @@ class LivekitServices:
                     can_publish=True,
                     can_subscribe=True,
                 )
-            )
+            ),
+            call,
         )
 
         # --------------------------------------------------------
@@ -236,6 +264,7 @@ class LivekitServices:
                 db=db,
                 user_id=None,
                 school_id=guest_school,
+                notify_worker=VOICE_ENGINE != "agents",
             )
 
             if not session:
@@ -260,7 +289,16 @@ class LivekitServices:
             if chosen not in self.SUPPORTED_LANGUAGES:
                 chosen = None
 
-            token = (
+            call = {
+                "user_id": None,
+                "role": "guest",
+                "type": "guest",
+                "session_id": session_id,
+                "language": chosen,
+                "school": guest_school,
+            }
+
+            token = with_voice_agent(
                 AccessToken(
                     api_key=settings.LIVEKIT_API_KEY,
                     api_secret=settings.LIVEKIT_API_SECRET,
@@ -272,16 +310,7 @@ class LivekitServices:
                     "Guest"
                 )
                 .with_metadata(
-                    json.dumps(
-                        {
-                            "user_id": None,
-                            "role": "guest",
-                            "type": "guest",
-                            "session_id": session_id,
-                            "language": chosen,
-                            "school": guest_school,
-                        }
-                    )
+                    json.dumps(call)
                 )
                 .with_grants(
                     VideoGrants(
@@ -290,7 +319,8 @@ class LivekitServices:
                         can_publish=True,
                         can_subscribe=True,
                     )
-                )
+                ),
+                call,
             )
 
             # "room" is the real field - both the
@@ -547,7 +577,9 @@ class LivekitServices:
                     "escalation_id": str(escalation_id),
                     "session_id": session_id,
                     "admin_id": str(current_user.user_id),
-                }
+                },
+                # the call's own school - its admins are the ones ringing
+                school=session.school_id or tenants.DEFAULT_SCHOOL_ID,
             )
 
         except Exception as error:

@@ -7,6 +7,7 @@ import CallTable from "@/components/CallTable";
 import FullScreenLoader from "@/components/FullScreenLoader";
 
 import { authFetch, clearSession, getAccessToken } from "@/lib/session";
+import { loginPath } from "@/lib/school";
 import { localDateKey, parseServerTime } from "@/lib/time";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -20,7 +21,15 @@ const PAGE_SIZE = 20;
 // it takes its colours from the OS unless they are set inline, which
 // left the child names white on white. colorScheme on the <select>
 // darkens the popup itself for the same reason.
-const OPTION_STYLE = { backgroundColor: "#100944", color: "#ffffff" };
+// "Zoya Khan" -> "ZK", for a child's card
+function initials(name) {
+  return (name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+}
 
 // A day picked on the calendar ("2026-09-30") as the two UTC instants
 // that bound it on the viewer's own clock - so a call at 1am Pakistan
@@ -46,10 +55,6 @@ function formatDay(dateKey) {
 export default function DashboardPage() {
   const [sessions, setSessions] = useState([]);
   const [children, setChildren] = useState([]);
-
-  // The child picked in the "My Children" list. It only shows that
-  // child's details - the calls and stats always cover every child.
-  const [selectedChild, setSelectedChild] = useState(null);
 
   const [stats, setStats] = useState({
     total_calls: 0,
@@ -96,7 +101,7 @@ export default function DashboardPage() {
 
     if (sessionsResponse.status === 401) {
       clearSession();
-      window.location.href = "/login";
+      window.location.href = loginPath();
       return null;
     }
 
@@ -181,7 +186,7 @@ export default function DashboardPage() {
         const accessToken = getAccessToken();
 
         if (!accessToken) {
-          window.location.href = "/login";
+          window.location.href = loginPath();
           return;
         }
 
@@ -213,7 +218,7 @@ export default function DashboardPage() {
         if (statsResponse.status === 401) {
           clearSession();
 
-          window.location.href = "/login";
+          window.location.href = loginPath();
           return;
         }
 
@@ -475,7 +480,49 @@ export default function DashboardPage() {
   return (
     <div className="page-shell flex flex-col justify-center">
 
-      {/* ==========================This problem is solved.===========================
+      {/* =====================================================
+          MY CHILDREN - first thing a guardian sees: the children
+          the assistant can answer about, from the school's records
+      ===================================================== */}
+
+      {children.length > 0 && (
+        <motion.section
+          id="my-children"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+          className="mb-8"
+        >
+          <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-text-secondary">
+            My Children ({children.length})
+          </h2>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {children.map((child) => (
+              <div
+                key={child.student_id}
+                className="child-card flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3"
+              >
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-accent-primary/70 to-accent-secondary/60 text-sm font-semibold text-white">
+                  {initials(child.name)}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-text-primary">
+                    {child.name}
+                  </p>
+                  <p className="truncate text-xs text-text-secondary">
+                    {[child.class_name || child.program, child.academic_year]
+                      .filter(Boolean)
+                      .join(" · ") || "Student"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.section>
+      )}
+
+      {/* =====================================================
           HEADER
       ===================================================== */}
 
@@ -504,73 +551,6 @@ export default function DashboardPage() {
         <div className="mt-6 rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
-      )}
-
-      {/* =====================================================
-          MY CHILDREN
-      ===================================================== */}
-
-      {children.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{
-            duration: 0.6,
-            ease: "easeOut",
-            delay: 0.03,
-          }}
-          className="mt-8"
-        >
-          <label
-            htmlFor="child-filter"
-            className="text-sm font-medium uppercase tracking-wide text-text-secondary"
-          >
-            My Children
-          </label>
-
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <select
-              id="child-filter"
-              value={selectedChild?.student_id ?? ""}
-              onChange={(event) =>
-                setSelectedChild(
-                  children.find(
-                    (child) => child.student_id === event.target.value
-                  ) ?? null
-                )
-              }
-              style={{ colorScheme: "dark" }}
-              className="min-w-64 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm text-text-primary outline-none transition hover:border-white/20 focus:border-primary/60"
-            >
-              <option value="" style={OPTION_STYLE}>
-                All children ({children.length})
-              </option>
-
-              {children.map((child) => (
-                <option
-                  key={child.student_id}
-                  value={child.student_id}
-                  style={OPTION_STYLE}
-                >
-                  {child.name}
-                  {child.class_name
-                    ? ` — ${child.class_name}`
-                    : child.program
-                      ? ` — ${child.program}`
-                      : ""}
-                </option>
-              ))}
-            </select>
-
-            {selectedChild && (
-              <span className="text-xs text-text-secondary">
-                {selectedChild.academic_year
-                  ? `Academic year ${selectedChild.academic_year}`
-                  : ""}
-              </span>
-            )}
-          </div>
-        </motion.div>
       )}
 
       {/* =====================================================

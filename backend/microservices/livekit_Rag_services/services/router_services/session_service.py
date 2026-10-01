@@ -97,7 +97,15 @@ class SessionService:
     # =========================================================
     # CREATE SESSION (transaction-safe)
     # =========================================================
-    async def create_session(self, db: AsyncSession, user_id: UUID | None, school_id: str | None = None):
+    async def create_session(self, db: AsyncSession, user_id: UUID | None, school_id: str | None = None,
+                             notify_worker: bool = True):
+        """
+        `notify_worker` sends the session to the older RabbitMQ worker
+        (livekit_worker.py), which then joins the room. With the LiveKit
+        Agents engine the call token itself asks LiveKit for the agent
+        (services/agent/worker.py), so nothing is published - two agents
+        in one call would answer every question twice.
+        """
         try:
             async with db.begin():  # transaction block
                 new_session = await self.session_repo.session_create(
@@ -145,8 +153,9 @@ class SessionService:
             print(f"[SessionService] Session verified successfully: {session_id}")
 
             # publish only once, after verification
-            await RabbitMQ().producer(message={"session_id": str(session_id)})
-            print(f"[SessionService] Session published to RabbitMQ: {session_id}")
+            if notify_worker:
+                await RabbitMQ().producer(message={"session_id": str(session_id)})
+                print(f"[SessionService] Session published to RabbitMQ: {session_id}")
 
             return saved_session
 

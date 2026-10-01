@@ -16,6 +16,7 @@ import io
 import os
 import re
 
+import onnxruntime
 from piper import PiperVoice
 from piper.config import SynthesisConfig
 
@@ -48,11 +49,31 @@ def _voice_for(language: str | None) -> PiperVoice:
         language = "en"
 
     if language not in _voices:
-        _voices[language] = PiperVoice.load(
-            f"{_MODEL_DIR}/{_VOICE_FILES[language]}"
+        path = f"{_MODEL_DIR}/{_VOICE_FILES[language]}"
+        voice = PiperVoice.load(path)
+        voice.session = onnxruntime.InferenceSession(
+            path, sess_options=_session_options(), providers=["CPUExecutionProvider"]
         )
+        _voices[language] = voice
 
     return _voices[language]
+
+
+def _session_options() -> "onnxruntime.SessionOptions":
+    """
+    Piper's ONNX settings. Its default - a thread for every core, each
+    spinning while it waits - is fine on an idle machine, but with
+    anything else busy (a browser on a call is enough) every step waits
+    on the slowest thread: a sentence measured 440 ms idle took 1.0-1.7 s
+    beside four busy processes. Eight threads that sleep instead of
+    spinning made it 340 ms idle and ~570 ms busy.
+    """
+    options = onnxruntime.SessionOptions()
+    options.intra_op_num_threads = int(os.getenv("PIPER_THREADS", "0")) or min(8, os.cpu_count() or 4)
+    options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    return options
 
 _CONFIG = SynthesisConfig(length_scale=1)
 

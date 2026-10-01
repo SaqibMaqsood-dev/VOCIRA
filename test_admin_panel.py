@@ -41,7 +41,7 @@ def chk(label, cond, extra=""):
 
 def login(email, pw):
     r = httpx.post(f"{GATEWAY}/auth/login",
-                   data={"username": email, "password": pw}, timeout=40)
+                   data={"username": email, "password": pw, "school": "educators"}, timeout=40)
     return r.json()["access_token"] if r.status_code == 200 else None
 
 

@@ -21,6 +21,7 @@ from sqlalchemy import text
 # before create_all runs.
 from backend.microservices.livekit_Rag_services.models import school_model  # noqa: F401
 from backend.microservices.livekit_Rag_services.models import school_connection_model  # noqa: F401
+from backend.microservices.livekit_Rag_services.models import support_ticket_model  # noqa: F401
 
 
 
@@ -127,6 +128,15 @@ async def lifespan(app: FastAPI):
         # the school's own address - its subdomain
         await conn.execute(text(
             "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subdomain VARCHAR(40)"
+        ))
+        # when a support ticket was resolved; one resolved before the column
+        # existed counts from its last change
+        await conn.execute(text(
+            "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP"
+        ))
+        await conn.execute(text(
+            "UPDATE support_tickets SET resolved_at = updated_at "
+            "WHERE status = 'resolved' AND resolved_at IS NULL"
         ))
 
     # The first school's ERPNext keys move once from the server settings

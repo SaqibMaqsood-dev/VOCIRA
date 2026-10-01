@@ -25,9 +25,14 @@ from backend.helper_functions.token_service.access_tokken.require_admin import (
 
 
 
+# The platform super admin's only, every endpoint. These span every school,
+# and most needed nothing but a login - so a parent could read the escalation
+# stats of every school, or change and delete escalations. A school's admin
+# works through /admin/escalations, which is limited to their own school.
 router = APIRouter(
     prefix="/escalations",
     tags=["Escalations"],
+    dependencies=[Depends(require_super_admin)],
 )
 
 escalation_service = EslcalationService()

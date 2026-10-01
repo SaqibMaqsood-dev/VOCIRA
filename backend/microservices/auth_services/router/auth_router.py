@@ -12,9 +12,15 @@ from backend.microservices.auth_services.services.hashing_service.hashing import
     Hash,
 )
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Form, HTTPException, status
 
 from fastapi.security import OAuth2PasswordRequestForm
+
+from backend.helper_functions.token_service.access_tokken.require_admin import (
+    DEFAULT_SCHOOL_ID,
+)
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -45,6 +51,9 @@ router = APIRouter(tags=["Authentication"])
 @router.post("/login", response_model=Token)
 async def login(
     user_data: OAuth2PasswordRequestForm = Depends(),
+    # The school whose address the sign-in page is on (its id), or
+    # nothing on Vocira's main address - see step 4b.
+    school: Annotated[str | None, Form()] = None,
     db: AsyncSession = Depends(get_db),
 ):
 
@@ -125,6 +134,39 @@ async def login(
     role = role_of(user)
 
     print(f"Role : {role}")
+
+    # =========================================================
+    # 4b. Where this account may sign in
+    #
+    # Vocira's main address belongs to the super admin alone. Parents
+    # and school staff sign in at their own school's address, and only
+    # there - the page sends that school's id. An account without a
+    # school is the first school's, as everywhere else. Checked after
+    # the password, so nobody learns from it that an account exists.
+    # =========================================================
+
+    where = (school or "").strip().lower() or None
+
+    if where is None and role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This sign-in is for the Vocira super admin. Parents and school staff "
+                "sign in at their school's own address."
+            ),
+        )
+
+    if where is not None and role == "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The super admin signs in at the main Vocira address.",
+        )
+
+    if where is not None and (user.school_id or DEFAULT_SCHOOL_ID).strip().lower() != where:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is not registered with this school. Please sign in at your own school's address.",
+        )
 
     # =========================================================
     # 5. Create Access Token

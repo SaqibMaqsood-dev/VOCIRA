@@ -35,6 +35,27 @@ RABBITMQ_URL = os.getenv(
 )
 
 
+async def _school_of_session(session_id) -> str | None:
+    """The school a call belongs to, from its session - None if it cannot be told."""
+    from uuid import UUID
+
+    from sqlalchemy import select
+
+    from backend.helper_functions.database.session import SessionLocal
+    from backend.microservices.livekit_Rag_services.models.session_model import Session
+
+    try:
+        key = UUID(str(session_id))
+    except (ValueError, TypeError):
+        return None
+    try:
+        async with SessionLocal() as db:
+            return (await db.execute(select(Session.school_id).where(Session.id == key))).scalar_one_or_none()
+    except Exception as error:
+        print(f"[RabbitMQ] could not read the call's school: {error}")
+        return None
+
+
 class RabbitMQ:
 
     # =========================================================
@@ -466,9 +487,12 @@ class RabbitMQ:
 
                 print(data)
 
-                # Send notification to connected admins
+                # To the admins of the call's own school only - read from
+                # the call's session, not from the event's word for it
+                school = await _school_of_session(data.get("session_id"))
                 await notification_manager.broadcast(
-                    data
+                    data,
+                    school=school,
                 )
 
                 await message.ack()

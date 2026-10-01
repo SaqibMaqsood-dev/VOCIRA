@@ -6,8 +6,13 @@
 #   .\start-vocira.ps1 -WithErp         + sirf ERPNext
 #   .\start-vocira.ps1 -WithFrontend    + sirf frontend
 #   .\start-vocira.ps1 -WithTunnel      + Cloudflare tunnel (Vercel ke liye)
+#   .\start-vocira.ps1 -LegacyWorker    purana RabbitMQ agent worker (fallback)
 #   .\start-vocira.ps1 -Stop            sab band
 #   .\start-vocira.ps1 -Status          kya chal raha hai
+#
+# Calls are answered by the LiveKit Agents worker (services/agent) by
+# default. -LegacyWorker runs the older livekit_worker.py instead, and
+# tells the livekit service to hand calls to it (VOICE_ENGINE=legacy).
 #
 # Har service apni window mein khulti hai taake logs nazar aayen.
 #
@@ -21,6 +26,7 @@ param(
     [switch]$WithErp,
     [switch]$WithFrontend,
     [switch]$WithTunnel,
+    [switch]$LegacyWorker,
     [switch]$Stop,
     [switch]$Status
 )
@@ -49,9 +55,22 @@ if ($All) { $WithErp = $true; $WithFrontend = $true }
 
 Set-Location $ROOT
 
+# The project's own pythons, plus the ones that do not name the project on
+# their command line: uv's launcher starts the real interpreter as
+# "python -m backend.microservices...", and the voice agent's job runners,
+# turn detector and Piper are multiprocessing children whose command line
+# is only "spawn_main(parent_pid=...)" - found through their parent. Left
+# behind, six of those once held ~6 GB of memory between them.
 function Get-VociraPython {
-    Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -like "*VOCIRA-feature-backend*" }
+    $all = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue)
+    $ours = @{}
+    $all | Where-Object {
+        $_.CommandLine -and ($_.CommandLine -like "*VOCIRA-feature-backend*" -or $_.CommandLine -like "*-m backend.microservices.*" -or $_.CommandLine -like "*-m uvicorn backend.microservices.*")
+    } | ForEach-Object { $ours[[int]$_.ProcessId] = $true }
+    $all | Where-Object {
+        $ours.ContainsKey([int]$_.ProcessId) -or
+        ($_.CommandLine -match "spawn_main\(parent_pid=(\d+)" -and $ours.ContainsKey([int]$Matches[1]))
+    }
 }
 
 # uv har service ke liye ek child python bhi banata hai. Ek hi baar
@@ -93,14 +112,22 @@ if ($Status) {
         }
     }
 
-    Write-Host "`n--- Agent worker ---" -ForegroundColor Cyan
+    Write-Host "`n--- Voice agent ---" -ForegroundColor Cyan
+    $agentsUp = $false
+    try {
+        Invoke-WebRequest "http://127.0.0.1:8091/" -UseBasicParsing -TimeoutSec 5 | Out-Null
+        Write-Host "  LiveKit Agents worker  up (:8091)" -ForegroundColor Green
+        $agentsUp = $true
+    } catch { Write-Host "  LiveKit Agents worker  down" -ForegroundColor DarkGray }
+    $legacyUp = $false
     try {
         $q = Invoke-RestMethod "http://localhost:15672/api/queues/%2F/vocira_queue" -TimeoutSec 5 `
              -Headers @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest")) }
-        $col = if ($q.consumers -ge 1) { "Green" } else { "Red" }
-        Write-Host ("  consumers={0}  queued={1}  running={2}" -f $q.consumers, $q.messages_ready, $q.messages_unacknowledged) -ForegroundColor $col
-        if ($q.consumers -lt 1) { Write-Host "  worker is not running - no call will connect" -ForegroundColor Red }
+        $legacyUp = $q.consumers -ge 1
+        $col = if ($legacyUp) { "Green" } else { "DarkGray" }
+        Write-Host ("  legacy worker          consumers={0}  queued={1}  running={2}" -f $q.consumers, $q.messages_ready, $q.messages_unacknowledged) -ForegroundColor $col
     } catch { Write-Host "  Could not reach RabbitMQ" -ForegroundColor DarkGray }
+    if (-not $agentsUp -and -not $legacyUp) { Write-Host "  no voice agent is running - no call will be answered" -ForegroundColor Red }
 
     Write-Host "`n--- Cloudflare tunnel ---" -ForegroundColor Cyan
     $cf = @(Get-Process cloudflared -ErrorAction SilentlyContinue)
@@ -363,9 +390,14 @@ function Start-Window($command) {
     Start-Process powershell -ArgumentList "-NoExit", "-EncodedCommand", $encoded
 }
 
+# Which voice agent the livekit service hands calls to (VOICE_ENGINE).
+$ENGINE = if ($LegacyWorker) { "legacy" } else { "agents" }
+
+# Python writes UTF-8; read with the console's own code page, Urdu in the
+# logs came out as mojibake.
 function Start-Svc($title, $cmd, $logName) {
     $logPath = Join-Path $LOG_DIR "$logName.log"
-    Start-Window "`$host.UI.RawUI.WindowTitle='$title'; `$env:PYTHONUNBUFFERED='1'; Set-Location '$ROOT'; cmd /c '$cmd 2>&1' | Tee-Object -FilePath '$logPath'"
+    Start-Window "`$host.UI.RawUI.WindowTitle='$title'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; `$env:PYTHONUNBUFFERED='1'; `$env:VOICE_ENGINE='$ENGINE'; Set-Location '$ROOT'; cmd /c '$cmd 2>&1' | Tee-Object -FilePath '$logPath'"
     Write-Host "      $title  (log: logs/$logName.log)" -ForegroundColor Green
 }
 
@@ -447,12 +479,21 @@ foreach ($name in @("auth", "livekit", "gateway")) {
     }
 }
 
-# LAZMI: ye RabbitMQ se "session.created" sunta hai aur AI agent ko
-# LiveKit room mein bhejta hai. Iske baghair call to lag jayegi magar
-# koi agent join nahi karega - user akela baitha rahega.
-Start-Svc "VOCIRA agent worker" `
-    "uv run --project $LK python -u -m backend.microservices.livekit_Rag_services.livekit_worker" `
-    "agent-worker"
+# LAZMI: the voice agent. Without it a call connects but nobody answers -
+# the caller sits alone in the room.
+#   default        the LiveKit Agents worker: LiveKit sends it into each
+#                  call's room (the call token asks for it)
+#   -LegacyWorker  the older worker: hears "session.created" on RabbitMQ
+#                  and joins the room itself
+if ($LegacyWorker) {
+    Start-Svc "VOCIRA agent worker (legacy)" `
+        "uv run --project $LK python -u -m backend.microservices.livekit_Rag_services.livekit_worker" `
+        "agent-worker"
+} else {
+    Start-Svc "VOCIRA voice agent" `
+        "uv run --project $LK python -u -m backend.microservices.livekit_Rag_services.services.agent.run start" `
+        "voice-agent"
+}
 
 # ---------------------------------------------------------------------
 # 5. CLOUDFLARE TUNNEL  (gateway :9000 ko internet par le aata hai)
@@ -550,22 +591,29 @@ if ($WithFrontend) {
     Wait-Svc "frontend" "http://localhost:3000" 40 | Out-Null
 }
 
-Write-Host "      waiting for agent worker" -NoNewline -ForegroundColor DarkGray
-$workerReady = $false
-for ($i = 0; $i -lt 60; $i += 2) {
-    try {
-        $q = Invoke-RestMethod "http://localhost:15672/api/queues/%2F/vocira_queue" -TimeoutSec 3 `
-             -Headers @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest")) }
-        if ($q.consumers -ge 1) { $workerReady = $true; break }
-    } catch { }
-    Write-Host "." -NoNewline -ForegroundColor DarkGray
-    Start-Sleep -Seconds 2
-}
-Write-Host ""
-if ($workerReady) {
-    Write-Host "      -> agent worker connected" -ForegroundColor DarkGreen
+if ($LegacyWorker) {
+    Write-Host "      waiting for agent worker" -NoNewline -ForegroundColor DarkGray
+    $workerReady = $false
+    for ($i = 0; $i -lt 60; $i += 2) {
+        try {
+            $q = Invoke-RestMethod "http://localhost:15672/api/queues/%2F/vocira_queue" -TimeoutSec 3 `
+                 -Headers @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest")) }
+            if ($q.consumers -ge 1) { $workerReady = $true; break }
+        } catch { }
+        Write-Host "." -NoNewline -ForegroundColor DarkGray
+        Start-Sleep -Seconds 2
+    }
+    Write-Host ""
+    if ($workerReady) {
+        Write-Host "      -> agent worker connected" -ForegroundColor DarkGreen
+    } else {
+        Write-Host "      -> agent worker never registered - see logs/agent-worker.log" -ForegroundColor Red
+    }
 } else {
-    Write-Host "      -> agent worker never registered - see logs/agent-worker.log" -ForegroundColor Red
+    # Its health port answers once it is registered with LiveKit; loading
+    # the voices and warming the knowledge search goes on for a few
+    # seconds more, before the first call.
+    Wait-Svc "voice-agent" "http://127.0.0.1:8091/" 120 | Out-Null
 }
 & $PSCommandPath -Status
 

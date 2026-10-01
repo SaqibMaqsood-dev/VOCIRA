@@ -4,10 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authFetch, clearSession } from "@/lib/session";
 import BrandLogo from "@/components/BrandLogo";
+import ContactVocira from "@/components/ContactVocira";
+import { subdomainOfPage } from "@/lib/school";
+import { useSite } from "@/lib/site";
 import LanguageSelect, {
   readGuestLanguage,
   writeGuestLanguage,
@@ -27,6 +30,8 @@ const LANGUAGES = [
 ];
 
 
+// A school's site (its own address), and a signed-in user anywhere:
+// the assistant and everything around it.
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/assistant", label: "Assistant" },
@@ -35,12 +40,35 @@ const navItems = [
   { href: "/support", label: "Support" },
 ];
 
+// Vocira's own site (the plain address): what Vocira is. No assistant
+// here - every school has its own address.
+export const VOCIRA_ITEMS = [
+  { href: "/", label: "Home" },
+  { href: "/features", label: "Features" },
+  { href: "/how-it-works", label: "How it works" },
+];
+
+// ...and, for the super admin signed in there, the way back to their panel
+export const PANEL_ITEM = { href: "/superadmin/schools", label: "Schools panel" };
+
+function isActive(pathname, href) {
+  if (href.includes("#")) return false;
+  return href === "/" ? pathname === "/" : pathname?.startsWith(href);
+}
+
 export default function Navbar() {
   const pathname = usePathname();
+  // null until the address is read - no menu is shown before that
+  const site = useSite();
+  const product = Boolean(site?.product);
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [who, setWho] = useState(null);
+
+  const items =
+    site === null ? [] : product ? (isLoggedIn ? [...VOCIRA_ITEMS, PANEL_ITEM] : VOCIRA_ITEMS) : navItems;
 
   // null while it is still being read - showing Urdu before the
   // answer arrives would flicker past an English choice.
@@ -183,12 +211,17 @@ export default function Navbar() {
     setMobileOpen(false);
 
     /*
-     * Go to login page.
+     * A school's site: its sign-in page. Vocira's own site has no
+     * sign-in to show - back to its home.
      */
-    window.location.href = "/login";
+    window.location.href = subdomainOfPage() ? "/login" : "/";
   };
 
   return (
+    <>
+    {/* outside the header: its backdrop blur would hold a fixed popup
+        inside the header's own box */}
+    {contactOpen && <ContactVocira onClose={() => setContactOpen(false)} />}
     <header className="sticky top-0 z-50 border-b border-white/10 bg-bg-primary/40 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-5">
 
@@ -210,11 +243,8 @@ export default function Navbar() {
             appeared while the bottom bar was still there, so an
             iPad showed the same five destinations twice. */}
         <nav className="hidden items-center gap-2 lg:flex">
-          {navItems.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname?.startsWith(item.href);
+          {items.map((item) => {
+            const active = isActive(pathname, item.href);
 
             return (
               <Link
@@ -253,13 +283,27 @@ export default function Navbar() {
 
             {!isLoggedIn ? (
               <>
-                {/* Login */}
-                <Link
-                  href="/login"
-                  className="rounded-xl px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:text-text-primary"
-                >
-                  Login
-                </Link>
+                {/* Vocira's own site has no sign-in for its visitors (the
+                    super admin's is /super_admin_login) - a school that
+                    wants Vocira gets in touch instead */}
+                {site === null ? null : product ? (
+                  <button
+                    id="contact-us"
+                    type="button"
+                    onClick={() => setContactOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-text-primary shadow-card transition-colors hover:border-white/20"
+                  >
+                    <MessageCircle className="h-4 w-4 text-[#25D366]" />
+                    Contact us
+                  </button>
+                ) : (
+                  <Link
+                    href="/login"
+                    className="rounded-xl px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:text-text-primary"
+                  >
+                    Login
+                  </Link>
+                )}
 
               </>
             ) : (
@@ -300,14 +344,17 @@ export default function Navbar() {
 
                 {/* The caller picks the language their own calls run
                     in - it used to be one setting for the whole
-                    deployment, so every guardian got the same one. */}
-                <LanguageSelect
-                  value={language ?? DEFAULT_LANGUAGE}
-                  options={LANGUAGES}
-                  disabled={language === null || savingLanguage || callActive}
-                  lockedReason="Language cannot change during a call"
-                  onChange={changeLanguage}
-                />
+                    deployment, so every guardian got the same one.
+                    Not on Vocira's own site: nobody calls from there. */}
+                {!product && (
+                  <LanguageSelect
+                    value={language ?? DEFAULT_LANGUAGE}
+                    options={LANGUAGES}
+                    disabled={language === null || savingLanguage || callActive}
+                    lockedReason="Language cannot change during a call"
+                    onChange={changeLanguage}
+                  />
+                )}
               </>
             )}
 
@@ -316,7 +363,8 @@ export default function Navbar() {
           {/* Outside the signed-in branch on purpose: a guest can
               talk to Vocira as well, so they need to pick the
               language their call runs in too. */}
-          {!isLoggedIn && (
+          {/* Not on Vocira's own site: nobody calls from there. */}
+          {!isLoggedIn && site && !product && (
             <div className="hidden sm:block">
               <LanguageSelect
                 value={language ?? DEFAULT_LANGUAGE}
@@ -375,17 +423,31 @@ export default function Navbar() {
 
                 {!isLoggedIn ? (
                   <>
-                    {/* Login */}
-                    <Link
-                      href="/login"
-                      onClick={() =>
-                        setMobileOpen(false)
-                      }
-                      className="rounded-lg px-3 py-2 text-sm font-semibold text-text-secondary hover:bg-white/5 hover:text-text-primary"
-                    >
-                      Login
-                    </Link>
+                    {product ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileOpen(false);
+                          setContactOpen(true);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-text-secondary hover:bg-white/5 hover:text-text-primary"
+                      >
+                        <MessageCircle className="h-4 w-4 text-[#25D366]" />
+                        Contact us
+                      </button>
+                    ) : (
+                      <Link
+                        href="/login"
+                        onClick={() =>
+                          setMobileOpen(false)
+                        }
+                        className="rounded-lg px-3 py-2 text-sm font-semibold text-text-secondary hover:bg-white/5 hover:text-text-primary"
+                      >
+                        Login
+                      </Link>
+                    )}
 
+                    {site && !product && (
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-text-secondary">
                         Call language
@@ -400,6 +462,7 @@ export default function Navbar() {
                         />
                       </div>
                     </div>
+                    )}
 
                   </>
                 ) : (
@@ -420,6 +483,7 @@ export default function Navbar() {
                       </span>
                     </div>
 
+                    {!product && (
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-text-secondary">
                         Call language
@@ -434,6 +498,7 @@ export default function Navbar() {
                         />
                       </div>
                     </div>
+                    )}
 
                     <button
                       type="button"
@@ -452,6 +517,7 @@ export default function Navbar() {
         )}
       </AnimatePresence>
     </header>
+    </>
   );
 }
 

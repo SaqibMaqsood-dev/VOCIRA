@@ -92,11 +92,11 @@ class AuthClient:
                 "'user_id'"
             )
 
-        if not data.get("parent_id"):
-            raise RuntimeError(
-                "Auth Service response does not contain "
-                "'parent_id'"
-            )
+        # No parent_id is an answer, not a failure: an admin, or a guardian
+        # not yet linked to the school's records. Raising here made every
+        # such call hear "cannot reach the school records system", and the
+        # callers' own checks for it (role, "not linked") never ran. Each
+        # caller treats a missing parent_id as "no children to read".
 
         if not data.get("role"):
             raise RuntimeError(

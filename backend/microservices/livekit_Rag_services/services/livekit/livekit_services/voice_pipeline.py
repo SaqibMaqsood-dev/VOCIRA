@@ -1167,6 +1167,31 @@ async def consume_audio(
             )
 
 
+def _log_timing(timing: dict, answer_chars: int) -> None:
+    """One line per answer: milliseconds spent in each stage."""
+    start = timing.get("start")
+    now = time.monotonic()
+
+    def ms(a, b):
+        return "-" if a is None or b is None else f"{(b - a) * 1000:.0f}"
+
+    stt_at, route_at, answer_at = timing.get("stt"), timing.get("route"), timing.get("answer")
+    print(
+        "[Timing] "
+        f"stt={ms(start, stt_at)}ms "
+        f"route={ms(stt_at, route_at)}ms "
+        f"answer={ms(route_at or stt_at, answer_at)}ms "
+        f"first_audio={ms(answer_at, now)}ms "
+        f"total={ms(start, now)}ms "
+        f"(+{SILENCE_WAIT_MS}ms end-of-speech wait) "
+        f"intent={timing.get('intent', '-')} chars={answer_chars}"
+    )
+
+
+# the end-of-speech wait in consume_audio (SILENCE_LIMIT x 30ms frames)
+SILENCE_WAIT_MS = 17 * 30
+
+
 # =========================================================
 # VOICE PROCESSING PIPELINE
 # =========================================================
@@ -1223,6 +1248,11 @@ async def process_voice_intent(
         LiveKit
     """
 
+    # How long each stage takes, from the moment the utterance was
+    # judged finished (after SILENCE_LIMIT of quiet) - logged once as
+    # "[Timing]" when the first audio of the answer goes out.
+    timing = {"start": time.monotonic()}
+
     try:
 
         ai_response_text = None
@@ -1237,6 +1267,7 @@ async def process_voice_intent(
             48000,
             language,
         )
+        timing["stt"] = time.monotonic()
 
         if not user_query or not user_query.strip():
 
@@ -1521,6 +1552,8 @@ async def process_voice_intent(
             print(
                 f"[Route]: intent={intent} items={erp_items}"
             )
+            timing["route"] = time.monotonic()
+            timing["intent"] = intent
 
             if intent == "ERP" and erp_items and not any(
                 item["student"] for item in erp_items
@@ -2303,6 +2336,7 @@ async def process_voice_intent(
         # before moving on - 1.5-2 seconds of silence on CPU. Now
         # only the sentence split happens here (which is cheap);
         # each sentence's audio is built just before it plays.
+        timing["answer"] = time.monotonic()
         sentences = split_sentences(ai_response_text)
 
         if not sentences:
@@ -2463,6 +2497,9 @@ async def process_voice_intent(
                     print(
                         f"[TTS] jumla {index + 1}/{len(sentences)}"
                     )
+
+                    if index == 0:
+                        _log_timing(timing, len(ai_response_text or ""))
 
                     caption.add_sentence(
                         sentence.split(),

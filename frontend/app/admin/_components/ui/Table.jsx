@@ -52,16 +52,30 @@ export function TBody({ children }) {
   return <tbody className="divide-y divide-white/5">{children}</tbody>;
 }
 
-export function TR({ children }) {
+// The rest of the props (colSpan above all) go through to the element. They
+// were dropped: an empty table's "Nothing here yet" cell, given colSpan={6},
+// filled one column, and its row lit up only that far on hover.
+
+export function TR({ children, className, ...props }) {
   return (
-    <tr className="transition-colors hover:bg-white/[0.04]">{children}</tr>
+    <tr className={cn("transition-colors hover:bg-white/[0.04]", className)} {...props}>
+      {children}
+    </tr>
   );
 }
 
-export function TH({ children, className }) {
-  return <th className={cn("px-4 py-3.5", className)}>{children}</th>;
+export function TH({ children, className, ...props }) {
+  return (
+    <th className={cn("px-4 py-3.5", className)} {...props}>
+      {children}
+    </th>
+  );
 }
 
-export function TD({ children, className }) {
-  return <td className={cn("px-4 py-3.5 align-middle", className)}>{children}</td>;
+export function TD({ children, className, ...props }) {
+  return (
+    <td className={cn("px-4 py-3.5 align-middle", className)} {...props}>
+      {children}
+    </td>
+  );
 }

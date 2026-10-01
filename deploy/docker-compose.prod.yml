@@ -218,6 +218,11 @@ services:
       --host 0.0.0.0 --port 8001
     environment:
       <<: *backend-env
+      # The "worker" below is still the older RabbitMQ one. The backend's
+      # default is now the LiveKit Agents worker (services/agent), which
+      # this file does not run yet - until it does, calls must go to the
+      # worker that is here.
+      VOICE_ENGINE: ${VOICE_ENGINE:-legacy}
     depends_on:
       postgres:
         condition: service_healthy

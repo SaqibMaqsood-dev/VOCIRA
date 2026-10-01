@@ -14,15 +14,15 @@
  *   useRemoteParticipants / useParticipantTracks / useParticipantAttributes
  *                    the agent, its mic track, and its state
  *
- * WHY THE AGENT IS FOUND BY IDENTITY
+ * HOW THE AGENT IS FOUND
  *
  * LiveKit's own useVoiceAssistant() identifies the agent by
  * ParticipantKind.AGENT. That kind is only assigned through the
- * LiveKit Agents framework - our worker is our own, and despite
+ * LiveKit Agents framework - the older worker is our own, and despite
  * agent=true in the token it keeps the standard kind (measured:
- * kind 0, where 4 was needed). So the agent is found here by its
- * identity, "agent". The visualizer is still LiveKit's own - only
- * the way the track is selected is ours.
+ * kind 0, where 4 was needed), so it is found by its identity,
+ * "agent". isAgentParticipant() accepts either. The visualizer is
+ * still LiveKit's own - only the way the track is selected is ours.
  *
  * The state comes from the backend: voice_pipeline sets the
  * "lk.agent.state" attribute at every turn - the same key the
@@ -40,9 +40,8 @@ import {
 import { Track } from "livekit-client";
 import { Mic } from "lucide-react";
 
-import { isAdminParticipant } from "@/lib/handoff";
+import { isAdminParticipant, isAgentParticipant } from "@/lib/handoff";
 
-const AGENT_IDENTITY = "agent";
 const STATE_KEY = "lk.agent.state";
 
 /*
@@ -94,7 +93,7 @@ export default function AgentVisualizer({
 }) {
   const participants = useRemoteParticipants();
 
-  const agent = participants.find((p) => p.identity === AGENT_IDENTITY);
+  const agent = participants.find(isAgentParticipant);
   const human = participants.find(isAdminParticipant);
 
   // Once a person has joined, they are the one speaking

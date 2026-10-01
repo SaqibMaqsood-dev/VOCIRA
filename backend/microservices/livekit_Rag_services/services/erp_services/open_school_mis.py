@@ -119,6 +119,11 @@ def _child_name(student: dict) -> str:
     return f"{user.get('firstName', '')} {user.get('lastName', '')}".strip()
 
 
+def _class_of(student: dict) -> str:
+    """ "Class 5 A" - the class and its section."""
+    return " ".join(x for x in [(student.get("class") or {}).get("name"), (student.get("section") or {}).get("name")] if x)
+
+
 class OpenSchoolMISConnector(GuardianScoped, RecordsConnector):
     kind = "open-school-mis"
     available = True
@@ -143,7 +148,7 @@ class OpenSchoolMISConnector(GuardianScoped, RecordsConnector):
         if not key:
             return []
         return [
-            {"id": s["id"], "name": _child_name(s)}
+            {"id": s["id"], "name": _child_name(s), "class": _class_of(s) or None}
             for s in await self._students()
             if any(guardian_key(g) == key for g in s.get("guardians") or [])
         ]
@@ -199,7 +204,7 @@ class OpenSchoolMISConnector(GuardianScoped, RecordsConnector):
     def _profile(s: dict, name: str) -> dict:
         row = {
             "student_name": name,
-            "class": " ".join(x for x in [(s.get("class") or {}).get("name"), (s.get("section") or {}).get("name")] if x),
+            "class": _class_of(s),
             "roll_no": s.get("rollNo"),
             "admission_no": s.get("admissionNo"),
             "date_of_birth": (s.get("dateOfBirth") or "")[:10] or None,

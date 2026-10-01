@@ -1,5 +1,6 @@
 "use client";
 
+import { ROOT_HOST, subdomainOf } from "@/lib/address";
 import { authFetch } from "@/lib/session";
 
 /**
@@ -21,19 +22,21 @@ import { authFetch } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000";
 
-// The address without a school in front: "localhost" here, the real
-// domain (e.g. "vocira.com") when deployed.
-export const ROOT_HOST = (process.env.NEXT_PUBLIC_ROOT_HOST || "localhost").toLowerCase();
-
-// Vocira's own addresses - never a school (services/tenants.py)
-const NOT_A_SCHOOL = new Set(["www", "app", "admin", "superadmin", "api"]);
+export { ROOT_HOST };
 
 /** The school subdomain this page was opened on, or "" on the plain address. */
 export function subdomainOfPage() {
-  const host = window.location.hostname.toLowerCase();
-  if (!host.endsWith(`.${ROOT_HOST}`)) return "";
-  const label = host.slice(0, -(ROOT_HOST.length + 1));
-  return label && !label.includes(".") && !NOT_A_SCHOOL.has(label) ? label : "";
+  return subdomainOf(window.location.hostname);
+}
+
+// The super admin's own sign-in, on the plain address only - a school's
+// address answers it with "not found" (proxy.js). /login on the plain
+// address is not a sign-in at all: Vocira's site has none for its visitors.
+export const SUPER_ADMIN_LOGIN = "/super_admin_login";
+
+/** Where this page signs in: a school's /login, or the super admin's own page. */
+export function loginPath() {
+  return subdomainOfPage() ? "/login" : SUPER_ADMIN_LOGIN;
 }
 
 /** A school's own address: http://medicaps.localhost:3000/assistant */

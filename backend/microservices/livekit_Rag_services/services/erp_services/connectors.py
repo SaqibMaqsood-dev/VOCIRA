@@ -133,7 +133,11 @@ class SpreadsheetConnector(GuardianScoped, RecordsConnector):
         children = {}
         for row in spreadsheet.rows(self._dir, "students"):
             if spreadsheet.same_id(row.get("guardian_id"), guardian_id):
-                children.setdefault(row["student_id"], {"id": row["student_id"], "name": row["student_name"]})
+                children.setdefault(row["student_id"], {
+                    "id": row["student_id"],
+                    "name": row["student_name"],
+                    "class": (row.get("class") or "").strip() or None,  # an optional column
+                })
         return list(children.values())
 
     async def guardians(self) -> list[dict]:

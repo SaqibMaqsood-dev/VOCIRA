@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { adminFetch } from "@/app/admin/useAdminApi";
 import { clearSession } from "@/lib/session";
+import { loginPath } from "@/lib/school";
 
 export default function Header({ onMenuClick }) {
   const router = useRouter();
@@ -71,7 +72,7 @@ export default function Header({ onMenuClick }) {
   const logout = () => {
     clearSession();
     window.dispatchEvent(new Event("auth-change"));
-    window.location.href = "/login";
+    window.location.href = loginPath();
   };
 
   return (

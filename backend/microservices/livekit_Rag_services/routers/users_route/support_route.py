@@ -1,18 +1,21 @@
 """
-Support tickets - a parent fills in the form, an Issue appears in
-ERPNext.
+Support tickets - a parent fills in the Support form, and the ticket goes
+to their own school's admin (the panel's Tickets page, admin_route.py).
 
-The Support page used to be a dead form: `type="button"`, no onClick,
-no fetch. Typing something and pressing Submit did nothing at all.
+Which school:
+    a guardian   their account's school - never the page's word for it
+    a guest      the school whose address the form was sent from
 
-These endpoints now sit behind it. The ticket is created in ERPNext's
-Issue doctype - where the school's own Support module already
-provides the full UI (localhost:8081/app/issue).
+These used to become Issues in the first school's ERPNext, whatever school
+the parent was from: another school saw a parent's name, email and message,
+and the parent's own school - on a spreadsheet, or the MIS - never did.
 """
+
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.helper_functions.database.session import get_db
@@ -23,10 +26,11 @@ from backend.helper_functions.token_service.access_tokken.get_current_user impor
 )
 
 from backend.microservices.auth_services.models.user_model import Users
-
-from backend.microservices.livekit_Rag_services.services.erp_services.support_service import (
-    SupportService,
+from backend.microservices.livekit_Rag_services.models.support_ticket_model import (
+    RESOLVED_VISIBLE_DAYS,
+    SupportTicket,
 )
+from backend.microservices.livekit_Rag_services.services import tenants
 
 
 router = APIRouter(
@@ -34,7 +38,8 @@ router = APIRouter(
     tags=["Support"],
 )
 
-support_service = SupportService()
+# how a ticket's state reads on the parent's side
+STATUS_LABEL = {"open": "Open", "in_progress": "In progress", "resolved": "Resolved"}
 
 
 class TicketRequest(BaseModel):
@@ -46,6 +51,10 @@ class TicketRequest(BaseModel):
     # both.
     email: EmailStr | None = None
 
+    # The school whose address the form was sent from - a guest's school.
+    # A guardian's comes from their account instead.
+    school: str | None = Field(default=None, max_length=60)
+
 
 class TicketResponse(BaseModel):
     ticket_id: str | None = None
@@ -55,15 +64,12 @@ class TicketResponse(BaseModel):
     opening_date: str | None = None
 
 
-async def _caller_email(db: AsyncSession, user) -> tuple[str | None, str | None]:
+async def _caller(db: AsyncSession, user) -> Users:
     """
-    Ticket kis ke naam par bane.
+    The account the ticket is from.
 
     In the token username = email, but that alone is not trusted -
     the DB confirms the user really exists.
-
-    Returns (email, name) - the name goes into the ticket too, or the
-    school sees nothing but an email address.
     """
 
     row = (
@@ -78,7 +84,11 @@ async def _caller_email(db: AsyncSession, user) -> tuple[str | None, str | None]
             detail="User not found",
         )
 
-    return row.email or user.username, row.name
+    return row
+
+
+def _date(when: datetime | None) -> str | None:
+    return when.strftime("%Y-%m-%d") if when else None
 
 
 # =========================================================
@@ -98,8 +108,9 @@ async def create_ticket(
     """
     Ticket banayein - login ke sath ya us ke baghair.
 
-    Logged in     : the email comes from the account
-    Not logged in : the email must be filled into the form
+    Logged in     : the email and the school come from the account
+    Not logged in : the email must be filled into the form, and the
+                    school is the one whose address the form is on
 
     IMPORTANT: when logged in, the email in the request is ignored
     DELIBERATELY. Otherwise anyone could send someone else's email
@@ -107,11 +118,14 @@ async def create_ticket(
     and it would then show up in that person's ticket list.
     """
 
+    await tenants.refresh()
+
     if user is not None:
-        email, name = await _caller_email(db=db, user=user)
+        account = await _caller(db=db, user=user)
+        email, name, user_id = account.email or user.username, account.name, account.user_id
+        school = tenants.get_school(account.school_id or tenants.default_school_id())
 
     else:
-        name = None
         if not request.email:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -120,39 +134,45 @@ async def create_ticket(
                     "or log in to submit a ticket."
                 ),
             )
+        email, name, user_id = str(request.email).strip().lower(), None, None
+        school = tenants.find_by_address(request.school)
+        if school is None:
+            # never a default school: the ticket would reach the wrong one
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Open the Support page from your school's own address to send it to your school.",
+            )
 
-        email = str(request.email).strip().lower()
-
-    try:
-        result = await support_service.create_ticket(
-            subject=request.subject,
-            message=request.message,
-            raised_by=email,
-            raised_by_name=name,
-        )
-
-    except HTTPException:
-        # ERPClient has already produced a meaningful error
-        raise
-
-    except ValueError as error:
+    subject = request.subject.strip()
+    if len(subject) < 3:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(error),
+            detail="Subject must be at least 3 characters.",
         )
 
-    if not result.get("ticket_id"):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Ticket could not be created in the school system",
-        )
+    ticket = SupportTicket(
+        school_id=school.id,
+        user_id=user_id,
+        name=name,
+        email=email,
+        subject=subject,
+        message=request.message.strip(),
+    )
+    db.add(ticket)
+    await db.commit()
+    await db.refresh(ticket)
 
     print(
-        f"[Support] ticket bana: {result['ticket_id']}  "
+        f"[Support] ticket {ticket.reference} for {school.id} "
         f"({email}, {'login' if user else 'guest'})"
     )
 
-    return result
+    return TicketResponse(
+        ticket_id=ticket.reference,
+        subject=ticket.subject,
+        status=STATUS_LABEL.get(ticket.status, ticket.status),
+        opening_date=_date(ticket.created_at),
+    )
 
 
 # =========================================================
@@ -161,15 +181,42 @@ async def create_ticket(
 
 @router.get("/tickets")
 async def my_tickets(
-    limit: int = 20,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
     user=Depends(current_user),
 ):
-    email, _ = await _caller_email(db=db, user=user)
+    """
+    The caller's own tickets, with the school's reply: the ones still open
+    first, then the resolved ones - each newest first. A ticket resolved
+    more than RESOLVED_VISIBLE_DAYS ago is marked "older": the page keeps
+    it behind "Show older tickets" (nothing is deleted).
+    """
+    account = await _caller(db=db, user=user)
 
-    # The filter is applied inside the service - a parent cannot
-    # ask for anyone else's tickets.
-    return await support_service.list_tickets(
-        raised_by=email,
-        limit=min(limit, 50),
-    )
+    older = (
+        SupportTicket.resolved_at < func.now() - timedelta(days=RESOLVED_VISIBLE_DAYS)
+    ).label("older")
+    rows = (
+        await db.execute(
+            select(SupportTicket, older)
+            .where(SupportTicket.user_id == account.user_id)
+            .order_by(
+                case((SupportTicket.status == "resolved", 1), else_=0),
+                SupportTicket.created_at.desc(),
+            )
+            .limit(min(max(limit, 1), 50))
+        )
+    ).all()
+
+    return [
+        {
+            "name": t.reference,
+            "subject": t.subject,
+            "status": STATUS_LABEL.get(t.status, t.status),
+            "opening_date": _date(t.created_at),
+            "resolved_date": _date(t.resolved_at),
+            "reply": t.reply,
+            "older": bool(is_older),
+        }
+        for t, is_older in rows
+    ]

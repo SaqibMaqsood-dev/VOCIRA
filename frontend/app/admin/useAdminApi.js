@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { parseServerTime } from "@/lib/time";
 
 import { authFetch, getAccessToken } from "@/lib/session";
+import { loginPath } from "@/lib/school";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -106,7 +107,7 @@ export function useAdminData(path, fallback, { pollMs } = {}) {
         setData(next);
       } catch (err) {
         if (err.code === "NO_TOKEN" || err.code === "UNAUTHORIZED") {
-          window.location.href = "/login";
+          window.location.href = loginPath();
           return;
         }
         if (!silent) setError(err.message || "Could not load data.");

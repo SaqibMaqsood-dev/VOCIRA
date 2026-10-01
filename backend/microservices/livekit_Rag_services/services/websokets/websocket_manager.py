@@ -8,6 +8,12 @@ That socket was not closed, it simply stopped receiving anything - so
 an open tab went quietly deaf, and never rang.
 
 Each admin therefore now carries a set of all their sockets.
+
+Every notification is about one school's call, and goes to that school's
+admins only. It used to go to every admin of every school: a parent's
+question rang on another school's panel, which could not even take the
+call. An admin's school comes from their token (caller_school); the
+platform super admin, who belongs to no school, gets none.
 """
 
 from typing import Dict, Optional, Set
@@ -19,6 +25,8 @@ class NotificationManager:
 
     def __init__(self):
         self.connections: Dict[str, Set[WebSocket]] = {}
+        # admin_id -> the school whose calls they take
+        self.schools: Dict[str, Optional[str]] = {}
 
     # =========================================================
     # CONNECT ADMIN
@@ -28,6 +36,7 @@ class NotificationManager:
         self,
         admin_id: str,
         websocket: WebSocket,
+        school: Optional[str],
     ):
         await websocket.accept()
 
@@ -35,9 +44,10 @@ class NotificationManager:
             admin_id,
             set(),
         ).add(websocket)
+        self.schools[admin_id] = (school or "").strip().lower() or None
 
         print(
-            f"[WebSocket] Admin connected: {admin_id} "
+            f"[WebSocket] Admin connected: {admin_id} of {school or 'no school'} "
             f"({len(self.connections[admin_id])} open)"
         )
 
@@ -70,22 +80,38 @@ class NotificationManager:
                 admin_id,
                 None,
             )
+            self.schools.pop(admin_id, None)
 
         print(
             f"[WebSocket] Admin disconnected: {admin_id}"
         )
 
     # =========================================================
-    # BROADCAST TO ALL ADMINS
+    # BROADCAST TO ONE SCHOOL'S ADMINS
     # =========================================================
 
     async def broadcast(
         self,
         message: dict,
+        *,
+        school: Optional[str],
     ):
         """
-        Send notification to all connected admins.
+        Send a notification to the connected admins of `school`. Without a
+        school it goes to nobody - a call's details must never reach
+        another school's admins by default.
         """
+
+        school = (school or "").strip().lower() or None
+
+        if school is None:
+
+            print(
+                "[WebSocket] Notification with no school - "
+                f"not sent: {message.get('event')}"
+            )
+
+            return
 
         if not self.connections:
 
@@ -101,6 +127,9 @@ class NotificationManager:
         for admin_id, sockets in list(
             self.connections.items()
         ):
+
+            if self.schools.get(admin_id) != school:
+                continue
 
             for websocket in list(sockets):
 

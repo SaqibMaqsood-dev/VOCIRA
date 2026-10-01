@@ -3,19 +3,19 @@
 /**
  * Support page.
  *
- * This used to be a dead form - type="button", no onClick, no
- * fetch. Type something, press Submit, nothing happened.
+ * A ticket goes to the parent's own school: its admin finds it on the
+ * panel's Tickets page and can answer it there. A guardian's school is
+ * their account's; a guest's is the school whose address this page is on.
  *
- * The ticket is now created in ERPNext's Issue doctype. Someone at
- * the school sees it in their own Support module
- * (localhost:8081/app/issue) - we do not have to build an admin
- * screen at all.
+ * (Tickets used to go to the first school's ERPNext, whatever school the
+ * parent was from - another school saw them, and their own never did.)
  */
 
 import { motion } from "framer-motion";
-import { AlertCircle, CheckCircle2, Loader2, Ticket } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, MessageSquareReply, Ticket } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authFetch, getAccessToken } from "@/lib/session";
+import { useSchoolOfPage, useSite } from "@/lib/site";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -30,6 +30,10 @@ export default function SupportPage() {
 
   const [tickets, setTickets] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
+  // tickets resolved over 30 days ago wait behind "Show older tickets"
+  const [showOlder, setShowOlder] = useState(false);
+  const currentTickets = tickets.filter((t) => !t.older);
+  const olderTickets = tickets.filter((t) => t.older);
 
   // The token has to be held in state: there is no localStorage on
   // the server, so the first render only ever sees null. Reading it
@@ -43,6 +47,12 @@ export default function SupportPage() {
   }, []);
 
   const loggedIn = Boolean(token);
+
+  // A guest's ticket goes to the school whose address this page is on -
+  // with no school here, it would have nowhere to go.
+  const site = useSite();
+  const school = useSchoolOfPage(site?.subdomain);
+  const guestWithoutSchool = authChecked && !loggedIn && site !== null && (!site.subdomain || school === null);
 
   // ---- pehle ke tickets ----
   const loadTickets = async () => {
@@ -102,7 +112,9 @@ export default function SupportPage() {
       // token at all, and the endpoint accepts that - so plain fetch
       // is right there.
       const body = JSON.stringify(
-        loggedIn ? { subject, message } : { subject, message, email }
+        loggedIn
+          ? { subject, message }
+          : { subject, message, email, school: school?.id }
       );
 
       const res = loggedIn
@@ -198,8 +210,9 @@ export default function SupportPage() {
                     {ticket.opening_date ? ` · ${ticket.opening_date}` : ""}
                   </p>
                   <p className="mt-2 text-xs leading-5 text-text-secondary">
-                    Our school staff will get back to you shortly. Please
-                    keep this reference number.
+                    {loggedIn
+                      ? "Your school's staff will reply here, under Your tickets. Please keep this reference number."
+                      : "Your school's staff will contact you at your email. Please keep this reference number."}
                   </p>
                 </div>
               </div>
@@ -211,6 +224,16 @@ export default function SupportPage() {
             <div className="mt-5 flex items-start gap-3 rounded-xl border border-red-400/30 bg-red-400/10 p-4">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
               <p className="text-sm leading-6 text-red-200">{error}</p>
+            </div>
+          )}
+
+          {guestWithoutSchool && (
+            <div id="support-no-school" className="mt-5 flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+              <p className="text-sm leading-6 text-amber-100">
+                Open this page from your school&apos;s own address - the link your school shares - so your
+                message reaches your school.
+              </p>
             </div>
           )}
 
@@ -283,7 +306,7 @@ export default function SupportPage() {
               whileHover={sending ? undefined : { y: -2 }}
               whileTap={sending ? undefined : { scale: 0.98 }}
               type="submit"
-              disabled={sending}
+              disabled={sending || guestWithoutSchool}
               className="group relative w-full overflow-hidden rounded-xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-semibold text-text-primary shadow-card disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="absolute -left-28 top-1/2 h-28 w-28 -translate-y-1/2 rotate-12 bg-accent-primary/40 blur-2xl transition-opacity group-hover:opacity-90" />
@@ -297,39 +320,67 @@ export default function SupportPage() {
 
           {/* ---- purane tickets ---- */}
           {!loadingList && tickets.length > 0 && (
-            <div className="mt-8 border-t border-white/10 pt-6">
-              <p className="mb-3 text-xs font-semibold tracking-wide text-text-secondary">
+            <div id="your-tickets" className="mt-8 border-t border-white/10 pt-6">
+              <p className="text-xs font-semibold tracking-wide text-text-secondary">
                 YOUR TICKETS
               </p>
+              <p className="mb-3 mt-1 text-[11px] text-text-secondary/70">
+                Open tickets stay at the top. A resolved one moves to older tickets 30 days after it was resolved.
+              </p>
               <ul className="space-y-2">
-                {tickets.map((t) => (
+                {[...currentTickets, ...(showOlder ? olderTickets : [])].map((t) => (
                   <li
                     key={t.name}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3"
+                    className="support-ticket rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm text-text-primary">
-                        {t.subject}
-                      </p>
-                      <p className="mt-0.5 font-mono text-xs text-text-secondary">
-                        {t.name}
-                        {t.opening_date ? ` · ${t.opening_date}` : ""}
-                      </p>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-text-primary">
+                          {t.subject}
+                        </p>
+                        <p className="mt-0.5 font-mono text-xs text-text-secondary">
+                          {t.name}
+                          {t.opening_date ? ` · ${t.opening_date}` : ""}
+                          {t.resolved_date ? ` · resolved ${t.resolved_date}` : ""}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          t.status === "Resolved"
+                            ? "bg-emerald-400/15 text-emerald-300"
+                            : t.status === "In progress"
+                              ? "bg-amber-400/15 text-amber-300"
+                              : "bg-cyan-400/15 text-cyan-300"
+                        }`}
+                      >
+                        {t.status}
+                      </span>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        t.status === "Closed" || t.status === "Resolved"
-                          ? "bg-emerald-400/15 text-emerald-300"
-                          : t.status === "On Hold"
-                            ? "bg-amber-400/15 text-amber-300"
-                            : "bg-cyan-400/15 text-cyan-300"
-                      }`}
-                    >
-                      {t.status}
-                    </span>
+                    {/* the school's answer */}
+                    {t.reply && (
+                      <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
+                        <MessageSquareReply className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-secondary" />
+                        <p className="whitespace-pre-line text-xs leading-5 text-text-primary">{t.reply}</p>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
+
+              {currentTickets.length === 0 && !showOlder && (
+                <p className="text-xs text-text-secondary">No open or recent tickets.</p>
+              )}
+
+              {olderTickets.length > 0 && (
+                <button
+                  id="toggle-older-tickets"
+                  type="button"
+                  onClick={() => setShowOlder((shown) => !shown)}
+                  className="mt-3 text-xs font-medium text-accent-secondary underline decoration-dotted hover:opacity-80"
+                >
+                  {showOlder ? "Hide older tickets" : `Show older tickets (${olderTickets.length})`}
+                </button>
+              )}
             </div>
           )}
         </motion.div>

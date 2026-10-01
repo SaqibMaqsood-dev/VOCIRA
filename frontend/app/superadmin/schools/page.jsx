@@ -16,13 +16,14 @@
  */
 
 import { useState } from "react";
-import { Check, Copy, Pencil, Plus, QrCode, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, Copy, KeyRound, Pencil, Plus, QrCode, RefreshCw, Trash2, UserPlus, X } from "lucide-react";
 
 import Badge from "@/app/admin/_components/ui/Badge";
 import Button from "@/app/admin/_components/ui/Button";
 import { Card, CardHeader } from "@/app/admin/_components/ui/Card";
 import { Table, THead, TBody, TR, TH, TD } from "@/app/admin/_components/ui/Table";
 import { useAdminData, adminFetch } from "@/app/admin/useAdminApi";
+import Modal from "@/app/admin/_components/ui/Modal";
 import FullScreenLoader from "@/components/FullScreenLoader";
 import ConnectionWizard from "./ConnectionWizard";
 import RecordsLinks from "./RecordsLinks";
@@ -32,6 +33,8 @@ import { schoolUrl } from "@/lib/school";
 const EMPTY = { schools: [], default: "educators" };
 
 const BLANK = { name: "", helpline: "", records: "", records_env_prefix: "", subdomain: "" };
+
+const BLANK_ADMIN = { name: "", email: "", password: "" };
 
 // what an id or subdomain may look like (services/tenants.py)
 const ADDRESS_CHARS = /[^a-z0-9-]/g;
@@ -60,7 +63,20 @@ export default function SchoolsPage() {
   const [problem, setProblem] = useState("");
   const [added, setAdded] = useState(null);
 
+  // A school's admins - and the form that gives a school one. A new
+  // school had no way to get its first admin: accounts the super admin
+  // made all belonged to the first school.
+  const { data: people, reload: reloadPeople } = useAdminData("/auth/admin/users", { users: [] });
+  const [adminFor, setAdminFor] = useState(null);
+  const [adminForm, setAdminForm] = useState(BLANK_ADMIN);
+  const [adminDone, setAdminDone] = useState("");
+  // one admin being changed: { id, mode: "edit" | "password", name, email, password }
+  const [adminEdit, setAdminEdit] = useState(null);
+  const adminsOf = (school) =>
+    (people?.users || []).filter((u) => u.role === "admin" && u.school_id === school.id);
+
   const schools = data?.schools || [];
+  const adminSchool = adminFor ? schools.find((s) => s.id === adminFor) : null;
   const editingSchool = editing ? schools.find((s) => s.id === editing) : null;
   const builtInEdit = !!editingSchool?.built_in;
 
@@ -75,6 +91,7 @@ export default function SchoolsPage() {
   }
 
   function openAdd() {
+    setAdminFor(null);
     setEditing(null);
     setForm(BLANK);
     setProblem("");
@@ -83,6 +100,7 @@ export default function SchoolsPage() {
   }
 
   function openEdit(school) {
+    setAdminFor(null);
     setEditing(school.id);
     setForm({
       name: school.name,
@@ -134,6 +152,106 @@ export default function SchoolsPage() {
       reload();
     } catch (err) {
       setProblem(err.message || "Could not save the school.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditing(null);
+    setProblem("");
+  }
+
+  function closeAdmins() {
+    setAdminFor(null);
+    setAdminEdit(null);
+    setAdminDone("");
+    setProblem("");
+  }
+
+  function openAddAdmin(school) {
+    setFormOpen(false);
+    setEditing(null);
+    setAdminFor(school.id);
+    setAdminForm(BLANK_ADMIN);
+    setAdminDone("");
+    setAdminEdit(null);
+    setProblem("");
+  }
+
+  // An admin's name and email (the email is their username), or a new
+  // password - the old one is not asked for: this is how a school gets
+  // back in when its admin has forgotten it.
+  async function saveAdminEdit(event) {
+    event.preventDefault();
+    setProblem("");
+    setAdminDone("");
+    setBusy("admin-edit");
+    try {
+      const path = `/auth/admin/users/${encodeURIComponent(adminEdit.id)}`;
+      if (adminEdit.mode === "password") {
+        const done = await adminFetch(`${path}/password`, {
+          method: "POST",
+          body: JSON.stringify({ password: adminEdit.password }),
+        });
+        setAdminDone(`${done.email} has a new password.`);
+      } else {
+        const done = await adminFetch(path, {
+          method: "PATCH",
+          body: JSON.stringify({ name: adminEdit.name, email: adminEdit.email }),
+        });
+        setAdminDone(`${done.email} is saved.`);
+      }
+      setAdminEdit(null);
+      reloadPeople({ silent: true });
+    } catch (err) {
+      setProblem(err.message || "Could not save the admin.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeAdmin(user) {
+    if (!window.confirm(`Remove ${user.email}?\n\nThey can no longer sign in to ${adminSchool.name}.`)) {
+      return;
+    }
+    setProblem("");
+    setAdminDone("");
+    setBusy(`admin-${user.user_id}`);
+    try {
+      await adminFetch(`/auth/admin/users/${encodeURIComponent(user.user_id)}`, { method: "DELETE" });
+      setAdminDone(`${user.email} is removed.`);
+      if (adminEdit?.id === user.user_id) setAdminEdit(null);
+      reloadPeople({ silent: true });
+    } catch (err) {
+      setProblem(err.message || "Could not remove the admin.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function addAdmin(event) {
+    event.preventDefault();
+    setProblem("");
+    setAdminDone("");
+    setBusy("admin");
+    try {
+      const made = await adminFetch("/auth/admin/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name: adminForm.name,
+          email: adminForm.email,
+          password: adminForm.password,
+          role: "admin",
+          school_id: adminSchool.id,
+        }),
+      });
+      setAdminDone(`${made.email} is now an admin of ${adminSchool.name}.`);
+      setAdminForm(BLANK_ADMIN);
+      reloadPeople({ silent: true });
+    } catch (err) {
+      setProblem(err.message || "Could not add the admin.");
     } finally {
       setBusy("");
     }
@@ -191,7 +309,10 @@ export default function SchoolsPage() {
         </div>
       </div>
 
-      {(error || problem) && <p className="text-xs text-rose-300">{problem || error}</p>}
+      {/* with a popup open, its own problems show inside it */}
+      {(error || (problem && !formOpen && !adminSchool)) && (
+        <p className="text-xs text-rose-300">{(!formOpen && !adminSchool && problem) || error}</p>
+      )}
 
       {added && (
         <Card>
@@ -199,8 +320,9 @@ export default function SchoolsPage() {
             <div className="text-sm text-white">
               <p className="font-semibold">{added.name} is added.</p>
               <p className="mt-1 text-xs text-text-secondary">
-                Next: the school&apos;s admin adds its documents on their Knowledge page and runs a sync, then its guest
-                link is shared. The agent needs no other change.
+                Next: give it an admin (the person icon in its row). They sign in at the school&apos;s address, add its
+                documents on their Knowledge page and run a sync - then its guest link is shared. The agent needs no
+                other change.
               </p>
               {added.subdomain && (
                 <p className="mt-2 font-mono text-xs text-accent-secondary">{schoolUrl(added.subdomain)}</p>
@@ -221,17 +343,20 @@ export default function SchoolsPage() {
       )}
 
       {formOpen && (
-        <Card>
-          <CardHeader
-            title={editing ? "Change school" : "Add a school"}
-            description={
-              builtInEdit
-                ? "A school defined in code: its id, knowledge base and guest link stay as they are."
-                : editing
-                ? "The school's id, knowledge base and guest link stay the same."
-                : "The school gets its own knowledge base and guest link straight away. Its id comes from the English name."
-            }
-          />
+        <Modal
+          id="school-form"
+          size="lg"
+          title={editing ? `Change ${editingSchool?.name || "school"}` : "Add a school"}
+          description={
+            builtInEdit
+              ? "A school defined in code: its id, knowledge base and guest link stay as they are."
+              : editing
+              ? "The school's id, knowledge base and guest link stay the same."
+              : "The school gets its own knowledge base and guest link straight away. Its id comes from the English name."
+          }
+          onClose={closeForm}
+        >
+          {problem && <p className="mb-3 text-xs text-rose-300">{problem}</p>}
           <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-xs text-text-secondary">
               <span>School name (English)</span>
@@ -332,19 +457,176 @@ export default function SchoolsPage() {
               <Button type="submit" disabled={busy === "save"}>
                 {busy === "save" ? "Saving…" : editing ? "Save changes" : "Add school"}
               </Button>
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => {
-                  setFormOpen(false);
-                  setEditing(null);
-                }}
-              >
+              <Button variant="outline" type="button" onClick={closeForm}>
                 Cancel
               </Button>
             </div>
           </form>
-        </Card>
+        </Modal>
+      )}
+
+      {adminSchool && (
+        <Modal
+          id="school-admins-dialog"
+          size="lg"
+          title={`Admins of ${adminSchool.name}`}
+          description={`They sign in at ${schoolUrl(adminSchool.subdomain, "/login")} and look after this school: its documents, its parents' accounts and its calls.`}
+          onClose={closeAdmins}
+        >
+          {problem && <p className="mb-3 text-xs text-rose-300">{problem}</p>}
+          <div id="school-admins" className="mb-4 space-y-2 text-xs text-text-secondary">
+            {adminsOf(adminSchool).length === 0 ? (
+              <p>This school has no admin yet.</p>
+            ) : (
+              adminsOf(adminSchool).map((user) =>
+                adminEdit?.id === user.user_id ? (
+                  <form
+                    key={user.user_id}
+                    onSubmit={saveAdminEdit}
+                    className="admin-edit grid gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-[1fr_1fr_auto]"
+                  >
+                    {adminEdit.mode === "password" ? (
+                      <input
+                        id="admin-edit-password"
+                        type="password"
+                        autoComplete="new-password"
+                        className={`${INPUT} sm:col-span-2`}
+                        value={adminEdit.password}
+                        onChange={(e) => setAdminEdit({ ...adminEdit, password: e.target.value })}
+                        placeholder={`New password for ${user.email} (at least 8 characters)`}
+                        required
+                        minLength={8}
+                        maxLength={128}
+                      />
+                    ) : (
+                      <>
+                        <input
+                          id="admin-edit-name"
+                          className={INPUT}
+                          value={adminEdit.name}
+                          onChange={(e) => setAdminEdit({ ...adminEdit, name: e.target.value })}
+                          required
+                          minLength={2}
+                          maxLength={100}
+                        />
+                        <input
+                          id="admin-edit-email"
+                          type="email"
+                          className={INPUT}
+                          value={adminEdit.email}
+                          onChange={(e) => setAdminEdit({ ...adminEdit, email: e.target.value })}
+                          required
+                        />
+                      </>
+                    )}
+                    <div className="flex gap-2">
+                      <Button type="submit" disabled={busy === "admin-edit"}>
+                        {busy === "admin-edit" ? "Saving…" : "Save"}
+                      </Button>
+                      <Button variant="outline" type="button" onClick={() => setAdminEdit(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div
+                    key={user.user_id}
+                    className="admin-row flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+                  >
+                    <div>
+                      <span className="font-medium text-white">{user.name}</span>
+                      <span className="ml-2 font-mono text-[11px]">{user.email}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdminEdit({ id: user.user_id, mode: "edit", name: user.name, email: user.email, password: "" })
+                        }
+                        className="rounded-lg border border-white/10 p-1.5 text-text-secondary hover:text-white"
+                        title="Change name or email"
+                        aria-label={`Edit ${user.email}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdminEdit({ id: user.user_id, mode: "password", name: user.name, email: user.email, password: "" })
+                        }
+                        className="rounded-lg border border-white/10 p-1.5 text-text-secondary hover:text-white"
+                        title="Set a new password"
+                        aria-label={`New password for ${user.email}`}
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeAdmin(user)}
+                        disabled={busy === `admin-${user.user_id}`}
+                        className="rounded-lg border border-white/10 p-1.5 text-text-secondary hover:border-rose-400/40 hover:text-rose-200 disabled:opacity-50"
+                        title="Remove this admin"
+                        aria-label={`Remove ${user.email}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              )
+            )}
+          </div>
+          {adminDone && <p className="mb-3 text-xs text-emerald-300">{adminDone}</p>}
+          <form onSubmit={addAdmin} className="grid gap-3 sm:grid-cols-3">
+            <label className="space-y-1 text-xs text-text-secondary">
+              <span>Name</span>
+              <input
+                id="admin-name"
+                className={INPUT}
+                value={adminForm.name}
+                onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })}
+                placeholder="e.g. Sara Khan"
+                required
+                minLength={2}
+                maxLength={100}
+              />
+            </label>
+            <label className="space-y-1 text-xs text-text-secondary">
+              <span>Email (their username)</span>
+              <input
+                id="admin-email"
+                type="email"
+                className={INPUT}
+                value={adminForm.email}
+                onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })}
+                placeholder="e.g. admin@citygrammar.edu.pk"
+                required
+              />
+            </label>
+            <label className="space-y-1 text-xs text-text-secondary">
+              <span>Password (at least 8 characters)</span>
+              <input
+                id="admin-password"
+                type="password"
+                autoComplete="new-password"
+                className={INPUT}
+                value={adminForm.password}
+                onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+                required
+                minLength={8}
+                maxLength={128}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2 sm:col-span-3">
+              <Button type="submit" disabled={busy === "admin"}>
+                {busy === "admin" ? "Adding…" : "Add admin"}
+              </Button>
+              <Button variant="outline" type="button" onClick={closeAdmins}>
+                Close
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       <Card>
@@ -370,6 +652,13 @@ export default function SchoolsPage() {
                   <div className="mt-1 text-[10px] uppercase tracking-wider text-text-secondary">
                     {school.id === data.default ? "Default · " : ""}
                     {school.built_in ? "Built in" : "Added here"}
+                  </div>
+                  <div
+                    className={`mt-1 text-[11px] ${adminsOf(school).length ? "text-text-secondary" : "text-amber-300"}`}
+                  >
+                    {adminsOf(school).length
+                      ? `${adminsOf(school).length} admin${adminsOf(school).length > 1 ? "s" : ""}`
+                      : "No admin yet"}
                   </div>
                 </TD>
                 <TD className="whitespace-nowrap">{school.helpline}</TD>
@@ -415,6 +704,15 @@ export default function SchoolsPage() {
                 </TD>
                 <TD>
                   <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openAddAdmin(school)}
+                      className="rounded-lg border border-white/10 p-1.5 text-text-secondary hover:text-white"
+                      title="Admins - add, change or remove"
+                      aria-label={`Admins of ${school.name}`}
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => openEdit(school)}

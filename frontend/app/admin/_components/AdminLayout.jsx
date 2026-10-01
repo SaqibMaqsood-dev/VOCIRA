@@ -17,6 +17,7 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import PageTransition from "./PageTransition";
 import IncomingCall from "./IncomingCall";
+import { LoaderInFrame } from "@/components/FullScreenLoader";
 
 export default function AdminLayout({
   children,
@@ -49,7 +50,11 @@ export default function AdminLayout({
 
         <main className="min-w-0 flex-1 pb-2">
           <div className="mx-auto w-full max-w-[1400px]">
-            <PageTransition>{children}</PageTransition>
+            {/* a page loading its data shows the loader here, beside the
+                sidebar - not over the whole screen */}
+            <LoaderInFrame.Provider value={true}>
+              <PageTransition>{children}</PageTransition>
+            </LoaderInFrame.Provider>
           </div>
         </main>
       </div>

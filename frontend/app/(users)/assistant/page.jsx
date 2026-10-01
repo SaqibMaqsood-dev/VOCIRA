@@ -35,6 +35,7 @@ import FullScreenLoader from "@/components/FullScreenLoader";
 import {
   HANDOFF_ATTRIBUTE,
   isAdminParticipant,
+  isAgentParticipant,
 } from "@/lib/handoff";
 import { authFetch, getAccessToken } from "@/lib/session";
 
@@ -1174,7 +1175,7 @@ ${JSON.stringify(
             participant.identity
           );
 
-          if (participant.identity === "agent") {
+          if (isAgentParticipant(participant)) {
             readAgentAttributes(participant.attributes);
           }
 
@@ -1209,7 +1210,7 @@ ${JSON.stringify(
           changed,
           participant
         ) => {
-          if (participant.identity === "agent") {
+          if (isAgentParticipant(participant)) {
             readAgentAttributes(changed);
           }
 
@@ -1313,7 +1314,7 @@ ${JSON.stringify(
             participant.identity
           );
 
-          if (participant.identity === "agent") {
+          if (isAgentParticipant(participant)) {
             startAgentAudioMeter(track);
           }
 
@@ -1600,7 +1601,7 @@ ${JSON.stringify(
       // for what happens after we join.
       livekitRoom.remoteParticipants.forEach(
         (participant) => {
-          if (participant.identity === "agent") {
+          if (isAgentParticipant(participant)) {
             readAgentAttributes(participant.attributes);
           }
 
