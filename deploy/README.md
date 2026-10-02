@@ -217,12 +217,29 @@ docker compose -f pwd.yml exec backend \
 ### 8. The frontend on Vercel
 
 Import the repo on Vercel, set **Root Directory** to `frontend`, and add
-two environment variables:
+these environment variables **before the first build** - `NEXT_PUBLIC_*` values
+are built into the pages, so changing one later needs a redeploy:
 
 ```
 NEXT_PUBLIC_API_URL       = https://api.<domain>
 NEXT_PUBLIC_REALTIME_URL  = https://rt.<domain>
+NEXT_PUBLIC_ROOT_HOST     = vocira.vercel.app      (or your own domain)
 ```
+
+`NEXT_PUBLIC_ROOT_HOST` decides how schools' addresses look
+(frontend/lib/address.js):
+
+| Root host | A school's address | Also needed |
+|---|---|---|
+| `vocira.vercel.app` | `vocira.vercel.app/s/medicaps` | nothing - one origin, `CORS_ORIGINS` only |
+| `your-domain.com` | `medicaps.your-domain.com` | the domain and `*.your-domain.com` on Vercel (wildcard domains need Vercel's nameservers), and `CORS_ORIGIN_REGEX` in `.env.prod` |
+
+Vercel cannot give a `*.vercel.app` address subdomains, which is why it gets
+paths. Moving to your own domain later is only `NEXT_PUBLIC_ROOT_HOST` (and the
+two lines above) - no code changes. `NEXT_PUBLIC_SCHOOL_ADDRESSES=path` or
+`subdomain` forces one way if ever needed.
+
+The super admin signs in at `https://<root host>/super_admin_login`.
 
 Once it deploys, put the URL Vercel gives you into `CORS_ORIGINS` in
 `.env.prod` and restart the gateway:

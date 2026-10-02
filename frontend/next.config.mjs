@@ -3,6 +3,10 @@
 const nextConfig = {
   reactStrictMode: true,
 
+  // A second dev server (e.g. one trying path addresses, lib/address.js)
+  // needs its own build folder - two servers on one .next clash.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
   turbopack: {
     root: process.cwd()
   },

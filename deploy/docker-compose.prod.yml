@@ -223,6 +223,11 @@ services:
       # this file does not run yet - until it does, calls must go to the
       # worker that is here.
       VOICE_ENGINE: ${VOICE_ENGINE:-legacy}
+    volumes:
+      # Each school's uploaded documents, its Google Sheets links and their
+      # last good copies, and the knowledge sync state. Without a volume they
+      # lived inside the container and were gone on every rebuild.
+      - ragdata:/app/backend/microservices/livekit_Rag_services/services/rag_engine/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -243,6 +248,10 @@ services:
       # Let only our own frontend in. Left empty this becomes "*" -
       # meaning any website at all.
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # Schools on their own subdomains (medicaps.your-domain.com) are let in
+      # by this pattern. It never reached the gateway before, so every school
+      # address was refused. Not needed on a *.vercel.app address (one origin).
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
     depends_on:
       - auth
       - livekit_rag
@@ -311,6 +320,7 @@ networks:
 
 volumes:
   pgdata:
+  ragdata:
   redisdata:
   rabbitdata:
   caddydata:

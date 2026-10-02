@@ -1,6 +1,6 @@
 "use client";
 
-import { ROOT_HOST, subdomainOf } from "@/lib/address";
+import { LEAVE_SCHOOL, PATH_MODE, ROOT_HOST, SCHOOL_COOKIE, schoolFromCookies, subdomainOf } from "@/lib/address";
 import { authFetch } from "@/lib/session";
 
 /**
@@ -24,9 +24,32 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000";
 
 export { ROOT_HOST };
 
-/** The school subdomain this page was opened on, or "" on the plain address. */
+/**
+ * The school this page is for, or "" on Vocira's own site: the address's
+ * subdomain - or, where addresses cannot have one (lib/address.js), the
+ * school this browser was sent into by its /s/<school> link.
+ */
 export function subdomainOfPage() {
+  if (PATH_MODE) return schoolFromCookies(document.cookie);
   return subdomainOf(window.location.hostname);
+}
+
+/** path mode: this browser is now in this school (the /s/<school> link). */
+export function rememberSchool(subdomain) {
+  const secure = window.location.protocol === "https:" ? "; secure" : "";
+  document.cookie = `${SCHOOL_COOKIE}=${encodeURIComponent(subdomain)}; path=/; max-age=31536000; samesite=lax${secure}`;
+}
+
+/** path mode: back on Vocira's own site. */
+export function forgetSchool() {
+  document.cookie = `${SCHOOL_COOKIE}=; path=/; max-age=0; samesite=lax`;
+}
+
+
+/** path mode: a page to go on to - only one of this site's own (never another site's). */
+export function safeNext(value, fallback) {
+  const next = (value || "").trim();
+  return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : fallback;
 }
 
 // The super admin's own sign-in, on the plain address only - a school's
@@ -39,15 +62,26 @@ export function loginPath() {
   return subdomainOfPage() ? "/login" : SUPER_ADMIN_LOGIN;
 }
 
-/** A school's own address: http://medicaps.localhost:3000/assistant */
+/**
+ * A school's own address: http://medicaps.localhost:3000/assistant - or in
+ * path mode https://vocira.vercel.app/s/medicaps (the school's home), with
+ * ?next=/assistant for one of its pages.
+ */
 export function schoolUrl(subdomain, path = "/assistant") {
-  const { protocol, port } = window.location;
+  const { protocol, port, host } = window.location;
+  if (PATH_MODE) {
+    const next = path && path !== "/" ? `?next=${encodeURIComponent(path)}` : "";
+    return `${protocol}//${host}/s/${subdomain}${next}`;
+  }
   return `${protocol}//${subdomain}.${ROOT_HOST}${port ? `:${port}` : ""}${path}`;
 }
 
-/** The plain address, without a school: http://localhost:3000/assistant */
+/** Vocira's own site, without a school: http://localhost:3000/ (path mode: leaving the school first). */
 export function rootUrl(path = "/") {
-  const { protocol, port } = window.location;
+  const { protocol, port, host } = window.location;
+  if (PATH_MODE) {
+    return `${protocol}//${host}/s/${LEAVE_SCHOOL}${path && path !== "/" ? `?next=${encodeURIComponent(path)}` : ""}`;
+  }
   return `${protocol}//${ROOT_HOST}${port ? `:${port}` : ""}${path}`;
 }
 
