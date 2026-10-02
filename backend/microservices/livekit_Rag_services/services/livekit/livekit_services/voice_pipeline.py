@@ -30,6 +30,7 @@ from backend.microservices.livekit_Rag_services.services.erp_services.erp_servic
 from backend.microservices.livekit_Rag_services.services.erp_services import (
     connectors,
 )
+from backend.microservices.livekit_Rag_services.services.integrations import tools as records_tools
 
 from backend.microservices.livekit_Rag_services.services import tenants
 from backend.microservices.livekit_Rag_services.services.groq import (
@@ -2059,7 +2060,8 @@ async def process_voice_intent(
                                         # concurrently rather than one
                                         # slow round-trip per item.
                                         erp_fetches = [
-                                            records.fetch(
+                                            records_tools.lookup(
+                                                school,
                                                 resource=item["resource"],
                                                 guardian_id=erp_parent_id,
                                                 student_name=item["student"],

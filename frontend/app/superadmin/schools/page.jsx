@@ -78,7 +78,6 @@ export default function SchoolsPage() {
   const schools = data?.schools || [];
   const adminSchool = adminFor ? schools.find((s) => s.id === adminFor) : null;
   const editingSchool = editing ? schools.find((s) => s.id === editing) : null;
-  const builtInEdit = !!editingSchool?.built_in;
 
   async function copyLink(school) {
     try {
@@ -348,9 +347,7 @@ export default function SchoolsPage() {
           size="lg"
           title={editing ? `Change ${editingSchool?.name || "school"}` : "Add a school"}
           description={
-            builtInEdit
-              ? "A school defined in code: its id, knowledge base and guest link stay as they are."
-              : editing
+            editing
               ? "The school's id, knowledge base and guest link stay the same."
               : "The school gets its own knowledge base and guest link straight away. Its id comes from the English name."
           }
@@ -649,10 +646,12 @@ export default function SchoolsPage() {
               <TR key={school.id}>
                 <TD>
                   <div className="font-medium text-white">{school.name}</div>
-                  <div className="mt-1 text-[10px] uppercase tracking-wider text-text-secondary">
-                    {school.id === data.default ? "Default · " : ""}
-                    {school.built_in ? "Built in" : "Added here"}
-                  </div>
+                  {/* Where a school is written down (in code, or added here) is
+                      no concern of the super admin's - every school is managed
+                      the same way. Only the default school is told apart. */}
+                  {school.id === data.default && (
+                    <div className="mt-1 text-[10px] uppercase tracking-wider text-text-secondary">Default</div>
+                  )}
                   <div
                     className={`mt-1 text-[11px] ${adminsOf(school).length ? "text-text-secondary" : "text-amber-300"}`}
                   >

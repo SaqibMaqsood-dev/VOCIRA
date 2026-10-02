@@ -9,6 +9,12 @@
   --text-secondary: #b8b8d1;
   --accent-primary: #6c63ff;
   --accent-secondary: #8be9fd;
+
+  /* Every page is dark. Without this the browser draws the parts of a
+     form control it owns - a date field's calendar icon, the calendar it
+     opens, a select's list, scrollbars - for a light page: a black icon
+     on the dark panel. */
+  color-scheme: dark;
 }
 
 body {

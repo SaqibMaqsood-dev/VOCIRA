@@ -25,58 +25,24 @@ import re
 import shutil
 from datetime import date, datetime, timezone
 
+from backend.microservices.livekit_Rag_services.services.integrations import canonical, normalizer
+
 MAX_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 20000
 MAX_COLUMNS = 40
 
+# The tables a sheet can fill - their columns are Vocira's canonical
+# fields (services/integrations/canonical.py), one definition for every source.
+SHEET_TABLES = ("students", "attendance", "results", "fees", "timetable", "announcements")
+
 TABLES = {
-    "students": {
-        "label": "Students",
-        "required": ["student_id", "student_name", "guardian_id"],
-        "optional": ["guardian_name", "guardian_email", "guardian_mobile", "class"],
-        "aliases": {
-            "roll_no": "student_id", "roll_number": "student_id",
-            "admission_no": "student_id", "admission_number": "student_id",
-            "name": "student_name",
-            "parent_id": "guardian_id",
-            "parent_name": "guardian_name", "father_name": "guardian_name",
-            "parent_email": "guardian_email", "email": "guardian_email",
-            "parent_mobile": "guardian_mobile", "mobile": "guardian_mobile", "phone": "guardian_mobile",
-            "grade": "class", "class_name": "class",
-        },
-    },
-    "attendance": {
-        "label": "Attendance",
-        "required": ["student_id", "date", "status"],
-        "optional": [],
-        "aliases": {"roll_no": "student_id", "roll_number": "student_id", "admission_no": "student_id"},
-    },
-    "results": {
-        "label": "Results",
-        "required": ["student_id", "subject", "marks"],
-        "optional": ["total", "grade", "exam", "year"],
-        "aliases": {
-            "roll_no": "student_id", "roll_number": "student_id", "admission_no": "student_id",
-            "course": "subject",
-            "obtained": "marks", "obtained_marks": "marks", "score": "marks",
-            "max_marks": "total", "total_marks": "total", "out_of": "total", "maximum": "total",
-            "term": "exam", "assessment": "exam",
-            "academic_year": "year",
-        },
-    },
-    "fees": {
-        "label": "Fees",
-        "required": ["student_id", "amount"],
-        "optional": ["description", "paid", "outstanding", "due_date", "status"],
-        "aliases": {
-            "roll_no": "student_id", "roll_number": "student_id", "admission_no": "student_id",
-            "fee_type": "description", "month": "description", "title": "description",
-            "total": "amount", "fee": "amount",
-            "paid_amount": "paid",
-            "balance": "outstanding", "due_amount": "outstanding", "remaining": "outstanding",
-            "due": "due_date",
-        },
-    },
+    name: {
+        "label": canonical.TABLES[name]["label"],
+        "required": canonical.required_fields(name),
+        "optional": [f for f in canonical.field_names(name) if f not in canonical.required_fields(name)],
+        "aliases": canonical.TABLES[name]["aliases"],
+    }
+    for name in SHEET_TABLES
 }
 
 
@@ -188,59 +154,33 @@ def _grid(filename: str, content: bytes) -> list[list[str]]:
     raise SpreadsheetError("Use a .csv or .xlsx sheet (old .xls files: save as .xlsx first).")
 
 
-def parse(table: str, filename: str, content: bytes) -> tuple[list[str], list[dict], list[str]]:
-    """The sheet as (columns, rows, warnings) - or SpreadsheetError."""
+def parse(table: str, filename: str, content: bytes, mapping: dict | None = None) -> tuple[list[str], list[dict], list[str]]:
+    """
+    The sheet as (columns, rows, warnings) - or SpreadsheetError. The columns
+    are Vocira's canonical fields (by the school's mapping, the field's own
+    name or a known alias - integrations/normalizer.py) followed by any
+    extra columns, kept as they are.
+    """
     if table not in TABLES:
         raise SpreadsheetError(f"Unknown table '{table}'.")
     if len(content) > MAX_BYTES:
         raise SpreadsheetError("The file is larger than 5 MB.")
-    spec = TABLES[table]
 
     grid = [row for row in _grid(filename, content) if any(cell for cell in row)]
     if not grid:
         raise SpreadsheetError("The file is empty.")
+    try:
+        result = normalizer.normalize(table, grid[0], grid[1:], mapping)
+    except normalizer.NormalizeError as error:
+        raise SpreadsheetError(str(error))
 
-    header = [spec["aliases"].get(_column(h), _column(h)) for h in grid[0]]
-    while header and not header[-1]:
-        header.pop()
-    if not header or any(not h for h in header):
-        raise SpreadsheetError("Every column in the first row needs a name.")
-    if len(header) > MAX_COLUMNS:
-        raise SpreadsheetError(f"At most {MAX_COLUMNS} columns.")
-    repeated = sorted({h for h in header if header.count(h) > 1})
-    if repeated:
-        raise SpreadsheetError(f"These columns appear twice: {', '.join(repeated)}.")
-    missing = [c for c in spec["required"] if c not in header]
-    if missing:
-        raise SpreadsheetError(
-            f"Missing column(s): {', '.join(missing)}. The first row must name the columns - "
-            f"needed: {', '.join(spec['required'])}."
-        )
-    if len(grid) - 1 > MAX_ROWS:
-        raise SpreadsheetError(f"At most {MAX_ROWS} rows.")
-
-    rows, skipped = [], []
-    for number, raw in enumerate(grid[1:], start=2):
-        row = {column: (raw[i] if i < len(raw) else "") for i, column in enumerate(header)}
-        if any(not row[c] for c in spec["required"]):
-            skipped.append(number)
-            continue
-        rows.append(row)
-
-    warnings = []
-    if skipped:
-        shown = ", ".join(str(n) for n in skipped[:8]) + ("…" if len(skipped) > 8 else "")
-        warnings.append(f"{len(skipped)} row(s) left out - a needed value is empty (row {shown}).")
-    if not rows:
-        raise SpreadsheetError("No usable rows - every row is missing a needed value.")
-
-    for column in ("marks", "total", "amount", "paid", "outstanding"):
-        if column in header:
-            bad = sum(1 for r in rows if r.get(column) and _number(r[column]) is None)
-            if bad:
-                warnings.append(f"{bad} row(s) have a '{column}' that is not a number.")
-
-    return header, rows, warnings
+    header = list(result.mapping) + [c for c in result.extras if c not in result.mapping]
+    rows = []
+    for row in result.rows:
+        flat = {k: ("" if v is None else v) for k, v in row.items() if k != "_extra"}
+        flat.update(row.get("_extra") or {})
+        rows.append(flat)
+    return header, rows, result.warnings
 
 
 # ---------------------------------------------------------
@@ -327,6 +267,9 @@ def same_id(a, b) -> bool:
 
 
 def _number(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # a stored number (canonical records keep them as numbers) - 0 included
+        return int(value) if float(value).is_integer() else value
     text = str(value or "").replace(",", "").strip()
     if not text:
         return None

@@ -63,6 +63,10 @@ class Connection:
     capabilities: tuple = ()
     allow_private_network: bool = False
     version: str = ""          # changes whenever the connection does - connectors are rebuilt
+    # the Integration Hub's: {table: {canonical field: source column}}, and how often to re-read
+    mapping: dict = field(default_factory=dict)
+    sync_minutes: int | None = None
+    status: str | None = None
 
 
 _store: dict[str, Connection] = {}
@@ -77,6 +81,9 @@ def _from_row(row: SchoolConnection) -> Connection:
         capabilities=tuple(json.loads(row.capabilities_json or "[]")),
         allow_private_network=bool(row.allow_private_network),
         version=str(row.updated_at),
+        mapping=json.loads(row.mapping_json or "{}"),
+        sync_minutes=row.sync_minutes,
+        status=row.status,
     )
 
 
@@ -95,8 +102,11 @@ async def _audit(db, school_id: str, action: str, kind: str | None, actor: str |
     db.add(ConnectionAudit(school_id=school_id, action=action, kind=kind, actor=actor, detail=detail))
 
 
+_KEEP = object()
+
+
 async def save(school_id: str, kind: str, settings: dict, secrets: dict, capabilities: list[str],
-               allow_private_network: bool, actor: str | None) -> Connection:
+               allow_private_network: bool, actor: str | None, mapping=_KEEP, sync_minutes=_KEEP) -> Connection:
     """
     Connect or change. A secret left empty keeps the one already saved
     (the panel never has it to send back); switching to another kind of
@@ -116,7 +126,15 @@ async def save(school_id: str, kind: str, settings: dict, secrets: dict, capabil
         row.capabilities_json = json.dumps(list(capabilities))
         row.allow_private_network = bool(allow_private_network)
         row.updated_by = actor
+        if mapping is not _KEEP:
+            row.mapping_json = json.dumps(mapping or {})
+        elif action == "connected":
+            row.mapping_json = None  # another system's columns mean nothing to this one
+        if sync_minutes is not _KEEP:
+            row.sync_minutes = sync_minutes
         if action == "connected":
+            row.status = "connected"
+            row.last_sync_at = row.last_sync_ok = row.last_sync_summary = row.record_counts_json = None
             # the usual order is Test, then Save: the test made before this
             # connection existed is its last test
             tested = (await db.execute(
@@ -150,6 +168,53 @@ async def delete(school_id: str, actor: str | None) -> bool:
     return True
 
 
+async def ensure(school_id: str, kind: str, actor: str | None, capabilities: list[str] | None = None) -> Connection:
+    """A connection row for a source with nothing secret (Excel/CSV, Google Sheets, Native Records),
+    so its sync state, mapping and history have a home like every other's."""
+    from backend.microservices.livekit_Rag_services.services.integrations.base import ALL_CAPABILITIES
+
+    found = get(school_id)
+    if found is not None and found.kind == kind:
+        return found
+    return await save(school_id, kind, {}, {}, list(capabilities or ALL_CAPABILITIES), False, actor)
+
+
+async def set_mapping(school_id: str, table: str, mapping: dict, actor: str | None) -> None:
+    """One table's column mapping, as chosen on the mapping step."""
+    async with SessionLocal() as db:
+        row = await db.get(SchoolConnection, school_id)
+        if row is None:
+            return
+        current = json.loads(row.mapping_json or "{}")
+        current[table] = {k: v for k, v in (mapping or {}).items() if v}
+        row.mapping_json = json.dumps(current)
+        await _audit(db, school_id, "mapped", row.kind, actor, f"{table}: {', '.join(sorted(current[table])) or 'automatic'}")
+        await db.commit()
+    await refresh()
+
+
+# how a sync's outcome leaves the connection's status
+_STATUS_AFTER_SYNC = {"success": "connected", "partial": "attention", "failed": "error"}
+
+
+async def record_sync(school_id: str, kind: str, state: str, summary: str, counts: dict | None) -> None:
+    """How the last sync went - success, partial (needs attention) or failed - shown on both panels."""
+    from datetime import datetime, timezone
+
+    async with SessionLocal() as db:
+        row = await db.get(SchoolConnection, school_id)
+        if row is None or row.kind != kind:
+            return
+        row.last_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        row.last_sync_ok = state == "success"
+        row.last_sync_state = state
+        row.last_sync_summary = (summary or "")[:2000]
+        if counts is not None:
+            row.record_counts_json = json.dumps(counts)
+        row.status = _STATUS_AFTER_SYNC.get(state, "error")
+        await db.commit()
+
+
 async def record_test(school_id: str, kind: str, ok: bool, summary: str, actor: str | None) -> None:
     from datetime import datetime, timezone
 
@@ -159,6 +224,7 @@ async def record_test(school_id: str, kind: str, ok: bool, summary: str, actor: 
             row.last_test_at = datetime.now(timezone.utc).replace(tzinfo=None)
             row.last_test_ok = ok
             row.last_test_summary = summary[:2000]
+            row.status = "connected" if ok else "error"
         await _audit(db, school_id, "tested", kind, actor, ("ok: " if ok else "failed: ") + summary[:500])
         await db.commit()
 
@@ -226,6 +292,16 @@ async def view(school_id: str) -> dict | None:
         },
         "updated_by": row.updated_by,
         "updated_at": row.updated_at.isoformat(timespec="seconds") if row.updated_at else None,
+        "status": row.status,
+        "mapping": json.loads(row.mapping_json or "{}"),
+        "sync_minutes": row.sync_minutes,
+        "last_sync": None if row.last_sync_at is None else {
+            "at": row.last_sync_at.isoformat(timespec="seconds"),
+            "ok": row.last_sync_ok,
+            "state": row.last_sync_state or ("success" if row.last_sync_ok else "failed"),
+            "summary": row.last_sync_summary,
+        },
+        "counts": json.loads(row.record_counts_json or "{}"),
         "audit": [
             {"action": a.action, "kind": a.kind, "actor": a.actor, "detail": a.detail,
              "at": a.at.isoformat(timespec="seconds") if a.at else None}

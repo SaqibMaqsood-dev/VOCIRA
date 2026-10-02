@@ -22,11 +22,13 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
+  Database,
   LayoutDashboard,
   MessageCircle,
   School,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Ticket,
   Users,
 } from "lucide-react";
@@ -44,12 +46,16 @@ export const ADMIN_ITEMS = [
   { href: "/admin/escalations", label: "Escalations", icon: AlertTriangle },
   // what parents sent from the Support page
   { href: "/admin/tickets", label: "Tickets", icon: Ticket },
+  // the school's own records - only when the super admin chose Vocira Native Records for it
+  { href: "/admin/records", label: "Records", icon: Database, onlyFor: "native" },
   { href: "/admin/users", label: "Accounts", icon: Users },
 ];
 
 // The platform super admin's panel.
 export const SUPER_ADMIN_ITEMS = [
   { href: "/superadmin/schools", label: "Schools", icon: School },
+  // every school's records system: provider, status, syncs and problems
+  { href: "/superadmin/integrations", label: "Integrations", icon: Plug },
 ];
 
 export default function Sidebar({
@@ -65,6 +71,9 @@ export default function Sidebar({
   const pathname = usePathname();
   // the counts on the items: pending escalations, open tickets
   const [pending, setPending] = useState({});
+  // the school's records system - an item marked onlyFor shows only on that one
+  const [recordsKind, setRecordsKind] = useState(null);
+  const shown = items.filter((item) => !item.onlyFor || item.onlyFor === recordsKind);
 
   useEffect(() => {
     if (!showPending) return;
@@ -80,6 +89,11 @@ export default function Sidebar({
       });
     adminFetch("/livekit/admin/tickets?status=open&limit=100")
       .then((rows) => setPending((p) => ({ ...p, "/admin/tickets": Array.isArray(rows) ? rows.length : 0 })))
+      .catch(() => {
+        /* sidebar ki wajah se page na ruke */
+      });
+    adminFetch("/livekit/admin/integrations/mine")
+      .then((res) => setRecordsKind(res?.status?.kind || null))
       .catch(() => {
         /* sidebar ki wajah se page na ruke */
       });
@@ -100,7 +114,7 @@ export default function Sidebar({
         {collapsed && <ExpandButton onToggle={onToggle} />}
 
         <NavList
-          items={items}
+          items={shown}
           pathname={pathname}
           collapsed={collapsed}
           pending={pending}
@@ -138,7 +152,7 @@ export default function Sidebar({
         <Brand collapsed={false} onNavigate={onMobileClose} title={title} home={home} />
 
         <NavList
-          items={items}
+          items={shown}
           pathname={pathname}
           collapsed={false}
           pending={pending}

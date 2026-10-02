@@ -29,6 +29,7 @@ from backend.microservices.livekit_Rag_services.models.escalation_model import (
 )
 from backend.microservices.livekit_Rag_services.models.message_model import SenderTypeEnum
 from backend.microservices.livekit_Rag_services.services.erp_services import connectors
+from backend.microservices.livekit_Rag_services.services.integrations import tools as records_tools
 from backend.microservices.livekit_Rag_services.services.groq import (
     answer_cache,
     human_text,
@@ -180,9 +181,12 @@ async def _records_answer(call: Call, records, items: list[dict], question: str)
             return human_text.system_message("erp_not_linked", language)
 
         print(f"[ERP] guardian {guardian_id} asks: {question} -> {items}")
-        # a compound question's topics are separate lookups - made together
+        # a compound question's topics are separate lookups - made together,
+        # each by the records tool for it (integrations/tools.py), whatever
+        # system the school runs
         results = await asyncio.gather(*[
-            records.fetch(
+            records_tools.lookup(
+                call.school,
                 resource=item["resource"],
                 guardian_id=guardian_id,
                 student_name=item["student"],
@@ -217,6 +221,32 @@ async def _records_answer(call: Call, records, items: list[dict], question: str)
         print(f"[{'LLM' if stage == 'llm' else 'ERP'} Error] {type(error).__name__}: {error}")
         traceback.print_exc()
         return human_text.system_message("answer_assembly_failed" if stage == "llm" else "erp_unreachable", language)
+
+
+async def _notices_answer(call: Call, question: str, children: list[dict]) -> str | None:
+    """
+    "Any announcements?" - the school's current notices, for any caller,
+    guests too. Only a school whose records are in Vocira keeps them; for
+    any other, or with none showing, the question goes on as usual.
+    """
+    if not (records_tools.asks_announcements(question) and records_tools.keeps_announcements(call.school)):
+        return None
+    try:
+        notices = await records_tools.get_announcements(call.school, [c["class"] for c in children if c.get("class")])
+        if not notices["data"]:
+            return None
+        response = await _llm(
+            human_text.build_response_prompt(
+                user_query=question, response=notices, language=call.language, school_name=call.school.name,
+            ),
+            max_tokens=640,
+        )
+        choice = response.choices[0]
+        return spoken_text.finish_answer(choice.message.content.strip(), call.language,
+                                         cut_off=choice.finish_reason == "length")
+    except Exception as error:
+        print(f"[Announcements] {type(error).__name__}: {error} - answering as usual")
+        return None
 
 
 async def _ask_for_staff(db, call: Call, question: str, message_id) -> Reply:
@@ -289,6 +319,11 @@ async def reply_to(call: Call, question: str) -> Reply | None:
         if cached:
             print("[Cache] this same question was just asked")
             return Reply(text=cached, intent="cached", message_id=message.id)
+
+        notices = await _notices_answer(call, question, children)
+        if notices:
+            print("[Route]: announcements")
+            return Reply(text=notices, intent="announcements", cacheable=use_cache, message_id=message.id)
 
         route = await _route(question, children, last_child, previous_words)
         intent = str(route.get("intent", "RAG")).strip().upper()

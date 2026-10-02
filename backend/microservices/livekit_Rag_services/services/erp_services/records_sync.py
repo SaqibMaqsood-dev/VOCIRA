@@ -131,7 +131,7 @@ def _as_file(content: bytes, content_type: str) -> str:
     return "link.csv"
 
 
-async def read(url: str, table: str) -> tuple[list[str], list[dict], list[str], str]:
+async def read(url: str, table: str, mapping: dict | None = None) -> tuple[list[str], list[dict], list[str], str]:
     """Fetch and check one table: (columns, rows, warnings, digest) - or LinkError / SpreadsheetError."""
     try:
         content, content_type = await fetch(url)
@@ -139,24 +139,26 @@ async def read(url: str, table: str) -> tuple[list[str], list[dict], list[str], 
         raise LinkError("The link took too long to answer.")
     except httpx.HTTPError as error:
         raise LinkError(f"The link could not be reached ({type(error).__name__}).")
-    columns, rows, warnings = spreadsheet.parse(table, _as_file(content, content_type), content)
-    return columns, rows, warnings, hashlib.sha256(content).hexdigest()
+    columns, rows, warnings = spreadsheet.parse(table, _as_file(content, content_type), content, mapping)
+    # the mapping is part of what was read: a changed mapping is a changed copy
+    digest = hashlib.sha256(content + repr(sorted((mapping or {}).items())).encode()).hexdigest()
+    return columns, rows, warnings, digest
 
 
-async def connect(records_dir: str, table: str, url: str) -> dict:
+async def connect(records_dir: str, table: str, url: str, mapping: dict | None = None) -> dict:
     """A new link for a table: kept only if it gives a usable sheet now."""
     source = normalize(url)
-    columns, rows, warnings, digest = await read(source, table)
+    columns, rows, warnings, digest = await read(source, table, mapping)
     return spreadsheet.save(records_dir, table, source, columns, rows, warnings, digest)
 
 
-async def sync_table(records_dir: str, table: str) -> dict:
+async def sync_table(records_dir: str, table: str, mapping: dict | None = None) -> dict:
     """Re-read one table's link. A failure keeps the copy in use and records why."""
     meta = spreadsheet.read_meta(records_dir, table)
     if not meta or not meta.get("source_url"):
         return {"table": table, "ok": False, "skipped": True}
     try:
-        columns, rows, warnings, digest = await read(meta["source_url"], table)
+        columns, rows, warnings, digest = await read(meta["source_url"], table, mapping)
     except (LinkError, spreadsheet.SpreadsheetError) as error:
         spreadsheet.update_meta(records_dir, table, last_attempt=spreadsheet.now(), last_error=str(error))
         print(f"[Records sync] {table}: kept the {meta.get('synced_at')} copy - {error}")
@@ -176,11 +178,11 @@ async def sync_table(records_dir: str, table: str) -> dict:
 _locks: dict[str, asyncio.Lock] = {}
 
 
-async def sync_school(school_id: str, records_dir: str) -> list[dict]:
+async def sync_school(school_id: str, records_dir: str, mappings: dict | None = None) -> list[dict]:
     """Every linked table of one school - one sync of a school at a time."""
     lock = _locks.setdefault(school_id, asyncio.Lock())
     async with lock:
-        return [await sync_table(records_dir, table) for table in spreadsheet.TABLES]
+        return [await sync_table(records_dir, table, (mappings or {}).get(table)) for table in spreadsheet.TABLES]
 
 
 async def sync_all() -> None:
@@ -216,7 +218,11 @@ async def run_forever() -> None:
     while True:
         last_round_at = spreadsheet.now()
         try:
-            await sync_all()
+            # every copied source that is due - Google Sheets every SYNC_MINUTES as
+            # before, a REST API or database by its own schedule (integrations/sync.py)
+            from backend.microservices.livekit_Rag_services.services.integrations import sync as hub_sync
+
+            await hub_sync.scheduled_round()
         except Exception as error:
             print(f"[Records sync] round failed: {type(error).__name__}: {error}")
         next_round_at = _in(SYNC_MINUTES * 60)

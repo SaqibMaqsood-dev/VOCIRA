@@ -22,6 +22,7 @@ from sqlalchemy import text
 from backend.microservices.livekit_Rag_services.models import school_model  # noqa: F401
 from backend.microservices.livekit_Rag_services.models import school_connection_model  # noqa: F401
 from backend.microservices.livekit_Rag_services.models import support_ticket_model  # noqa: F401
+from backend.microservices.livekit_Rag_services.models import canonical_records_model  # noqa: F401
 
 
 
@@ -138,6 +139,21 @@ async def lifespan(app: FastAPI):
             "UPDATE support_tickets SET resolved_at = updated_at "
             "WHERE status = 'resolved' AND resolved_at IS NULL"
         ))
+        # the Records Integration Hub's state on each school's connection
+        for column in (
+            "status VARCHAR(20)", "mapping_json TEXT", "sync_minutes INTEGER",
+            "last_sync_at TIMESTAMP", "last_sync_ok BOOLEAN", "last_sync_state VARCHAR(20)", "last_sync_summary TEXT",
+            "record_counts_json TEXT",
+        ):
+            await conn.execute(text(f"ALTER TABLE school_connections ADD COLUMN IF NOT EXISTS {column}"))
+        # a sync recorded before its state was kept: its state is its latest run's
+        await conn.execute(text(
+            "UPDATE school_connections c SET last_sync_state = r.status, "
+            "status = CASE r.status WHEN 'success' THEN 'connected' WHEN 'partial' THEN 'attention' ELSE 'error' END "
+            "FROM (SELECT DISTINCT ON (school_id) school_id, status FROM integration_sync_runs "
+            "      WHERE status <> 'running' ORDER BY school_id, id DESC) r "
+            "WHERE c.school_id = r.school_id AND c.last_sync_state IS NULL AND c.last_sync_at IS NOT NULL"
+        ))
 
     # The first school's ERPNext keys move once from the server settings
     # into its encrypted connection - so it is managed on the Schools page
@@ -185,6 +201,27 @@ async def lifespan(app: FastAPI):
     from backend.microservices.livekit_Rag_services.services.erp_services import records_sync
 
     records_sync_task = asyncio.create_task(records_sync.run_forever())
+
+    # Once: the Google Sheets schools whose sheets were linked before the
+    # canonical records existed get them copied in (until then the agent
+    # reads their sheet copies as before - integrations/canonical_adapter.py).
+    async def copy_linked_sheets():
+        from backend.microservices.livekit_Rag_services.services import tenants
+        from backend.microservices.livekit_Rag_services.services.integrations import store as records_store
+        from backend.microservices.livekit_Rag_services.services.integrations.generic import google_sheets
+
+        try:
+            await tenants.refresh(force=True)
+            for school_id in list(tenants.all_schools()):
+                school = tenants.get_school(school_id)
+                if school.records == "spreadsheet" and not await records_store.has_students(school.id):
+                    copied = await google_sheets.import_all(school.id)
+                    if copied:
+                        print(f"[Records] {school.id}: sheets copied into the canonical records {copied}")
+        except Exception as error:
+            print(f"WARNING: could not copy the linked sheets into the canonical records ({error}).")
+
+    sheets_copy_task = asyncio.create_task(copy_linked_sheets())
 
     print(
         "Application started successfully"
@@ -297,6 +334,19 @@ app.include_router(
 # The logged-in guardian's own children, for the dashboard card.
 app.include_router(
     students_route.router,
+    prefix="/livekit",
+)
+
+# The Records Integration Hub - connecting each school's records system,
+# syncing, uploads, and Vocira Native Records (services/integrations/).
+from backend.microservices.livekit_Rag_services.routers.users_route import integrations_route  # noqa: E402
+
+app.include_router(
+    integrations_route.router,
+    prefix="/livekit",
+)
+app.include_router(
+    integrations_route.records_router,
     prefix="/livekit",
 )
 

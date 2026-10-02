@@ -387,11 +387,19 @@ _connectors: dict[tuple, RecordsConnector] = {}
 
 def connector_for(school, default_service: ERPService | None = None) -> RecordsConnector:
     """
-    The records connector for a school - built once, then reused.
-
-    default_service is the ERPNext service to use for a school that
-    keeps the service's own ERP settings (the first school).
+    The records connector for a school - now the Records Integration Hub's
+    (services/integrations/registry.py), which knows every provider: the
+    live ones here (ERPNext, Open School MIS) and every source copied into
+    Vocira's canonical records (Excel/CSV, Google Sheets, REST API,
+    database, Native Records).
     """
+    from backend.microservices.livekit_Rag_services.services.integrations import registry
+
+    return registry.connector_for(school, default_service)
+
+
+def _legacy_connector_for(school, default_service: ERPService | None = None) -> RecordsConnector:
+    """The connector as it was built before the Integration Hub - kept for reference and comparison tests."""
     connection = connections.get(school.id)
     if connection is not None and connection.kind != school.records:
         connection = None

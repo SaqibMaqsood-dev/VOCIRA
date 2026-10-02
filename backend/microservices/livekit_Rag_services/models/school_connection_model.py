@@ -30,6 +30,21 @@ class SchoolConnection(Base):
     updated_by             : Mapped[str | None]      = mapped_column(String(120), nullable=True)
     updated_at             : Mapped[datetime]        = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
+    # ---- the Records Integration Hub (services/integrations/)
+    # connected | error | disconnected - how the last test or sync left it
+    status                 : Mapped[str | None]      = mapped_column(String(20), nullable=True)
+    # {table: {canonical field: the source's column}} - set on the mapping step
+    mapping_json           : Mapped[str | None]      = mapped_column(Text, nullable=True)
+    # how often a copied source (REST API, database) is re-read; None: the default
+    sync_minutes           : Mapped[int | None]      = mapped_column(Integer, nullable=True)
+    last_sync_at           : Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_ok           : Mapped[bool | None]     = mapped_column(Boolean, nullable=True)
+    # success | partial (part of it could not be read - needs attention) | failed
+    last_sync_state        : Mapped[str | None]      = mapped_column(String(20), nullable=True)
+    last_sync_summary      : Mapped[str | None]      = mapped_column(Text, nullable=True)
+    # {table: rows} after the last sync
+    record_counts_json     : Mapped[str | None]      = mapped_column(Text, nullable=True)
+
 
 class ConnectionAudit(Base):
     """Who connected, changed, tested or disconnected a school's records system, and when."""

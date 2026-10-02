@@ -576,6 +576,11 @@ async def admin_delete_school(school_id: str, admin: Annotated[object, Depends(r
     # school's - and students' personal data. They go with it.
     await connections.delete(school.id, getattr(admin, "username", None))
     spreadsheet.remove_all(tenants.records_dir(school.id))
+    from backend.microservices.livekit_Rag_services.services.integrations import store as records_store
+    from backend.microservices.livekit_Rag_services.services.integrations import sync as records_sync_engine
+
+    await records_store.clear(school.id)
+    await records_sync_engine.forget(school.id)
 
     print(f"[Schools] removed: {school.id}{' (defined in code - knowledge kept)' if built_in else ''}")
     return {"removed": school.id}
@@ -642,10 +647,13 @@ async def admin_link_records(school_id: str, table: str, request: RecordsLinkReq
     except (records_sync.LinkError, spreadsheet.SpreadsheetError) as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error))
 
-    if table != "students" and spreadsheet.has_table(folder, "students"):
+    from backend.microservices.livekit_Rag_services.services.integrations.generic import google_sheets
+
+    await google_sheets.import_table(school.id, table)
+    if table not in ("students", "timetable", "announcements") and spreadsheet.has_table(folder, "students"):
         known = {r["student_id"].strip().lower() for r in spreadsheet.rows(folder, "students")}
         unknown = sorted({r["student_id"] for r in spreadsheet.rows(folder, table)
-                          if r["student_id"].strip().lower() not in known})
+                          if r.get("student_id", "").strip().lower() not in known})
         if unknown:
             meta = spreadsheet.update_meta(folder, table, warnings=meta["warnings"] + [
                 f"{len(unknown)} student id(s) are not in Students (e.g. {', '.join(unknown[:3])}) - "
@@ -662,8 +670,14 @@ async def admin_sync_records(school_id: str):
     from backend.microservices.livekit_Rag_services.services import tenants
     from backend.microservices.livekit_Rag_services.services.erp_services import records_sync
 
+    from backend.microservices.livekit_Rag_services.services.erp_services import connections
+    from backend.microservices.livekit_Rag_services.services.integrations.generic import google_sheets
+
     school = await _known_school(school_id)
-    results = await records_sync.sync_school(school.id, tenants.records_dir(school.id))
+    connection = connections.get(school.id)
+    mappings = connection.mapping if connection is not None and connection.kind == "spreadsheet" else None
+    results = await records_sync.sync_school(school.id, tenants.records_dir(school.id), mappings)
+    await google_sheets.import_all(school.id)
     return {"results": [r for r in results if not r.get("skipped")]}
 
 
@@ -672,9 +686,12 @@ async def admin_remove_records(school_id: str, table: str):
     from backend.microservices.livekit_Rag_services.services import tenants
     from backend.microservices.livekit_Rag_services.services.erp_services import spreadsheet
 
+    from backend.microservices.livekit_Rag_services.services.integrations import store as records_store
+
     school = await _known_school(school_id)
     if table not in spreadsheet.TABLES or not spreadsheet.remove(tenants.records_dir(school.id), table):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such link")
+    await records_store.replace_table(school.id, table, [], "sheets")
     print(f"[Records] {school.id}: {table} removed")
     return {"removed": table}
 

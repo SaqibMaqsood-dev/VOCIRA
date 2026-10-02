@@ -271,7 +271,9 @@ def public_list() -> list[dict]:
 # grouped by spaces, dashes, dots or brackets - 6 to 15 digits in all.
 _HELPLINE = re.compile(r"^\+?[0-9(][0-9 ()\-.]{3,24}[0-9]$")
 _ENV_PREFIX = re.compile(r"^[A-Z][A-Z0-9_]{1,30}$")
-RECORDS_KINDS = ("erpnext", "spreadsheet", "open-school-mis")  # erp_services/connectors.py KINDS
+# The providers a school's records can be set to - integrations/registry.py USABLE
+# (the named systems still waiting for an official integration are not among them)
+RECORDS_KINDS = ("erpnext", "spreadsheet", "open-school-mis", "excel", "rest-api", "database", "native")
 
 # One DNS label: lower-case letters, digits and inner dashes.
 _SUBDOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])$")
