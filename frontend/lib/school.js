@@ -1,6 +1,13 @@
 "use client";
 
-import { LEAVE_SCHOOL, PATH_MODE, ROOT_HOST, SCHOOL_COOKIE, schoolFromCookies, subdomainOf } from "@/lib/address";
+import {
+  LEAVE_SCHOOL,
+  SCHOOL_COOKIE,
+  rootHostOf,
+  schoolFromCookies,
+  subdomainOf,
+  usesPathAddresses,
+} from "@/lib/address";
 import { authFetch } from "@/lib/session";
 
 /**
@@ -22,7 +29,13 @@ import { authFetch } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000";
 
-export { ROOT_HOST };
+/**
+ * Whether this page's address gives schools paths (vocira.vercel.app/s/medicaps)
+ * rather than subdomains (medicaps.vocira.online) - lib/address.js.
+ */
+export function pathAddresses() {
+  return usesPathAddresses(window.location.hostname);
+}
 
 /**
  * The school this page is for, or "" on Vocira's own site: the address's
@@ -30,7 +43,7 @@ export { ROOT_HOST };
  * school this browser was sent into by its /s/<school> link.
  */
 export function subdomainOfPage() {
-  if (PATH_MODE) return schoolFromCookies(document.cookie);
+  if (pathAddresses()) return schoolFromCookies(document.cookie);
   return subdomainOf(window.location.hostname);
 }
 
@@ -63,26 +76,27 @@ export function loginPath() {
 }
 
 /**
- * A school's own address: http://medicaps.localhost:3000/assistant - or in
- * path mode https://vocira.vercel.app/s/medicaps (the school's home), with
- * ?next=/assistant for one of its pages.
+ * A school's own address, on the domain this page is on:
+ * https://medicaps.vocira.online/assistant live, http://medicaps.localhost:3000/assistant
+ * here - or in path mode https://vocira.vercel.app/s/medicaps (the school's
+ * home), with ?next=/assistant for one of its pages.
  */
 export function schoolUrl(subdomain, path = "/assistant") {
-  const { protocol, port, host } = window.location;
-  if (PATH_MODE) {
+  const { protocol, port, host, hostname } = window.location;
+  if (pathAddresses()) {
     const next = path && path !== "/" ? `?next=${encodeURIComponent(path)}` : "";
     return `${protocol}//${host}/s/${subdomain}${next}`;
   }
-  return `${protocol}//${subdomain}.${ROOT_HOST}${port ? `:${port}` : ""}${path}`;
+  return `${protocol}//${subdomain}.${rootHostOf(hostname)}${port ? `:${port}` : ""}${path}`;
 }
 
-/** Vocira's own site, without a school: http://localhost:3000/ (path mode: leaving the school first). */
+/** Vocira's own site, without a school: https://vocira.online/ (path mode: leaving the school first). */
 export function rootUrl(path = "/") {
-  const { protocol, port, host } = window.location;
-  if (PATH_MODE) {
+  const { protocol, port, host, hostname } = window.location;
+  if (pathAddresses()) {
     return `${protocol}//${host}/s/${LEAVE_SCHOOL}${path && path !== "/" ? `?next=${encodeURIComponent(path)}` : ""}`;
   }
-  return `${protocol}//${ROOT_HOST}${port ? `:${port}` : ""}${path}`;
+  return `${protocol}//${rootHostOf(hostname)}${port ? `:${port}` : ""}${path}`;
 }
 
 /**

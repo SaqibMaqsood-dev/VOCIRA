@@ -223,23 +223,25 @@ are built into the pages, so changing one later needs a redeploy:
 ```
 NEXT_PUBLIC_API_URL       = https://api.<domain>
 NEXT_PUBLIC_REALTIME_URL  = https://rt.<domain>
-NEXT_PUBLIC_ROOT_HOST     = vocira.vercel.app      (or your own domain)
 ```
 
-`NEXT_PUBLIC_ROOT_HOST` decides how schools' addresses look
-(frontend/lib/address.js):
+How schools' addresses look is worked out from the address the site is
+opened on (frontend/lib/address.js) - nothing to set, and one build is right
+on localhost, a Vercel preview and your own domain alike:
 
-| Root host | A school's address | Also needed |
+| Site opened at | A school's address | Also needed |
 |---|---|---|
-| `vocira.vercel.app` | `vocira.vercel.app/s/medicaps` | nothing - one origin, `CORS_ORIGINS` only |
+| `vocira.vercel.app` (any `*.vercel.app`) | `vocira.vercel.app/s/medicaps` | nothing - one origin, `CORS_ORIGINS` only |
 | `your-domain.com` | `medicaps.your-domain.com` | the domain and `*.your-domain.com` on Vercel (wildcard domains need Vercel's nameservers), and `CORS_ORIGIN_REGEX` in `.env.prod` |
+| `localhost:3000` | `medicaps.localhost:3000` | nothing |
 
 Vercel cannot give a `*.vercel.app` address subdomains, which is why it gets
-paths. Moving to your own domain later is only `NEXT_PUBLIC_ROOT_HOST` (and the
-two lines above) - no code changes. `NEXT_PUBLIC_SCHOOL_ADDRESSES=path` or
-`subdomain` forces one way if ever needed.
+paths. Moving to your own domain later is only the two lines in the last
+column - no code changes. Only for a domain this cannot work out,
+`NEXT_PUBLIC_ROOT_HOST=<domain>` pins the root, and
+`NEXT_PUBLIC_SCHOOL_ADDRESSES=path` or `subdomain` forces one way.
 
-The super admin signs in at `https://<root host>/super_admin_login`.
+The super admin signs in at `https://<domain>/super_admin_login`.
 
 Once it deploys, put the URL Vercel gives you into `CORS_ORIGINS` in
 `.env.prod` and restart the gateway:

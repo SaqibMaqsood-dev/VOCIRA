@@ -3,9 +3,17 @@
 import { useEffect, useState } from "react";
 
 import FullScreenLoader from "@/components/FullScreenLoader";
-import { LEAVE_SCHOOL, PATH_MODE } from "@/lib/address";
+import { LEAVE_SCHOOL } from "@/lib/address";
 import { clearSession, getAccessToken } from "@/lib/session";
-import { fetchSchoolAt, forgetSchool, rememberSchool, safeNext, schoolUrl, subdomainOfPage } from "@/lib/school";
+import {
+  fetchSchoolAt,
+  forgetSchool,
+  pathAddresses,
+  rememberSchool,
+  safeNext,
+  schoolUrl,
+  subdomainOfPage,
+} from "@/lib/school";
 
 /**
  * /s/<school> - a school's link.
@@ -28,8 +36,9 @@ export default function SchoolLink({ schoolId }) {
     let cancelled = false;
     const wanted = schoolId.trim().toLowerCase();
     const next = new URLSearchParams(window.location.search).get("next");
+    const pathMode = pathAddresses();
 
-    if (PATH_MODE && wanted === LEAVE_SCHOOL) {
+    if (pathMode && wanted === LEAVE_SCHOOL) {
       if (subdomainOfPage() && getAccessToken()) clearSession();
       forgetSchool();
       window.location.replace(safeNext(next, "/"));
@@ -41,7 +50,7 @@ export default function SchoolLink({ schoolId }) {
         if (cancelled) return;
         if (!school) {
           setState("unknown");
-        } else if (PATH_MODE) {
+        } else if (pathMode) {
           if (subdomainOfPage() !== school.subdomain && getAccessToken()) clearSession();
           rememberSchool(school.subdomain);
           window.location.replace(safeNext(next, "/"));

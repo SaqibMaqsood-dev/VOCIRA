@@ -6,6 +6,7 @@
 #   .\start-vocira.ps1 -WithErp         + sirf ERPNext
 #   .\start-vocira.ps1 -WithFrontend    + sirf frontend
 #   .\start-vocira.ps1 -WithTunnel      + Cloudflare tunnel (Vercel ke liye)
+#   .\start-vocira.ps1 -TunnelOnly      sirf tunnel (dobara) - services jaisi hain waisi
 #   .\start-vocira.ps1 -LegacyWorker    purana RabbitMQ agent worker (fallback)
 #   .\start-vocira.ps1 -Stop            sab band
 #   .\start-vocira.ps1 -Status          kya chal raha hai
@@ -26,6 +27,7 @@ param(
     [switch]$WithErp,
     [switch]$WithFrontend,
     [switch]$WithTunnel,
+    [switch]$TunnelOnly,
     [switch]$LegacyWorker,
     [switch]$Stop,
     [switch]$Status
@@ -41,15 +43,270 @@ $ERP  = Join-Path $ROOT "frappe_test"
 $LK   = "backend\microservices\livekit_Rag_services"
 $AUTH = "backend\microservices\auth_services"
 
-# Tunnel ka log aur us se nikali hui URL. -Status baad mein yahin se
-# padhta hai, taake URL dobara dhoondni na pare.
+# Tunnel ka log aur us ki URL. -Status baad mein URL yahin se padhta hai.
 $TUNNEL_LOG = Join-Path $ROOT ".tunnel.log"
 $TUNNEL_URL = Join-Path $ROOT ".tunnel-url.txt"
 
-# Quick tunnel ki URL har baar nayi hoti hai - ye pattern usay log se
-# nikalta hai. api.trycloudflare.com Cloudflare ka apna endpoint hai,
-# hamari URL nahi, is liye usay chhod dete hain.
-$TUNNEL_RX = 'https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com'
+# The quick tunnel's credentials (its id, secret and address), kept so the
+# next start reconnects the SAME tunnel - same URL. Gitignored: whoever has
+# this file can serve traffic on that URL.
+$TUNNEL_CREDS = Join-Path $ROOT ".tunnel-credentials.json"
+$QUICK_TUNNEL_API = "https://api.trycloudflare.com/tunnel"
+
+# ---------------------------------------------------------------------
+# CLOUDFLARE QUICK TUNNEL  (gateway :9000 ko internet par le aata hai)
+#
+# Quick tunnel do hisson mein banti hai:
+#   1. Cloudflare se nayi tunnel maangna (POST api.trycloudflare.com/tunnel)
+#      - jawab mein us ka pata (xxx.trycloudflare.com) aur chaabi aati hai
+#   2. cloudflared us chaabi se Cloudflare se jurta hai aur requests
+#      gateway (127.0.0.1:9000) tak lata hai
+#
+# Kyun baar baar fail hoti thi (2026-10-04): "cloudflared tunnel --url"
+# pehla hissa khud karta hai, aur jawab ka sirf 15 second intezaar karta hai
+# (cloudflared ke andar fix, koi flag nahi). Cloudflare ko tunnel banane mein
+# 6-12 second lagte hain, kabhi is se zyada - tab cloudflared "Client.Timeout
+# exceeded while awaiting headers" keh kar band ho jata tha. Yeh error
+# stderr par aata hai, .tunnel.log mein nahi, is liye nazar bhi nahi aata tha.
+# Ab:
+#   - pehla hissa yeh script khud karta hai: curl, 60 second, kai koshishein
+#   - chaabi .tunnel-credentials.json mein rehti hai, aur agli dafa WOHI
+#     tunnel dobara jurti hai - URL wohi, Vercel mein kuch nahi badalna.
+#     Cloudflare ne woh tunnel mita di ho ("Unauthorized: Tunnel not
+#     found") to khud nayi banti hai.
+#   - cloudflared sirf jurta hai: "tunnel run --credentials-file"
+#   - --edge-ip-version 4 aur curl -4: Developers Room Wi-Fi par IPv6
+#     Cloudflare tak nahi pohanchta tha (2026-10-03)
+#   - aakhir mein internet ki taraf se asal check: URL se gateway ka /docs
+# ---------------------------------------------------------------------
+
+# The saved tunnel, or $null.
+function Read-SavedTunnel {
+    if (-not (Test-Path $TUNNEL_CREDS)) { return $null }
+    try {
+        $saved = Get-Content $TUNNEL_CREDS -Raw | ConvertFrom-Json
+        if ($saved.AccountTag -and $saved.TunnelSecret -and $saved.TunnelID -and $saved.Hostname) { return $saved }
+    } catch { }
+    return $null
+}
+
+# Asks Cloudflare for a new quick tunnel, giving it 60 seconds to answer,
+# and saves it. $null after every try failed.
+function New-QuickTunnel {
+    $tries = 6
+    for ($try = 1; $try -le $tries; $try++) {
+        $lines = @(& curl.exe -4 --http1.1 -s --max-time 60 -X POST -H "Content-Type: application/json" `
+                    -w '\n%{http_code}' $QUICK_TUNNEL_API 2>$null)
+        $curlExit = $LASTEXITCODE
+        $code = if ($lines.Count -gt 0) { "$($lines[-1])".Trim() } else { "" }
+        $body = ($lines | Select-Object -SkipLast 1) -join "`n"
+
+        $reply = $null
+        try { $reply = $body | ConvertFrom-Json } catch { }
+        if ($curlExit -eq 0 -and $code -eq "200" -and $reply.success -and
+            $reply.result.id -and $reply.result.secret -and $reply.result.hostname) {
+            # The fields cloudflared reads from a credentials file, plus the
+            # address (cloudflared ignores fields it does not know).
+            $tunnel = [pscustomobject][ordered]@{
+                AccountTag   = $reply.result.account_tag
+                TunnelSecret = $reply.result.secret
+                TunnelID     = $reply.result.id
+                Hostname     = $reply.result.hostname
+            }
+            # UTF-8 without a BOM - cloudflared's JSON reader stops at a BOM
+            [IO.File]::WriteAllText($TUNNEL_CREDS, ($tunnel | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+            return $tunnel
+        }
+
+        $why = switch ($curlExit) {
+            0       { "HTTP $code" }
+            6       { "could not look up api.trycloudflare.com (DNS)" }
+            7       { "could not connect to Cloudflare" }
+            28      { "no answer within 60 seconds" }
+            default { "curl error $curlExit" }
+        }
+        Write-Host ("      Cloudflare gave no tunnel (try {0}/{1}): {2}" -f $try, $tries, $why) -ForegroundColor DarkGray
+        if ($try -lt $tries) { Start-Sleep -Seconds ([Math]::Min(5 * $try, 20)) }
+    }
+    return $null
+}
+
+function Stop-Cloudflared {
+    $procs = @(Get-Process cloudflared -ErrorAction SilentlyContinue)
+    $procs | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+    # Until it has really exited, cloudflared keeps .tunnel.log open - and
+    # the next connection then read the old process's "Registered" lines.
+    $procs | ForEach-Object { try { [void]$_.WaitForExit(10000) } catch { } }
+}
+
+# Starts cloudflared on a tunnel. "ok" once Cloudflare has taken a
+# connection; "refused" when Cloudflare no longer knows the tunnel (or its
+# key); "exited" / "timeout" when nothing came of it.
+function Connect-QuickTunnel($tunnel, $exe) {
+    Stop-Cloudflared
+    for ($i = 0; $i -lt 10 -and (Test-Path $TUNNEL_LOG); $i++) {
+        Remove-Item $TUNNEL_LOG -Force -ErrorAction SilentlyContinue
+        if (Test-Path $TUNNEL_LOG) { Start-Sleep -Milliseconds 300 }
+    }
+    Remove-Item "$TUNNEL_LOG.out" -ErrorAction SilentlyContinue
+    if (Test-Path $TUNNEL_LOG) {
+        # an old log here would be read as this connection's
+        Write-Host "      could not clear the old .tunnel.log (still in use)" -ForegroundColor Red
+        return "exited"
+    }
+
+    # cloudflared writes its own log. Redirecting its output instead made it
+    # inherit - and hold open - the output of whoever ran this script, so a
+    # piped run (VS Code, a tool) never finished. 127.0.0.1, not localhost:
+    # cloudflared tries localhost as ::1, and the gateway listens on IPv4 only.
+    $proc = Start-Process $exe `
+        -ArgumentList "tunnel", "--no-autoupdate", "--edge-ip-version", "4", "--logfile", "`"$TUNNEL_LOG`"", `
+                      "--url", "http://127.0.0.1:9000", `
+                      "run", "--credentials-file", "`"$TUNNEL_CREDS`"", $tunnel.TunnelID `
+        -WindowStyle Hidden -PassThru
+
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 1
+        if (Test-Path $TUNNEL_LOG) {
+            if (Select-String -Path $TUNNEL_LOG -Pattern "Registered tunnel connection" -Quiet -ErrorAction SilentlyContinue) { return "ok" }
+            if (Select-String -Path $TUNNEL_LOG -Pattern "Unauthorized" -Quiet -ErrorAction SilentlyContinue) { return "refused" }
+        }
+        if ($proc.HasExited) { return "exited" }
+    }
+    return "timeout"
+}
+
+# HTTP status of the gateway's /docs through a URL ("000": no answer).
+function Test-GatewayAt($url, $seconds = 20) {
+    return "$(& curl.exe -s -o NUL -w "%{http_code}" --max-time $seconds "$url/docs" 2>$null)".Trim()
+}
+
+# The real test, from the internet's side: a few tries, since a request
+# across the world can drop once.
+function Test-TunnelEndToEnd($url) {
+    $code = ""
+    for ($i = 0; $i -lt 4; $i++) {
+        $code = Test-GatewayAt $url
+        if ($code -eq "200") { return "200" }
+        Start-Sleep -Seconds 3
+    }
+    return $code
+}
+
+function Start-VociraTunnel {
+    $script:TunnelReused = $false
+    $exe = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if (-not $exe) {
+        Write-Host "      cloudflared is not installed - skipping tunnel." -ForegroundColor Red
+        return $null
+    }
+    $exe = $exe.Source
+    Remove-Item $TUNNEL_URL -ErrorAction SilentlyContinue
+
+    $gatewayUp = (Test-GatewayAt "http://127.0.0.1:9000" 5) -eq "200"
+    if (-not $gatewayUp) {
+        Write-Host "      the gateway (:9000) is not running - the tunnel will have nothing behind it" -ForegroundColor Yellow
+    }
+
+    $url = $null
+
+    # 1. last time's tunnel - same URL, nothing to change on Vercel
+    $tunnel = Read-SavedTunnel
+    if ($tunnel) {
+        $state = Connect-QuickTunnel $tunnel $exe
+        if ($state -ne "ok" -and $state -ne "refused") {
+            # a dropped packet on a slow network - not a reason to give up the URL
+            $state = Connect-QuickTunnel $tunnel $exe
+        }
+        $works = $state -eq "ok"
+        if ($works -and $gatewayUp) {
+            $code = Test-TunnelEndToEnd "https://$($tunnel.Hostname)"
+            if ($code -ne "200") { $works = $false; $state = "its URL answered HTTP $code" }
+        }
+        if ($works) {
+            $url = "https://$($tunnel.Hostname)"
+            $script:TunnelReused = $true
+            Write-Host "      reconnected last time's tunnel" -ForegroundColor DarkGreen
+        } else {
+            Write-Host "      last time's tunnel is gone ($state) - asking Cloudflare for a new one" -ForegroundColor DarkGray
+            Stop-Cloudflared
+            Remove-Item $TUNNEL_CREDS -ErrorAction SilentlyContinue
+        }
+    }
+
+    # 2. a new tunnel
+    if (-not $url) {
+        $tunnel = New-QuickTunnel
+        if ($tunnel) {
+            for ($attempt = 1; $attempt -le 3 -and -not $url; $attempt++) {
+                $state = Connect-QuickTunnel $tunnel $exe
+                if ($state -eq "ok") {
+                    $url = "https://$($tunnel.Hostname)"
+                } else {
+                    Write-Host ("      cloudflared could not connect yet ({0}, try {1}/3)" -f $state, $attempt) -ForegroundColor DarkGray
+                    Start-Sleep -Seconds 3
+                }
+            }
+            if ($url -and $gatewayUp) {
+                $code = Test-TunnelEndToEnd $url
+                if ($code -ne "200") {
+                    Write-Host "      the tunnel is connected, but a test request through it got HTTP $code - see .tunnel.log" -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+
+    if (-not $url) {
+        Stop-Cloudflared
+        Write-Host "      No tunnel - Cloudflare could not be reached properly from this network." -ForegroundColor Red
+        Write-Host "      Run .\start-vocira.ps1 -TunnelOnly again, or try another network (phone hotspot)." -ForegroundColor Red
+        return $null
+    }
+
+    Set-Content -Path $TUNNEL_URL -Value $url
+    Write-Host "      $url" -ForegroundColor Green
+    if ($gatewayUp) {
+        Write-Host "      -> checked from the internet: it reaches the gateway" -ForegroundColor DarkGreen
+    }
+    return $url
+}
+
+# What has to be done by hand - only when the URL is a new one
+function Show-TunnelUrl($url) {
+    if (-not $url) { return }
+    if ($script:TunnelReused) {
+        Write-Host @"
+
+===============================================================
+  TUNNEL URL - the same as last time
+
+  $url
+
+  If Vercel's NEXT_PUBLIC_API_URL is already this, there is
+  nothing to do.
+===============================================================
+"@ -ForegroundColor Green
+        return
+    }
+    Write-Host @"
+
+===============================================================
+  NEW TUNNEL URL - Vercel needs it once
+
+  $url
+
+  Vercel -> Settings -> Environment Variables
+      NEXT_PUBLIC_API_URL  =  $url
+  then Deployments -> Redeploy
+
+  The next starts reconnect this same tunnel, so this is not
+  needed every time - only when this box says NEW again.
+
+  (if NEXT_PUBLIC_REALTIME_URL exists, delete it - otherwise
+   admin notifications will not work)
+===============================================================
+"@ -ForegroundColor Yellow
+}
 
 if ($All) { $WithErp = $true; $WithFrontend = $true }
 
@@ -157,9 +414,10 @@ if ($Stop) {
         Where-Object { $_.CommandLine -and $_.CommandLine -like "*VOCIRA-feature-backend*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
+    # .tunnel-credentials.json stays: the next start reconnects the same
+    # tunnel, with the same URL.
     Write-Host "Stopping tunnel..." -ForegroundColor Yellow
-    Get-Process cloudflared -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+    Stop-Cloudflared
     Remove-Item $TUNNEL_URL -ErrorAction SilentlyContinue
 
     Write-Host "Stopping infra containers..." -ForegroundColor Yellow
@@ -171,6 +429,17 @@ if ($Stop) {
     }
     Write-Host "Done." -ForegroundColor Green
     return
+}
+
+# ---------------------------------------------------------------------
+# TUNNEL ONLY - services jaisi hain waisi rehti hain
+# ---------------------------------------------------------------------
+if ($TunnelOnly) {
+    Write-Host "Cloudflare tunnel..." -ForegroundColor Cyan
+    $url = Start-VociraTunnel
+    Show-TunnelUrl $url
+    # not the last curl's exit code (7 while the gateway is down)
+    if ($url) { exit 0 } else { exit 1 }
 }
 
 # =====================================================================
@@ -496,63 +765,13 @@ if ($LegacyWorker) {
 }
 
 # ---------------------------------------------------------------------
-# 5. CLOUDFLARE TUNNEL  (gateway :9000 ko internet par le aata hai)
-#
-# Quick tunnel ko Cloudflare account nahi chahiye, magar do baatein
-# yaad rakhein:
-#
-#   - URL har baar nayi banti hai. Process band, URL khatam. Is liye
-#     har restart ke baad Vercel ka NEXT_PUBLIC_API_URL badalna parta
-#     hai (aur redeploy).
-#   - Cloudflare ka quick-tunnel API kabhi kabhi slow hota hai aur
-#     cloudflared apna intezaar chhod deta hai. Is liye neeche 3 baar
-#     koshish hoti hai - warna script bilkul chup chaap URL ke baghair
-#     aage nikal jati thi.
+# 5. CLOUDFLARE TUNNEL  (Start-VociraTunnel, upar)
 # ---------------------------------------------------------------------
 $tunnelUrl = $null
 
 if ($WithTunnel) {
     Write-Host "`n[5/6] Cloudflare tunnel..." -ForegroundColor Cyan
-
-    if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
-        Write-Host "      cloudflared is not installed - skipping tunnel." -ForegroundColor Red
-    } else {
-        # Purani tunnel zinda ho to nayi ke saath do URL chal parti hain
-        Get-Process cloudflared -ErrorAction SilentlyContinue |
-            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-
-        for ($try = 1; $try -le 3 -and -not $tunnelUrl; $try++) {
-            Remove-Item $TUNNEL_LOG -ErrorAction SilentlyContinue
-
-            $cf = Start-Process cloudflared `
-                -ArgumentList "tunnel", "--url", "http://localhost:9000", "--no-autoupdate" `
-                -RedirectStandardError $TUNNEL_LOG `
-                -RedirectStandardOutput "$TUNNEL_LOG.out" `
-                -WindowStyle Hidden -PassThru
-
-            for ($i = 0; $i -lt 40 -and -not $tunnelUrl; $i += 2) {
-                Start-Sleep -Seconds 2
-                if (Test-Path $TUNNEL_LOG) {
-                    $hit = Select-String -Path $TUNNEL_LOG -Pattern $TUNNEL_RX -ErrorAction SilentlyContinue |
-                           Select-Object -First 1
-                    if ($hit) { $tunnelUrl = $hit.Matches[0].Value }
-                }
-            }
-
-            if (-not $tunnelUrl) {
-                Write-Host ("      attempt {0} failed - retrying..." -f $try) -ForegroundColor DarkGray
-                Stop-Process -Id $cf.Id -Force -ErrorAction SilentlyContinue
-            }
-        }
-
-        if ($tunnelUrl) {
-            Set-Content -Path $TUNNEL_URL -Value $tunnelUrl
-            Write-Host "      $tunnelUrl" -ForegroundColor Green
-        } else {
-            Write-Host "      Tunnel could not be created (Cloudflare's API is slow)." -ForegroundColor Red
-            Write-Host "      Later: cloudflared tunnel --url http://localhost:9000" -ForegroundColor DarkGray
-        }
-    }
+    $tunnelUrl = Start-VociraTunnel
 } else {
     Write-Host "`n[5/6] Tunnel skipped (starts with -WithTunnel)" -ForegroundColor DarkGray
 }
@@ -634,20 +853,4 @@ Write-Host @"
 
 # Sab se aakhir mein, taake health check ke shor mein gum na ho jaye -
 # har restart par yehi ek cheez hai jo haath se karni parti hai.
-if ($tunnelUrl) {
-    Write-Host @"
-
-===============================================================
-  TUNNEL URL (changes on every restart)
-
-  $tunnelUrl
-
-  Vercel -> Settings -> Environment Variables
-      NEXT_PUBLIC_API_URL  =  $tunnelUrl
-  then Deployments -> Redeploy
-
-  (if NEXT_PUBLIC_REALTIME_URL exists, delete it - otherwise
-   admin notifications will not work)
-===============================================================
-"@ -ForegroundColor Yellow
-}
+Show-TunnelUrl $tunnelUrl

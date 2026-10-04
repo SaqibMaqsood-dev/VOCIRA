@@ -185,6 +185,8 @@ backend/audio_models/
 # URL hoti hai, machine ke sath makhsoos - commit karne layak nahi.
 .tunnel-url.txt
 .tunnel.log.out
+# the saved quick tunnel's secret (start-vocira.ps1)
+.tunnel-credentials.json
 
 *.tmp
 *.temp
