@@ -188,6 +188,11 @@ def system_message(key: str, language: str | None = None, school=None) -> str:
 #     "ACC-SINV-two thousand twenty-six-zero zero zero zero seven"
 _INTERNAL_ID_FIELDS = ("name", "student")
 
+# What the records carry for the agent's own working out, never for the
+# answer: every row behind a summary (compact_records' "_rows"), and the
+# school not sharing an overall result (records_base._limit_assessment).
+_PRIVATE_FIELDS = ("_rows", "_no_overall")
+
 
 def _strip_internal_ids(response):
     """LLM ko bhejne se pehle andaroni IDs nikaal dein."""
@@ -196,7 +201,7 @@ def _strip_internal_ids(response):
         return {
             k: _strip_internal_ids(v)
             for k, v in response.items()
-            if k not in _INTERNAL_ID_FIELDS
+            if k not in _INTERNAL_ID_FIELDS and k not in _PRIVATE_FIELDS
         }
 
     if isinstance(response, list):
@@ -307,9 +312,22 @@ IMPORTANT CONTEXT:
   "overall_result" / "overall_results" (obtained_marks out of
   total_marks, and overall_percentage) for a whole exam, and
   "attendance_percentage". Say those exact figures. NEVER calculate a
-  percentage, total or average yourself. When the caller asks about
-  a result or a percentage, give the overall percentage first, then
-  the subjects.
+  percentage, total or average yourself. For an exam, say the overall
+  result first, then the strongest and the weakest subject when they
+  are given. Do not read out every subject's marks unless they are
+  listed under "all_subjects" or the caller asked for all of them; a
+  subject the caller named is always answered.
+
+- "change_in_percentage_points" compares with the exam before
+  ("previous_exam"): say it plainly - better or lower than in that
+  exam, by how much.
+
+- If the information has an "_ask" line, Vocira needs to know
+  something before it can answer. Your whole answer is that one short
+  question, naming the choices it lists - no figures, nothing else.
+
+- If the information has an "_end_with" line, answer first, then end
+  with that question.
 
 ==================================================
 RESPONSE RULES

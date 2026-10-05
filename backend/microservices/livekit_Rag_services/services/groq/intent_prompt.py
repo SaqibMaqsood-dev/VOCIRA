@@ -18,6 +18,7 @@ Ek LLM call kam, aur ~5,000 tokens ke bajaye ~400.
 """
 
 import re
+from datetime import date
 
 ROUTER_TEMPLATE = """You are the router for VOCIRA, a school voice assistant.
 
@@ -111,6 +112,22 @@ covers only that child. An empty string covers all their children.
   question that points at no one child: empty string.
 NEVER invent a name.
 
+An item may also carry these - ONLY when the caller actually said
+them; leave them out otherwise, never guess:
+  "month"    attendance: the month as YYYY-MM, worked out from today's
+             date for "this month", "last month", "is mahine", "pichle
+             mahine", "ستمبر"; "all" for the whole year / overall
+  "date"     attendance: one day as YYYY-MM-DD - "today", "aaj",
+             "yesterday", "15 September"
+  "exam"     assessment: the exam as the caller named it, in English -
+             "mid term", "final", "first term"; "all" for every exam
+  "subject"  assessment: the subject in English as school records name
+             it - "Mathematics", "English", "Urdu", "Science",
+             "Islamiat"; "all" when they ask for every subject's marks
+When Vocira has just asked the caller something (THIS CALL says so),
+a reply that answers it - "September", "mid term", "Urdu" - is that
+same record for that same child, with the detail filled in.
+
 === RAG ===
 General school information that is not about a specific child:
 admission policy, school timings, fee structure in general, campuses,
@@ -151,6 +168,15 @@ Compound questions - one entry per topic asked:
 "How is my children's academic performance?" -> {{"intent":"ERP","items":[{{"resource":"assessment","student":""}}]}}
 "Is any challan pending for my kids?"    -> {{"intent":"ERP","items":[{{"resource":"fee","student":""}}]}}
 
+With details the caller said (today being 2026-10-05):
+"Ahmed ki September ki attendance?"      -> {{"intent":"ERP","items":[{{"resource":"attendance","student":"Ahmed","month":"2026-09"}}]}}
+"Was my son present today?"              -> {{"intent":"ERP","items":[{{"resource":"attendance","student":"","date":"2026-10-05"}}]}}
+"Ahmed ko maths mein mid term mein
+ kitne marks mile?"                      -> {{"intent":"ERP","items":[{{"resource":"assessment","student":"Ahmed","exam":"mid term","subject":"Mathematics"}}]}}
+"اردو میں کتنے نمبر آئے؟" (Urdu: how
+ many marks in Urdu?)                    -> {{"intent":"ERP","items":[{{"resource":"assessment","student":"","subject":"Urdu"}}]}}
+"Sab subjects ke marks batao"            -> {{"intent":"ERP","items":[{{"resource":"assessment","student":"","subject":"all"}}]}}
+
 "What is the admission policy?"          -> {{"intent":"RAG","search":"What is the admission policy?"}}
 "What time does the school open?"        -> {{"intent":"RAG","search":"What are the school timings?"}}
 "What does your system exactly do?"      -> {{"intent":"RAG","search":"What is the Vocira voice assistant and what can it help with?"}}
@@ -190,24 +216,32 @@ def build_router_prompt(
     children: list[str] | tuple = (),
     last_child: str | None = None,
     previous: str | None = None,
+    asked: str | None = None,
+    today: date | None = None,
 ) -> str:
     """
     The router prompt with what this call already knows: the caller's
     own children as the records name them - so a misheard name can
-    still be matched to the right child - and what was just asked, so
-    "and her percentage?" stays about the same child.
+    still be matched to the right child - what was just asked, so
+    "and her percentage?" stays about the same child, what Vocira just
+    asked back (integrations/followups.describe), and today's date for
+    "this month" or "today".
     """
+    today = today or date.today()
     # Empty says "not known", not "none": the list is empty also when
     # it just could not be read, and "none" made the model drop the
     # name the caller said - which answers about every child.
     lines = [
+        f"Today's date: {today.isoformat()}",
         "The caller's children: "
-        + (", ".join(children) if children else "not known.")
+        + (", ".join(children) if children else "not known."),
     ]
     if last_child:
         lines.append(f"The child the caller was just asking about: {last_child}")
     if previous:
         lines.append(f'What the caller said just before this: "{previous}"')
+    if asked:
+        lines.append(f"Vocira just asked the caller {asked}")
     return ROUTER_TEMPLATE.format(user_query=user_query, context="\n".join(lines))
 
 # Room for the "search" restatement - at 80 a long one was cut off,

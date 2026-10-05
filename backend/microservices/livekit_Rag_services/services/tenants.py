@@ -272,8 +272,9 @@ def public_list() -> list[dict]:
 _HELPLINE = re.compile(r"^\+?[0-9(][0-9 ()\-.]{3,24}[0-9]$")
 _ENV_PREFIX = re.compile(r"^[A-Z][A-Z0-9_]{1,30}$")
 # The providers a school's records can be set to - integrations/registry.py USABLE
-# (the named systems still waiting for an official integration are not among them)
-RECORDS_KINDS = ("erpnext", "spreadsheet", "open-school-mis", "excel", "rest-api", "database", "native")
+# (the named systems still waiting for an official integration are not among them,
+# nor the ones registry.HIDDEN keeps back for now: rest-api, database)
+RECORDS_KINDS = ("erpnext", "spreadsheet", "open-school-mis", "excel", "native")
 
 # One DNS label: lower-case letters, digits and inner dashes.
 _SUBDOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])$")

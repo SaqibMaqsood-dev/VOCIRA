@@ -304,6 +304,17 @@ def test_providers_without_an_official_api_can_never_be_a_schools_records():
     assert set(tenants.RECORDS_KINDS) == set(registry.USABLE)
 
 
+def test_rest_api_and_database_are_kept_back_for_now():
+    from backend.microservices.livekit_Rag_services.services import tenants
+
+    offered = {p["kind"] for p in registry.catalogue()}
+    for kind in ("rest-api", "database"):
+        assert kind in registry.HIDDEN
+        assert kind not in offered and kind not in registry.USABLE and kind not in tenants.RECORDS_KINDS
+        assert registry.get(kind) is not None          # the code stays - one line brings it back
+    assert {"native", "excel", "spreadsheet", "erpnext", "open-school-mis"} <= offered
+
+
 def test_erpnext_and_open_school_mis_are_optional_demo_providers():
     assert registry.get("erpnext").status == "demo" and registry.get("erpnext").mode == "live"
     assert registry.get("open-school-mis").status == "demo"

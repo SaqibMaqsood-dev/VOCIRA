@@ -49,12 +49,17 @@ PROVIDERS: dict[str, Provider] = {p.kind: p for p in (
     skoolee.PROVIDER,
 )}
 
+# Not offered for now (2026-10-05): kept in the code, but left out of the
+# catalogue and never choosable. To bring one back, take it out of here and
+# put it back in tenants.RECORDS_KINDS.
+HIDDEN = frozenset({"rest-api", "database"})
+
 # What a school's records can be set to - a provider Vocira can actually use
-USABLE = tuple(kind for kind, p in PROVIDERS.items() if p.mode != "unavailable")
+USABLE = tuple(kind for kind, p in PROVIDERS.items() if p.mode != "unavailable" and kind not in HIDDEN)
 
 
 def catalogue() -> list[dict]:
-    return [p.public() for p in PROVIDERS.values()]
+    return [p.public() for kind, p in PROVIDERS.items() if kind not in HIDDEN]
 
 
 def get(kind: str | None) -> Provider | None:

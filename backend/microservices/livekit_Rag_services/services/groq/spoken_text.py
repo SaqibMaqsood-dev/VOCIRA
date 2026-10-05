@@ -77,11 +77,24 @@ def _speak_clock(match: re.Match) -> str:
     return f"{urdu_number(hour)} بج کر {urdu_number(minute)} منٹ"
 
 
+# "X میں سے Y" is "Y out of X" - the total comes first. The model now and
+# then writes it the English way round ("238 میں سے 300" for 238 out of
+# 300); a total is never smaller than what was got out of it, so a smaller
+# number first is turned round.
+_OUT_OF = re.compile(r"(\d+(?:\.\d+)?)(\s*میں سے\s*)(\d+(?:\.\d+)?)")
+
+
+def _total_first(match: re.Match) -> str:
+    first, between, second = match.groups()
+    return f"{second}{between}{first}" if float(first) < float(second) else match.group(0)
+
+
 def speak_numbers(text: str, language: str | None) -> str:
     """Spell every number in an Urdu answer. English answers are left alone."""
     if (language or "").strip().lower() != "ur" or not text:
         return text
     text = text.translate(_URDU_DIGITS)
+    text = _OUT_OF.sub(_total_first, text)
     text = _ISO_DATE.sub(_speak_date, text)
     text = _CLOCK.sub(_speak_clock, text)
     text = _RANGE.sub(r"\1 سے \2", text)
@@ -90,6 +103,29 @@ def speak_numbers(text: str, language: str | None) -> str:
 
 _CLAUSE = re.compile(r"[^،,؛;۔.!?؟\n]+[،,؛;۔.!?؟\n]*")
 _SENTENCE_END = re.compile(r"[۔.!?؟]")
+
+
+# A letter grade next to "گریڈ" ("A+ گریڈ", "گریڈ C"): the Urdu voice cannot
+# read Latin letters, so they are written as said - "اے پلس", "سی".
+_GRADE_LETTER = {"A": "اے", "B": "بی", "C": "سی", "D": "ڈی", "E": "ای", "F": "ایف"}
+_GRADE = re.compile(
+    r"(?<![A-Za-z])([A-F])(\s?[+-])?(?![A-Za-z])(?=\s*گریڈ)"
+    r"|(?<=گریڈ)(\s*)([A-F])(\s?[+-])?(?![A-Za-z+-])"
+)
+
+
+def _speak_grade(match: re.Match) -> str:
+    before = match.group(1) is not None
+    letter, sign = (match.group(1), match.group(2)) if before else (match.group(4), match.group(5))
+    spoken = _GRADE_LETTER[letter] + {"+": " پلس", "-": " مائنس"}.get((sign or "").strip(), "")
+    return spoken if before else f"{match.group(3)}{spoken}"
+
+
+def speak_grades(text: str, language: str | None) -> str:
+    """Letter grades in an Urdu answer as they are said. English answers are left alone."""
+    if (language or "").strip().lower() != "ur" or not text:
+        return text
+    return _GRADE.sub(_speak_grade, text)
 
 
 def drop_repetition(text: str) -> str:
@@ -145,6 +181,7 @@ def finish_answer(text: str, language: str | None, cut_off: bool = False) -> str
     # line as if it were a list number.
     text = speak_phone_numbers(text, language or "en")
     text = speak_numbers(text, language)
+    text = speak_grades(text, language)
     # A paragraph break after a finished sentence is just a space -
     # clean_for_tts would add a second full stop ("۔.").
     text = re.sub(r"([۔.!?؟])\s*\n+\s*", r"\1 ", text)

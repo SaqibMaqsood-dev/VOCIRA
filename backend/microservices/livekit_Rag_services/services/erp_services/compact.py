@@ -213,6 +213,26 @@ def _add_result_totals(entry: dict) -> None:
         entry["overall_results"] = results
 
 
+def attendance_summary(rows: list) -> list:
+    """compact_records' attendance entries for any part of the rows - one month, one day."""
+    return _compact_attendance(rows)
+
+
+def results_summary(rows: list) -> list:
+    """compact_records' result entries (with their totals) for any part of the rows."""
+    entries = _group_by_student(rows, repeated=("academic_year", "assessment_group", "program"))
+    for entry in entries:
+        _add_result_totals(entry)
+    return entries
+
+
+# The rows behind these stay with the data as "_rows", so the agent can
+# narrow an answer to one month, exam or subject and work the figures out
+# again (integrations/followups.py). The answer prompt never shows them
+# (human_text._PRIVATE_FIELDS).
+_KEEP_ROWS = ("attendance", "assessment")
+
+
 def compact_records(resource: str, data: dict) -> dict:
     """
     Shrink an ERP response for the LLM.
@@ -238,6 +258,8 @@ def compact_records(resource: str, data: dict) -> dict:
             if isinstance(row.get("customer"), str):
                 row["customer"] = _CUSTOMER_NUMBER.sub("", row["customer"])
 
+        kept = [dict(row) for row in rows] if resource in _KEEP_ROWS else None
+
         if resource == "attendance":
             rows = _compact_attendance(rows)
 
@@ -256,7 +278,10 @@ def compact_records(resource: str, data: dict) -> dict:
                 repeated=("student_group",),
             )
 
-        return {**data, "data": rows}
+        out = {**data, "data": rows}
+        if kept is not None:
+            out["_rows"] = kept
+        return out
 
     except Exception as error:
         print(f"[ERP Compact] chhoR diya: {error}")

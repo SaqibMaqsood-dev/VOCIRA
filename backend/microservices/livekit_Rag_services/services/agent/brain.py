@@ -7,6 +7,11 @@ the router (quick_route, else the LLM router), a guardian's own records
 behind the auth service's role check, the school's knowledge, staff asked
 for. Only the audio is gone - the agent (worker.py) listens and speaks.
 
+Attendance and results are narrowed to the month, exam or subject asked;
+when that was not said, Vocira asks back ("which month?") and keeps the
+question for the call, so the reply ("September") answers it
+(integrations/followups.py).
+
 Everything here runs on the brain loop (brain_loop.py): the database pool,
 Redis and RabbitMQ are made on it, and must never be shared across the
 calls' own loops.
@@ -18,8 +23,10 @@ calls' own loops.
 
 import asyncio
 import json
+import time
 import traceback
 from dataclasses import dataclass
+from datetime import date
 from uuid import UUID
 
 from backend.helper_functions.database.session import SessionLocal
@@ -29,6 +36,7 @@ from backend.microservices.livekit_Rag_services.models.escalation_model import (
 )
 from backend.microservices.livekit_Rag_services.models.message_model import SenderTypeEnum
 from backend.microservices.livekit_Rag_services.services.erp_services import connectors
+from backend.microservices.livekit_Rag_services.services.integrations import followups
 from backend.microservices.livekit_Rag_services.services.integrations import tools as records_tools
 from backend.microservices.livekit_Rag_services.services.groq import (
     answer_cache,
@@ -72,6 +80,37 @@ class Reply:
     message_id: object = None  # the saved question
 
 
+# ---------------------------------------------------------
+# What Vocira just asked back, per call
+#
+# "Which month?" / "Which exam?" / "Any one subject in detail?" - the
+# parent's reply ("September", "Urdu") answers it. Kept here, in the worker
+# that holds the call, for a few minutes; a reply that answers something
+# else, or "no", clears it.
+# ---------------------------------------------------------
+
+PENDING_SECONDS = 180
+_pending: dict[str, tuple[float, dict]] = {}
+
+
+def pending_for(session_id) -> dict | None:
+    key = str(session_id)
+    found = _pending.get(key)
+    if found and time.monotonic() - found[0] <= PENDING_SECONDS:
+        return found[1]
+    _pending.pop(key, None)
+    return None
+
+
+def _set_pending(session_id, pending: dict | None) -> None:
+    for key in [k for k, (at, _) in _pending.items() if time.monotonic() - at > PENDING_SECONDS]:
+        del _pending[key]
+    if pending:
+        _pending[str(session_id)] = (time.monotonic(), pending)
+    else:
+        _pending.pop(str(session_id), None)
+
+
 def as_uuid(value) -> UUID | None:
     """The token's ids as the database keeps them; anything else is no id."""
     try:
@@ -104,9 +143,10 @@ async def _session_exists(db, call: Call) -> bool:
     return False
 
 
-async def _route(question: str, children: list[dict], last_child, previous_words) -> dict:
+async def _route(question: str, children: list[dict], last_child, previous_words, asked: str | None = None) -> dict:
     """quick_route for the plain questions, the LLM router for the rest."""
-    route = intent_prompt.quick_route(question)
+    # a reply to what Vocira just asked needs the LLM, which is told what that was
+    route = None if asked else intent_prompt.quick_route(question)
     # with more than one child and a conversation under way, "the result"
     # may mean the child just discussed - only the LLM sees that
     if route and route.get("intent") == "ERP" and len(children) > 1 and (last_child or previous_words):
@@ -121,6 +161,7 @@ async def _route(question: str, children: list[dict], last_child, previous_words
             children=[c["name"] for c in children],
             last_child=last_child,
             previous=previous_words,
+            asked=asked,
         ),
         model=GROQ_FAST_MODEL,
         max_tokens=intent_prompt.ROUTER_MAX_TOKENS,
@@ -141,13 +182,21 @@ async def _route(question: str, children: list[dict], last_child, previous_words
         return {"intent": "RAG"}
 
 
+# What the router may add to an item, when the caller said it (followups.py)
+_DETAILS = ("month", "date", "exam", "subject")
+
+
 def _erp_items(route: dict) -> list[dict]:
     """The router's {resource, student} pairs - one per topic of a compound question."""
     items = route.get("items")
     if items is None and route.get("resource"):
         items = [{"resource": route.get("resource"), "student": route.get("student")}]
     return [
-        {"resource": item.get("resource"), "student": (item.get("student") or "").strip() or None}
+        {
+            "resource": item.get("resource"),
+            "student": (item.get("student") or "").strip() or None,
+            **{k: str(item[k]).strip() for k in _DETAILS if item.get(k) and str(item[k]).strip()},
+        }
         for item in (items or [])
         if isinstance(item, dict) and item.get("resource")
     ]
@@ -194,8 +243,25 @@ async def _records_answer(call: Call, records, items: list[dict], question: str)
             )
             for item in items
         ])
-        data = results[0] if len(results) == 1 else list(results)
+        # narrowed to the month / exam / subject asked - or, when that was
+        # not said, a question back (followups.py). Only a one-topic
+        # question is asked back; a compound one is answered as it is.
+        today = date.today()
+        single = len(items) == 1
+        focused = [
+            followups.focus(item["resource"], found, item, question, today=today, may_ask=single)
+            for item, found in zip(items, results)
+        ]
+        data = focused[0].data if single else [f.data for f in focused]
+        nxt = focused[0].ask or focused[0].offer if single else None
+        _set_pending(call.session_id, {
+            **nxt,
+            "resource": items[0]["resource"],
+            "student": focused[0].student or items[0]["student"],
+        } if nxt else None)
         print(f"[ERP DATA] {data}")
+        if nxt:
+            print(f"[Followup] {'asking' if focused[0].ask else 'offering'}: {nxt['what']} {nxt.get('labels')}")
 
         stage = "llm"
         response = await _llm(
@@ -220,6 +286,7 @@ async def _records_answer(call: Call, records, items: list[dict], question: str)
         # an LLM out of credit is not "the records are unreachable"
         print(f"[{'LLM' if stage == 'llm' else 'ERP'} Error] {type(error).__name__}: {error}")
         traceback.print_exc()
+        _set_pending(call.session_id, None)  # the question back was never heard
         return human_text.system_message("answer_assembly_failed" if stage == "llm" else "erp_unreachable", language)
 
 
@@ -312,22 +379,42 @@ async def reply_to(call: Call, question: str) -> Reply | None:
         print(f"[Context] children={[c['name'] for c in children]} "
               f"last_child={last_child!r} previous={previous_words!r}")
 
+        # A reply to what Vocira just asked ("which month?") is answered
+        # straight from that, without the router (followups.answer_to)
+        pending = pending_for(call.session_id)
+        followup = None
+        if pending:
+            slots, declined = followups.answer_to(pending, question)
+            if declined:
+                print("[Followup] the caller said no")
+                _set_pending(call.session_id, None)
+                pending = None
+            elif slots is not None:
+                followup = [{"resource": pending["resource"], "student": pending.get("student"), **slots}]
+                print(f"[Followup] the reply answers it: {followup}")
+
         # "and her result?" means a different child at different points of
         # a call - an answer that leaned on what came before is never reused
-        use_cache = not (last_child or previous_words)
+        use_cache = not (last_child or previous_words or pending)
         cached = answer_cache.get(call.user_id, question, language, school.id) if use_cache else None
         if cached:
             print("[Cache] this same question was just asked")
             return Reply(text=cached, intent="cached", message_id=message.id)
 
-        notices = await _notices_answer(call, question, children)
-        if notices:
-            print("[Route]: announcements")
-            return Reply(text=notices, intent="announcements", cacheable=use_cache, message_id=message.id)
+        if followup:
+            route, intent, items = {"intent": "ERP"}, "ERP", followup
+        else:
+            notices = await _notices_answer(call, question, children)
+            if notices:
+                print("[Route]: announcements")
+                return Reply(text=notices, intent="announcements", cacheable=use_cache, message_id=message.id)
 
-        route = await _route(question, children, last_child, previous_words)
-        intent = str(route.get("intent", "RAG")).strip().upper()
-        items = _erp_items(route)
+            route = await _route(question, children, last_child, previous_words,
+                                 asked=followups.describe(pending) if pending else None)
+            intent = str(route.get("intent", "RAG")).strip().upper()
+            items = _erp_items(route)
+            if pending and not (intent == "ERP" and any(i["resource"] == pending["resource"] for i in items)):
+                _set_pending(call.session_id, None)  # the caller moved on to something else
         print(f"[Route]: intent={intent} items={items}")
 
         if intent == "ERP" and items and not any(item["student"] for item in items):
@@ -346,7 +433,9 @@ async def reply_to(call: Call, question: str) -> Reply | None:
         else:
             print("[Route]: ERP Pipeline")
             text = await _records_answer(call, records, items, question)
-        return Reply(text=text, intent=topic, cacheable=use_cache, message_id=message.id)
+        # an answer that asks something back, or follows from it, depends on this call
+        cacheable = use_cache and not followup and pending_for(call.session_id) is None
+        return Reply(text=text, intent=topic, cacheable=cacheable, message_id=message.id)
 
     print("[Route]: RAG Pipeline")
     prepared = await prepare_rag(

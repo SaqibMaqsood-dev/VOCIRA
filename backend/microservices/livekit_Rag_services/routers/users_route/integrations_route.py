@@ -162,6 +162,8 @@ async def _checked(admin, school, request: IntegrationRequest, for_test: bool):
     provider = registry.get(request.kind)
     if provider is None:
         _fail(422, f"Unknown records system '{request.kind}'.")
+    if provider.kind in registry.HIDDEN:
+        _fail(422, f"{provider.label} is not offered right now.")
     if provider.mode == "unavailable":
         _fail(422, f"{provider.label} needs its official integration first. {provider.notes}")
 

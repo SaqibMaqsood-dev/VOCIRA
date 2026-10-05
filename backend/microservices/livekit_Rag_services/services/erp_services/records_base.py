@@ -97,6 +97,12 @@ def _limit_assessment(data: dict, allowed: set[str]) -> dict:
             entry.pop("overall_results", None)
         shaped.append(entry)
     out = {**data, "data": shaped}
+    # compact_records' rows ("_rows") hold every subject's marks, and add up
+    # to the overall result - the agent works figures out from them
+    if not keep_marks:
+        out.pop("_rows", None)
+    elif not keep_results:
+        out["_no_overall"] = True
     if shaped and not out.get("_note"):  # never over a note of the connector's own ("No child named ...")
         if not keep_marks:
             out["_note"] = "The school shares only the overall result, not each subject's marks."
